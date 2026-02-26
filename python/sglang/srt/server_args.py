@@ -19,6 +19,7 @@ import argparse
 import dataclasses
 import importlib
 import importlib.util
+from dataclasses import asdict
 import json
 import logging
 import os
@@ -6060,7 +6061,16 @@ class ServerArgs:
         # It is used to determine the caching point in a sequence during prefill.
         return max(FLA_CHUNK_SIZE, self.page_size)
 
+    def print_server_args(self):
+        args_dict = asdict(self)
+        logger.info("Server Arguments:")
+        for key in sorted(args_dict.keys()):
+            logger.info(f"  {key}: {args_dict[key]}")
+
     def check_server_args(self):
+        # Print server args
+        self.print_server_args()
+        
         # Check parallel size constraints
         assert (
             self.tp_size * self.pp_size
