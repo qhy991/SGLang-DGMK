@@ -148,6 +148,31 @@ def process_content_for_template_format(
         # Already a string or None, no processing needed
         return {k: v for k, v in msg_dict.items() if v is not None}
 
+    # Handle tool messages with multimodal content (e.g. images from tool results).
+    # Extracts images to image_data and builds content string with <|media_pad|> placeholders.
+    if msg_dict.get("role") == "tool":
+        content_parts = []
+        for chunk in msg_dict["content"]:
+            if isinstance(chunk, dict):
+                chunk_type = chunk.get("type")
+                if chunk_type == "image_url":
+                    image_obj = chunk.get("image_url")
+                    if isinstance(image_obj, str):
+                        url, detail = image_obj, "auto"
+                    else:
+                        image_obj = image_obj or {}
+                        url = image_obj.get("url", "")
+                        detail = image_obj.get("detail", "auto")
+                    image_data.append(ImageData(url=url, detail=detail))
+                    content_parts.append("<|media_pad|>")
+                elif chunk_type == "text":
+                    content_parts.append(chunk.get("text", ""))
+        new_msg = {
+            k: v for k, v in msg_dict.items() if v is not None and k != "content"
+        }
+        new_msg["content"] = "".join(content_parts)
+        return new_msg
+
     if content_format == "openai" or use_dpsk_v32_encoding:
         # OpenAI format: preserve structured content list, normalize types
         # V32 encoding: extract multimodal data but convert content to string
