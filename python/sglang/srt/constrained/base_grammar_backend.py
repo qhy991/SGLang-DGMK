@@ -184,6 +184,17 @@ class BaseGrammarBackend:
             return copied_value, True
         value = self.executor.submit(self._init_value_dispatch, key, require_reasoning)
         return value, False
+    
+    def get_value(
+        self, key: Tuple[str, str], require_reasoning: bool
+    ):
+        value = self.cache.get(key)
+        if value:
+            copied_value = value.copy()
+            copied_value.maybe_init_reasoning(require_reasoning)
+            return copied_value, True
+        value = self._init_value_dispatch(key, require_reasoning)
+        return value, True
 
     def set_cache(self, key: Tuple[str, str], value: BaseGrammarObject):
         self.cache[key] = value

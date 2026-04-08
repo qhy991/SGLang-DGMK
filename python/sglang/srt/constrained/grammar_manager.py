@@ -86,7 +86,7 @@ class GrammarManager:
                 elif req.sampling_params.structural_tag:
                     key = ("structural_tag", req.sampling_params.structural_tag)
 
-                value, cache_hit = self.grammar_backend.get_cached_or_future_value(
+                value, cache_hit = self.grammar_backend.get_value(
                     key, req.require_reasoning
                 )
                 req.grammar = value
@@ -105,6 +105,7 @@ class GrammarManager:
 
         if add_to_grammar_queue:
             self.grammar_queue.append(req)
+            raise RuntimeError(f"grammar_queue should be empty")
 
         return add_to_grammar_queue
 
