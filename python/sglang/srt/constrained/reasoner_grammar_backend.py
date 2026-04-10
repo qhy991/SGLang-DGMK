@@ -33,7 +33,7 @@ class ReasonerGrammarObject(BaseGrammarObject):
         # 0     means just ended thinking in the last token
         # +     means number of tokens after thinking ended
         self.tokens_after_think_end = -1
-
+    
     def maybe_init_reasoning(self, reasoning: bool):
         self.tokens_after_think_end = -1 if reasoning else 0
 
@@ -80,6 +80,17 @@ class ReasonerGrammarObject(BaseGrammarObject):
     @property
     def apply_vocab_mask(self):
         return self.grammar.apply_vocab_mask
+
+    @property
+    def grammar_stats(self):
+        return self.grammar.grammar_stats
+
+    @grammar_stats.setter
+    def grammar_stats(self, value):
+        pass  # delegated to inner grammar
+
+    def set_cache(self, key: Tuple[str, str], value: BaseGrammarObject):
+        self.grammar.set_cache(key, value)
 
     def copy(self) -> BaseGrammarObject:
         return ReasonerGrammarObject(self.grammar.copy(), self.think_end_id)

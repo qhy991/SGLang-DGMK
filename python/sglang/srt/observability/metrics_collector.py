@@ -245,6 +245,7 @@ class SchedulerMetricsCollector:
             labelnames=labels.keys(),
             multiprocess_mode="mostrecent",
         )
+        # 由于修 PP bug, grammar queue已经不可能有请求了
         self.num_grammar_queue_reqs = Gauge(
             name="sglang:num_grammar_queue_reqs",
             documentation="The number of requests in the grammar waiting queue.",
@@ -556,6 +557,10 @@ class SchedulerMetricsCollector:
 
         tree_traversal_time_buckets = [
             0.0,
+            0.0001,
+            0.0005,
+            0.001,
+            0.005,
             0.01,
             0.02,
             0.05,
@@ -568,10 +573,7 @@ class SchedulerMetricsCollector:
             10,
             15,
             30,
-            60,
-            90,
-            120,
-            240,
+            60
         ]
         self.grammar_tree_traversal_time_avg = Histogram(
             name="sglang:grammar_tree_traversal_time_avg",
@@ -582,6 +584,18 @@ class SchedulerMetricsCollector:
         self.grammar_tree_traversal_time_max = Histogram(
             name="sglang:grammar_tree_traversal_time_max",
             documentation="Histogram of max grammar tree traversal time in seconds.",
+            labelnames=labels.keys(),
+            buckets=tree_traversal_time_buckets,
+        )
+        self.grammar_accept_token_time_avg = Histogram(
+            name="sglang:grammar_accept_token_time_avg",
+            documentation="Histogram of average grammar accept_token time in seconds.",
+            labelnames=labels.keys(),
+            buckets=tree_traversal_time_buckets,
+        )
+        self.grammar_accept_token_time_max = Histogram(
+            name="sglang:grammar_accept_token_time_max",
+            documentation="Histogram of max grammar accept_token time in seconds.",
             labelnames=labels.keys(),
             buckets=tree_traversal_time_buckets,
         )
@@ -1074,6 +1088,12 @@ class SchedulerMetricsCollector:
             avg_time = sum(tree_times) / len(tree_times)
             self._log_histogram(self.grammar_tree_traversal_time_max, max_time)
             self._log_histogram(self.grammar_tree_traversal_time_avg, avg_time)
+        accept_times = grammar_stats.accept_token_time
+        if accept_times:
+            max_time = max(accept_times)
+            avg_time = sum(accept_times) / len(accept_times)
+            self._log_histogram(self.grammar_accept_token_time_max, max_time)
+            self._log_histogram(self.grammar_accept_token_time_avg, avg_time)
         if grammar_stats.is_cache_hit:
             self.num_grammar_cache_hit.labels(**self.labels).inc(1)
         if grammar_stats.is_grammar_aborted:
