@@ -7,6 +7,7 @@ import time
 from collections import defaultdict
 from typing import TYPE_CHECKING, List, Optional, Tuple, Union
 
+from sglang.srt.constrained.reasoner_grammar_backend import ReasonerGrammarObject
 from sglang.srt.disaggregation.kv_events import EventPublisherFactory, KVEventBatch
 from sglang.srt.disaggregation.utils import DisaggregationMode
 from sglang.srt.environ import envs
@@ -483,6 +484,7 @@ class SchedulerMetricsMixin:
         prefill_stats: PrefillStats,
         can_run_cuda_graph: bool,
         dp_cooperation_info: Optional[DPCooperationInfo] = None,
+        schedule_batch: Optional[ScheduleBatch] = None,
     ):
         if (
             not self.is_stats_logging_rank
@@ -608,6 +610,15 @@ class SchedulerMetricsMixin:
             self._log_hicache_stats()
             self.metrics_collector.log_stats(self.stats)
             self._emit_kv_metrics()
+            # Log grammar stats
+            for req in schedule_batch.reqs:
+                if req.grammar is None:
+                    continue
+                grammar_stats = req.grammar.grammar_stats
+                if grammar_stats is None:
+                    continue
+                self.metrics_collector.log_grammar_stats(grammar_stats)
+
         self._publish_kv_events()
 
     def report_decode_stats(
@@ -800,6 +811,15 @@ class SchedulerMetricsMixin:
             self._log_hicache_stats()
             self.metrics_collector.log_stats(self.stats)
             self._emit_kv_metrics()
+            # Log grammar stats
+            for req in running_batch.reqs:
+                if req.grammar is None:
+                    continue
+                grammar_stats = req.grammar.grammar_stats
+                if grammar_stats is None:
+                    continue
+                self.metrics_collector.log_grammar_stats(grammar_stats)
+                
         self._publish_kv_events()
 
     def log_batch_result_stats(

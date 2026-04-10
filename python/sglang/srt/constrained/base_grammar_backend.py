@@ -35,6 +35,7 @@ class GrammarStats:
     is_cache_hit: bool = False
     is_grammar_aborted: bool = False
     tree_traversal_time: List[float] = field(default_factory=list)
+    accept_token_time: List[float] = field(default_factory=list)
     dispatch_type: Optional[str] = None
     num_timeout: int = 0
 
@@ -215,6 +216,8 @@ class BaseGrammarBackend:
             copied_value.maybe_init_reasoning(require_reasoning)
             return copied_value, True
         value = self._init_value_dispatch(key, require_reasoning)
+        # directly set cache for synchronous case
+        self.set_cache(key, value)
         return value, True
 
     def set_cache(self, key: Tuple[str, str], value: BaseGrammarObject):

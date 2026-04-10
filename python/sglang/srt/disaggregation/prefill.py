@@ -592,6 +592,7 @@ class SchedulerDisaggregationPrefillMixin:
             prefill_stats=batch.prefill_stats,
             can_run_cuda_graph=can_run_cuda_graph,
             dp_cooperation_info=batch.dp_cooperation_info,
+            schedule_batch=batch,
         )
 
     def process_disagg_prefill_inflight_queue(

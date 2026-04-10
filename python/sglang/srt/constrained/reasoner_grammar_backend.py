@@ -168,6 +168,17 @@ class ReasonerGrammarObject(BaseGrammarObject):
             return self.grammar.apply_vocab_mask
         return self.apply_vocab_mask_fn
 
+    @property
+    def grammar_stats(self):
+        return self.grammar.grammar_stats
+
+    @grammar_stats.setter
+    def grammar_stats(self, value):
+        pass  # delegated to inner grammar
+
+    def set_cache(self, key: Tuple[str, str], value: BaseGrammarObject):
+        self.grammar.set_cache(key, value)
+
     def copy(self):
         new_obj = ReasonerGrammarObject(
             self.grammar.copy() if self.grammar is not None else None,

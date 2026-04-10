@@ -16,6 +16,7 @@
 import dataclasses
 import json
 import logging
+import time
 from typing import Dict, List, Optional, Tuple, Union
 
 import torch
@@ -81,7 +82,10 @@ class XGrammarGrammar(BaseGrammarObject):
     def accept_token(self, token: int):
         if not self.is_terminated():
             self.current_token = token
+            t0 = time.perf_counter()
             accepted = self.matcher.accept_token(token)
+            if self.grammar_stats is not None:
+                self.grammar_stats.accept_token_time.append(time.perf_counter() - t0)
             if not accepted:
                 # log for debugging
                 raise ValueError(
@@ -105,7 +109,10 @@ class XGrammarGrammar(BaseGrammarObject):
         return allocate_token_bitmask(batch_size, vocab_size)
 
     def fill_vocab_mask(self, vocab_mask: torch.Tensor, idx: int) -> None:
+        t0 = time.perf_counter()
         self.matcher.fill_next_token_bitmask(vocab_mask, idx)
+        if self.grammar_stats is not None:
+            self.grammar_stats.tree_traversal_time.append(time.perf_counter() - t0)
 
     @staticmethod
     def move_vocab_mask(vocab_mask: torch.Tensor, device) -> torch.Tensor:
@@ -130,7 +137,7 @@ class XGrammarGrammar(BaseGrammarObject):
         )
         if grammar_stats := self.grammar_stats:
             grammar_stats = dataclasses.replace(
-                grammar_stats, is_cache_hit=True, tree_traversal_time=[]
+                grammar_stats, is_cache_hit=True, tree_traversal_time=[], accept_token_time=[]
             )
         return XGrammarGrammar(
             matcher,
