@@ -11,6 +11,7 @@ from sglang.srt.sampling.custom_logit_processor import CustomLogitProcessor
 from sglang.srt.sampling.penaltylib.repetition_penalty import apply_scaling_penalties
 from sglang.srt.sampling.sampling_params import TOP_K_ALL
 from sglang.srt.server_args import get_global_server_args
+from sglang.srt.utils import is_blackwell
 
 if TYPE_CHECKING:
     from sglang.srt.managers.schedule_batch import ScheduleBatch
@@ -253,6 +254,8 @@ class SamplingBatchInfo:
         if self.acc_additive_penalties is not None:
             # Used in the overlap mode
             logits.add_(self.acc_additive_penalties)
+            if is_blackwell():
+                self.acc_additive_penalties = None
 
         if self.acc_scaling_penalties is not None:
             # Used in the overlap mode
