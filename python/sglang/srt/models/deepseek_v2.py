@@ -167,6 +167,7 @@ from sglang.srt.utils import (
     BumpAllocator,
     LazyValue,
     add_prefix,
+    is_blackwell,
     is_non_idle_and_non_empty,
     log_info_on_rank0,
     make_layers,
@@ -2101,6 +2102,10 @@ class DeepseekV2Model(nn.Module):
             else None
         )
 
+        server_args = get_global_server_args()
+        _tool_call_parser = getattr(server_args, "tool_call_parser", None) or ""
+        kimi_offloader = _tool_call_parser in ("kimi_k2", "kimi-k2") and is_blackwell()
+
         self.layers, self.start_layer, self.end_layer = make_layers(
             config.num_hidden_layers,
             lambda idx, prefix: DeepseekV2DecoderLayer(
@@ -2120,19 +2125,26 @@ class DeepseekV2Model(nn.Module):
                     else layer.mlp
                 ),
                 whitelist_param_names_creator=lambda module: (
-                    [
-                        "w13_weight",
-                        "w2_weight",
-                        # only for nvfp4
-                        *(
-                            [
-                                "w13_blockscale_swizzled",
-                                "w2_blockscale_swizzled",
-                            ]
-                            if hasattr(module, "w13_blockscale_swizzled")
-                            else []
-                        ),
-                    ]
+                    (
+                        [
+                            name for name in dict(module.named_parameters()).keys()
+                            if name.startswith(("w13_", "w2_"))
+                        ]
+                        if kimi_offloader
+                        else [
+                            "w13_weight",
+                            "w2_weight",
+                            # only for nvfp4
+                            *(
+                                [
+                                    "w13_blockscale_swizzled",
+                                    "w2_blockscale_swizzled",
+                                ]
+                                if hasattr(module, "w13_blockscale_swizzled")
+                                else []
+                            ),
+                        ]
+                    )
                     if isinstance(module, FusedMoE)
                     else []
                 ),
