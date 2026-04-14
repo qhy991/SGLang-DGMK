@@ -419,7 +419,7 @@ class SchedulerMetricsCollector:
             name="sglang:kv_transfer_latency_ms",
             documentation="Histogram of KV cache transfer latency in ms.",
             labelnames=labels.keys(),
-            buckets=(1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000),
+            buckets=(1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 1500, 2000, 2500, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000, 20000, 30000, 40000, 50000, 60000),
         )
         self.pending_prealloc_token_usage = Gauge(
             name="sglang:pending_prealloc_token_usage",
@@ -446,19 +446,19 @@ class SchedulerMetricsCollector:
             name="sglang:kv_transfer_bootstrap_ms",
             documentation="Histogram of KV transfer bootstrap time in ms.",
             labelnames=labels.keys(),
-            buckets=(1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500),
+            buckets=(1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 1500, 2000, 2500, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000, 20000, 30000, 40000, 50000, 60000),
         )
         self.kv_transfer_alloc_ms = Histogram(
             name="sglang:kv_transfer_alloc_ms",
             documentation="Histogram of KV transfer allocation waiting time in ms.",
             labelnames=labels.keys(),
-            buckets=(1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500),
+            buckets=(1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 1500, 2000, 2500, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000, 20000, 30000, 40000, 50000, 60000),
         )
         self.kv_transfer_total_mb = Histogram(
             name="sglang:kv_transfer_total_mb",
             documentation="Histogram of KV cache transfer size in MB.",
             labelnames=labels.keys(),
-            buckets=(1, 5, 10, 50, 100, 500, 1000, 5000, 10000),
+            buckets=(1, 5, 10, 50, 100, 200, 300, 400, 500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 6000, 7000, 8000, 9000, 10000, 20000, 30000, 40000, 50000, 60000),
         )
 
         # =================================================================
@@ -603,6 +603,10 @@ class SchedulerMetricsCollector:
                 3,
                 4,
                 5,
+                6,
+                7,
+                8,
+                9,
                 10,
                 15,
                 20,
@@ -657,7 +661,13 @@ class SchedulerMetricsCollector:
                 0.5,
                 1,
                 2,
+                3,
+                4,
                 5,
+                6,
+                7,
+                8,
+                9,
                 10,
                 20,
                 30,
@@ -743,7 +753,14 @@ class SchedulerMetricsCollector:
             0.0001,
             0.0005,
             0.001,
+            0.002,
+            0.003,
+            0.004,
             0.005,
+            0.006,
+            0.007,
+            0.008,
+            0.009,
             0.01,
             0.02,
             0.05,
@@ -1377,11 +1394,19 @@ class TokenizerMetricsCollector:
                 0.8,
                 1,
                 2,
+                3,
                 4,
+                5,
                 6,
+                7,
                 8,
+                9,
                 10,
+                15,
                 20,
+                25,
+                30,
+                35,
                 40,
                 60,
                 80,
@@ -1414,6 +1439,7 @@ class TokenizerMetricsCollector:
                 1200,
                 1800,
                 2400,
+                3000,
             ]
 
         if bucket_inter_token_latency is None:
@@ -1429,10 +1455,15 @@ class TokenizerMetricsCollector:
                 0.030,
                 0.035,
                 0.040,
+                0.050,
                 0.060,
+                0.070,
                 0.080,
+                0.090,
                 0.100,
+                0.150,
                 0.200,
+                0.300,
                 0.400,
                 0.600,
                 0.800,
@@ -1697,6 +1728,10 @@ class RadixCacheMetricsCollector:
                 0.2,
                 0.5,
                 1.0,
+                1.5,
+                2.0,
+                2.5,
+                5.0,
             ]
         bucket_load_back_duration = get_histogram_conf_from_env(
             "SGLANG_BUCKET_LOAD_BACK_DURATION"
@@ -1721,6 +1756,10 @@ class RadixCacheMetricsCollector:
                 0.2,
                 0.5,
                 1.0,
+                1.5,
+                2.0,
+                2.5,
+                5.0,
             ]
         self.eviction_duration_seconds = Histogram(
             name="sglang:eviction_duration_seconds",
