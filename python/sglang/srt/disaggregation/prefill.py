@@ -25,7 +25,6 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING, List, Optional
 
 import torch
-
 from sglang.srt.disaggregation.base import KVPoll
 from sglang.srt.disaggregation.common.conn import CommonKVManager
 from sglang.srt.disaggregation.utils import (
@@ -544,6 +543,18 @@ class SchedulerDisaggregationPrefillMixin:
                             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
                         )
                     req.grammar.finished = req.finished()
+                    # The decode server manages grammar state for all subsequent tokens.
+                    # Release the grammar now rather than keeping it alive for the entire
+                    # KV transfer window (disagg_prefill_inflight_queue dwell time).
+                    req.grammar = None
+                    from sglang.srt.constrained.xgrammar_backend import (
+                        get_live_grammar_count,
+                    )
+                    logger.warning(
+                        "[grammar_leak_check] released grammar for rid=%s live_count=%d",
+                        req.rid,
+                        get_live_grammar_count(),
+                    )
             else:
                 # being chunked reqs' prefill is not finished
                 req.is_chunked -= 1

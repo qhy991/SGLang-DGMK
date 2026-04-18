@@ -288,6 +288,20 @@ class SamplingBatchInfo:
         if self.logit_bias is not None:
             self.logit_bias = self.logit_bias[keep_indices_device]
 
+        # Filter grammars list to match the filtered batch.
+        if self.grammars is not None:
+            if not keep_indices:
+                self.grammars = None
+            else:
+                grammar_list = []
+                for i in keep_indices:
+                    if i >= len(self.grammars):
+                        continue
+                    grammar_list.append(self.grammars[i])
+                self.grammars = grammar_list
+                if not any(self.grammars):
+                    self.grammars = None
+
         self.adjusted_filter_batch(keep_indices, keep_indices_device)
 
     def _filter_batch_custom_logit_processor(
@@ -399,12 +413,24 @@ class SamplingBatchInfo:
         self.need_top_k_sampling |= other.need_top_k_sampling
         self.need_min_p_sampling |= other.need_min_p_sampling
 
+        # Merge grammars
+        if self.grammars is not None or other.grammars is not None:
+            self.grammars = (self.grammars or []) + (other.grammars or [])
+
         self.adjusted_merge_batch(other)
 
     def copy_for_forward(self):
         # Accumulate the penalty into a pre-allocated buffer to get rid of the dependency of `penalizer_orchestrator` later
         self.update_penalties()
-        return dataclasses.replace(self, penalizer_orchestrator=None)
+        copied = dataclasses.replace(self, penalizer_orchestrator=None)
+        # In overlap scheduling, `self` is still referenced as the scheduler-side
+        # sampling_info after the caller replaces model_worker_batch.sampling_info
+        # with `copied`.  Transfer grammar ownership to the forward copy and clear
+        # from the original so the scheduler batch does not retain grammar objects
+        # beyond the forward pass.  In non-overlap mode copy_for_forward is never
+        # called, so _preprocess_logits clears grammars on the shared object directly.
+        self.grammars = None
+        return copied
 
 
 def merge_bias_tensor(

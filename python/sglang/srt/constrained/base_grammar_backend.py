@@ -14,10 +14,12 @@
 """The baseclass of a backend for grammar-guided constrained decoding."""
 
 import logging
+import os
 import time
+from collections import OrderedDict
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import torch
 
@@ -129,9 +131,17 @@ class InvalidGrammarObject(BaseGrammarObject):
 
 
 class BaseGrammarBackend:
+    # Maximum number of compiled grammar templates to keep in the LRU cache.
+    # Each entry holds a GrammarMatcher + CompiledGrammar (~1–3 MB C++ heap per
+    # entry in xgrammar). Tune via the SGLANG_GRAMMAR_CACHE_MAX_ENTRIES env var
+    # or override this class attribute in a subclass.
+    GRAMMAR_CACHE_MAX_ENTRIES = int(
+        os.environ.get("SGLANG_GRAMMAR_CACHE_MAX_ENTRIES", "256")
+    )
+
     def __init__(self):
         self.executor = ThreadPoolExecutor()
-        self.cache: Dict[Tuple[str, str], BaseGrammarObject] = {}
+        self.cache: OrderedDict[Tuple[str, str], BaseGrammarObject] = OrderedDict()
 
     def _not_supported(self, key_type: str, key_string: str) -> BaseGrammarObject:
         logger.warning(f"Skip unsupported {key_type=}, {key_string=}")
@@ -180,6 +190,7 @@ class BaseGrammarBackend:
     ) -> Tuple[BaseGrammarObject | Future[BaseGrammarObject], bool]:
         value = self.cache.get(key)
         if value:
+            self.cache.move_to_end(key)  # mark as recently used
             copied_value = value.copy()
             copied_value.maybe_init_reasoning(require_reasoning)
             return copied_value, True
@@ -191,16 +202,21 @@ class BaseGrammarBackend:
     ):
         value = self.cache.get(key)
         if value:
+            self.cache.move_to_end(key)  # mark as recently used
             copied_value = value.copy()
             copied_value.maybe_init_reasoning(require_reasoning)
             return copied_value, True
         value = self._init_value_dispatch(key, require_reasoning)
-        # directly set cache for synchronous case
         self.set_cache(key, value)
-        return value, True
+        return value.copy(), True
 
     def set_cache(self, key: Tuple[str, str], value: BaseGrammarObject):
+        if key in self.cache:
+            self.cache.move_to_end(key)
         self.cache[key] = value
+        if len(self.cache) > self.GRAMMAR_CACHE_MAX_ENTRIES:
+            evicted_key, _ = self.cache.popitem(last=False)  # evict least recently used
+            logger.warning("[grammar_leak_check] Grammar cache full, evicted key: %s", evicted_key[0])
 
     def reset(self):
         self.cache.clear()
