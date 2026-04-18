@@ -17,6 +17,7 @@ import dataclasses
 import json
 import logging
 import time
+import weakref
 from typing import Dict, List, Optional, Tuple, Union
 
 import torch
@@ -56,7 +57,16 @@ from sglang.srt.constrained.torch_ops.token_filter_torch_ops import (
 from sglang.srt.constrained.triton_ops.token_filter_ops import set_token_filter_triton
 
 logger = logging.getLogger(__name__)
-MAX_ROLLBACK_TOKENS = 200
+MAX_ROLLBACK_TOKENS = 1  # useless
+
+# Tracks all live XGrammarGrammar instances via weak references.
+# len(_live_grammars) == 0 after all requests finish means no Python-side leak.
+# If it keeps growing, grammar objects are not being released (e.g. circular ref).
+_live_grammars: weakref.WeakSet = weakref.WeakSet()
+
+
+def get_live_grammar_count() -> int:
+    return len(_live_grammars)
 
 
 class XGrammarGrammar(BaseGrammarObject):
@@ -78,6 +88,7 @@ class XGrammarGrammar(BaseGrammarObject):
         self.accepted_tokens = []
         self.key_string = key_string
         self.grammar_stats = grammar_stats
+        _live_grammars.add(self)
 
     def accept_token(self, token: int):
         if not self.is_terminated():
@@ -384,6 +395,18 @@ class XGrammarGrammarBackend(BaseGrammarBackend):
         return self._from_context(
             ctx, key_string, GrammarStats(dispatch_type="structural_tag")
         )
+
+    def set_cache(self, key, value):
+        prev_len = len(self.cache)
+        super().set_cache(key, value)
+        evicted = len(self.cache) < prev_len + 1
+        logger.warning(
+            "[grammar_leak_check] key=%s cache_len=%d evicted=%s",
+            key[0], len(self.cache), evicted,
+        )
+        if evicted:
+            self.grammar_compiler.clear_cache()
+            logger.warning("[grammar_leak_check] clear_cache() called")
 
     def reset(self):
         super().reset()

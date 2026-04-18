@@ -327,3 +327,17 @@ class ReasonerGrammarBackend(BaseGrammarBackend):
         if ret is None or isinstance(ret, InvalidGrammarObject):
             return ret
         return self._make_grammar_object(ret, reasoning)
+
+    def set_cache(self, key: Tuple[str, str], value: BaseGrammarObject):
+        # Delegate to the inner backend so backend-specific cleanup
+        # (e.g. XGrammarGrammarBackend.grammar_compiler.clear_cache()) is triggered
+        # on LRU eviction. Without this, ReasonerGrammarBackend would use only
+        # BaseGrammarBackend.set_cache(), skipping the C++ compiler cache release.
+        inner_value = value.grammar if isinstance(value, ReasonerGrammarObject) else value
+        self.grammar_backend.set_cache(key, inner_value)
+        # Keep the reasoner-level cache in sync so get_value() cache hits work.
+        super().set_cache(key, value)
+
+    def reset(self):
+        super().reset()
+        self.grammar_backend.reset()

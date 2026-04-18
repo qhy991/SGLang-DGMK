@@ -553,6 +553,9 @@ class TpModelWorker(BaseTpWorker):
         logits_output, can_run_cuda_graph = out.logits_output, out.can_run_graph
         if logits_output:
             next_token_ids = self.model_runner.sample(logits_output, model_worker_batch)
+            # All splits are done; release the ForwardBatch so sampling_info.grammars
+            # (and any GPU tensors it holds) can be freed immediately.
+            batch.split_forward_batch = None
         else:
             next_token_ids = None
         batch_result = GenerationBatchResult(

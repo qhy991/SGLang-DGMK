@@ -2429,6 +2429,11 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
         if keep_indices is None or len(keep_indices) == 0:
             # Filter out all requests
             self.reqs = []
+            self.has_grammar = False
+            # Explicitly release grammar objects so they are not retained until
+            # the next batch replaces this one.
+            if self.sampling_info is not None and self.sampling_info.grammars is not None:
+                self.sampling_info.grammars = None
             return
 
         if len(keep_indices) == len(self.reqs):
