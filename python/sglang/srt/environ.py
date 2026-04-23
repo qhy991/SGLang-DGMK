@@ -184,6 +184,8 @@ class Envs:
     # Constrained Decoding (Grammar)
     SGLANG_GRAMMAR_POLL_INTERVAL = EnvFloat(0.005)
     SGLANG_GRAMMAR_MAX_POLL_ITERATIONS = EnvInt(10000)
+    # LRU of compiled grammar templates per scheduler (json/regex/ebnf/structural_tag keys).
+    SGLANG_GRAMMAR_CACHE_MAX_ENTRIES = EnvInt(1024)
     SGLANG_DISABLE_OUTLINES_DISK_CACHE = EnvBool(False)
 
 

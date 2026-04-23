@@ -3,7 +3,7 @@
 import uuid
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_serializer
 
 
 class AnthropicError(BaseModel):
@@ -48,6 +48,13 @@ class AnthropicContentBlock(BaseModel):
     # For thinking content
     thinking: Optional[str] = None
     signature: Optional[str] = None
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler):
+        data = handler(self)
+        if data.get("text") == "":
+            data.pop("text", None)
+        return data
 
 
 class AnthropicMessage(BaseModel):
@@ -140,6 +147,15 @@ class AnthropicDelta(BaseModel):
         Literal["end_turn", "max_tokens", "stop_sequence", "tool_use"]
     ] = None
     stop_sequence: Optional[str] = None
+
+    @model_serializer(mode="wrap")
+    def _serialize(self, handler):
+        data = handler(self)
+        if data.get("text") == "":
+            data.pop("text", None)
+        if data.get("partial_json") == "":
+            data.pop("partial_json", None)
+        return data
 
 
 class AnthropicStreamEvent(BaseModel):

@@ -48,6 +48,11 @@ from sglang.srt.function_call.core_types import ToolCallItem
 from sglang.srt.function_call.function_call_parser import FunctionCallParser
 from sglang.srt.function_call.json_array_parser import JsonArrayParser
 from sglang.srt.function_call.utils import get_json_schema_constraint
+from sglang.srt.infini.tool_call_validator import (
+    ToolCallStreamSession,
+    ToolCallValidationError,
+    ToolCallValidator,
+)
 from sglang.srt.managers.io_struct import GenerateReqInput
 from sglang.srt.parser.conversation import generate_chat_conv
 from sglang.srt.parser.jinja_template_utils import process_content_for_template_format
@@ -100,6 +105,7 @@ class OpenAIServingChat(OpenAIServingBase):
         self.template_manager = template_manager
         self.tool_call_parser = self.tokenizer_manager.server_args.tool_call_parser
         self.reasoning_parser = self.tokenizer_manager.server_args.reasoning_parser
+        self._tool_call_validator = ToolCallValidator(self.tool_call_parser)
 
         # Get default sampling parameters from model's generation config
         self.default_sampling_params = (
@@ -191,6 +197,27 @@ class OpenAIServingChat(OpenAIServingBase):
     def _request_id_prefix(self) -> str:
         return "chatcmpl-"
 
+    _NO_TOOLS_MARKER_GRAMMAR_BACKENDS = frozenset({"loom", "xgrammar"})
+
+    def _no_tools_marker_constraint(self) -> Optional[tuple[str, Any]]:
+        """Block Kimi FC markers when this turn must not emit tool calls.
+
+        Uses legacy empty ``structural_tag`` (``structures=[]``). Loom maps it to
+        ``wire: kimi, tools: []``; xgrammar compiles via ``dispatch_kimi_structural_tag``.
+        """
+        grammar_backend = getattr(
+            self.tokenizer_manager.server_args, "grammar_backend", None
+        )
+        if (
+            grammar_backend not in self._NO_TOOLS_MARKER_GRAMMAR_BACKENDS
+            or not self.tool_call_parser
+        ):
+            return None
+        parser = FunctionCallParser([], self.tool_call_parser)
+        if not parser.detector.supports_structural_tag():
+            return None
+        return ("structural_tag", FunctionCallParser.get_empty_structural_tag())
+
     def _validate_request(self, request: ChatCompletionRequest) -> Optional[str]:
         """Validate that the input is valid."""
         if not request.messages:
@@ -260,8 +287,12 @@ class OpenAIServingChat(OpenAIServingBase):
         """Convert OpenAI chat completion request to internal format"""
         is_multimodal = self.tokenizer_manager.model_config.is_multimodal
 
+        require_reasoning = self._get_reasoning_from_request(request)
+
         # Process messages and apply chat template
-        processed_messages = self._process_messages(request, is_multimodal)
+        processed_messages = self._process_messages(
+            request, is_multimodal, require_reasoning
+        )
 
         # Build sampling parameters
         sampling_params = request.to_sampling_params(
@@ -314,7 +345,7 @@ class OpenAIServingChat(OpenAIServingBase):
             return_routed_experts=request.return_routed_experts,
             rid=request.rid,
             extra_key=self._compute_extra_key(request),
-            require_reasoning=self._get_reasoning_from_request(request),
+            require_reasoning=require_reasoning,
             priority=request.priority,
             routing_key=self.extract_routing_key(raw_request),
             custom_labels=custom_labels,
@@ -327,7 +358,10 @@ class OpenAIServingChat(OpenAIServingBase):
         return adapted_request, request
 
     def _process_messages(
-        self, request: ChatCompletionRequest, is_multimodal: bool
+        self,
+        request: ChatCompletionRequest,
+        is_multimodal: bool,
+        require_reasoning: bool,
     ) -> MessageProcessingResult:
         """Process chat messages and apply chat template"""
         # GptOss model needs to keep special tokens for harmony parsing
@@ -366,12 +400,19 @@ class OpenAIServingChat(OpenAIServingBase):
                     parallel_tool_calls=request.parallel_tool_calls,
                 )
                 tool_call_constraint = ("json_schema", json_schema)
+            # Keep parser/json_schema behavior unchanged; no high-volume debug logging here.
+        else:
+            tool_call_constraint = self._no_tools_marker_constraint()
 
         # Use chat template
         if self.template_manager.chat_template_name is None:
-            result = self._apply_jinja_template(request, tools, is_multimodal)
+            result = self._apply_jinja_template(
+                request, tools, is_multimodal, require_reasoning
+            )
         else:
-            result = self._apply_conversation_template(request, is_multimodal)
+            result = self._apply_conversation_template(
+                request, is_multimodal, require_reasoning
+            )
 
         result.tool_call_constraint = tool_call_constraint
         return result
@@ -381,6 +422,7 @@ class OpenAIServingChat(OpenAIServingBase):
         request: ChatCompletionRequest,
         tools: Optional[List[Dict]],
         is_multimodal: bool,
+        require_reasoning: bool,
     ) -> MessageProcessingResult:
         """Apply Jinja chat template"""
         prompt = ""
@@ -394,11 +436,11 @@ class OpenAIServingChat(OpenAIServingBase):
         template_content_format = self.template_manager.jinja_template_content_format
 
         if self.use_dpsk_v32_encoding:
-            thinking_mode = (
-                "thinking"
-                if (request.chat_template_kwargs or {}).get("thinking")
-                else "chat"
-            )
+            ct_kw = request.chat_template_kwargs or {}
+            if "thinking" in ct_kw:
+                thinking_mode = "thinking" if ct_kw.get("thinking") else "chat"
+            else:
+                thinking_mode = "thinking" if require_reasoning else "chat"
             messages = request.messages
             messages = [msg.model_dump() for msg in messages]
 
@@ -464,9 +506,13 @@ class OpenAIServingChat(OpenAIServingBase):
                         if "arguments" in item["function"] and isinstance(
                             item["function"]["arguments"], str
                         ):
-                            item["function"]["arguments"] = orjson.loads(
-                                item["function"]["arguments"]
-                            )
+                            try:
+                                item["function"]["arguments"] = orjson.loads(
+                                    item["function"]["arguments"]
+                                )
+                            except Exception as e:
+                                # error from last turn, just ignore it
+                                pass
 
                 openai_compatible_messages.append(processed_msg)
 
@@ -480,6 +526,9 @@ class OpenAIServingChat(OpenAIServingBase):
                 extra_template_kwargs["reasoning_effort"] = request.reasoning_effort
             if request.chat_template_kwargs:
                 extra_template_kwargs.update(request.chat_template_kwargs)
+            self._inject_reasoning_chat_template_kwarg(
+                extra_template_kwargs, require_reasoning
+            )
 
             try:
                 prompt_ids = self.tokenizer_manager.tokenizer.apply_chat_template(
@@ -540,6 +589,7 @@ class OpenAIServingChat(OpenAIServingBase):
         self,
         request: ChatCompletionRequest,
         is_multimodal: bool,
+        require_reasoning: bool,
     ) -> MessageProcessingResult:
         """Apply conversation template"""
         prompt = ""
@@ -570,9 +620,11 @@ class OpenAIServingChat(OpenAIServingBase):
                 prompt = prompt[: -len(conv.sep2)]
         else:
             prompt = conv.get_prompt()
-            if self._get_reasoning_from_request(
-                request
-            ) and self.reasoning_parser not in ["qwen3", "qwen3-thinking", "glm4"]:
+            if require_reasoning and self.reasoning_parser not in [
+                "qwen3",
+                "qwen3-thinking",
+                "glm4",
+            ]:
                 # qwen3 and glm4 think internally without a leading <think> token
                 prompt += "<think>"  # Note(Xinyuan): hard code thinking token
 
@@ -637,8 +689,12 @@ class OpenAIServingChat(OpenAIServingBase):
     ) -> AsyncGenerator[str, None]:
         """Generate streaming chat completion response"""
         # Parsers for tool calls and reasoning
-        parser_dict = {}
+        parser_dict: Dict[int, Union[FunctionCallParser, JsonArrayParser]] = {}
         reasoning_parser_dict = {}
+        tool_stream = self._tool_call_validator.open_stream_session(
+            tool_choice_active=request.tool_choice != "none",
+            tools=request.tools or [],
+        )
 
         # State tracking for streaming
         is_firsts = {}
@@ -701,15 +757,22 @@ class OpenAIServingChat(OpenAIServingBase):
                         code = finish_reason.get(
                             "status_code", HTTPStatus.INTERNAL_SERVER_ERROR
                         )
+                        name = code.name if code is not None else "Unknown Error"
+                        value = code.value if code is not None else "Unknown Error"
+                        # TODO: add more error codes and messages
                         error = self.create_streaming_error_response(
                             finish_reason.get("message", "Generation aborted."),
-                            code.name,
-                            code.value,
+                            name,
+                            value,
                         )
                         yield f"data: {error}\n\n"
                         break
                     else:
-                        finish_reasons[index] = finish_reason
+                        if finish_reason:
+                            fr_copy = tool_stream.merge_engine_finish_for_storage(
+                                index, finish_reason
+                            )
+                            finish_reasons[index] = fr_copy
 
                 # First chunk with role
                 if is_firsts.get(index, True):
@@ -737,7 +800,12 @@ class OpenAIServingChat(OpenAIServingBase):
                 # Handle reasoning content
                 if self.reasoning_parser and request.separate_reasoning:
                     reasoning_text, delta = self._process_reasoning_stream(
-                        index, delta, reasoning_parser_dict, content, request
+                        index,
+                        delta,
+                        reasoning_parser_dict,
+                        content,
+                        request,
+                        adapted_request.require_reasoning,
                     )
                     if reasoning_text:
                         choice_data = ChatCompletionResponseStreamChoice(
@@ -775,7 +843,9 @@ class OpenAIServingChat(OpenAIServingBase):
                         content,
                         request,
                         has_tool_calls,
+                        finish_reasons,
                         continuous_usage_stats,
+                        tool_stream,
                     ):
                         if chunk:
                             yield chunk
@@ -784,10 +854,20 @@ class OpenAIServingChat(OpenAIServingBase):
                     if finish_reason_type is not None and index in parser_dict:
                         parser = parser_dict[index]
                         remaining_chunk = self._check_for_unstreamed_tool_args(
-                            parser, content, request, index
+                            parser,
+                            content,
+                            request,
+                            index,
+                            tool_stream,
                         )
                         if remaining_chunk:
                             yield remaining_chunk
+                        tool_stream.finalize_choice(
+                            index,
+                            finish_reason,
+                            finish_reasons,
+                            has_tool_calls,
+                        )
 
                 else:
                     # Regular content
@@ -822,7 +902,10 @@ class OpenAIServingChat(OpenAIServingBase):
 
                 # Change finish_reason to "tool_calls" if we had tool calls and stopped naturally
                 final_finish_reason = finish_reason_type
-                if has_tool_calls.get(idx, False) and finish_reason_type == "stop":
+                if has_tool_calls.get(idx, False) and finish_reason_type in (
+                    "stop",
+                    "length",
+                ):
                     final_finish_reason = "tool_calls"
 
                 finish_reason_chunk = ChatCompletionStreamResponse(
@@ -933,6 +1016,7 @@ class OpenAIServingChat(OpenAIServingBase):
 
         response = self._build_chat_response(
             request,
+            adapted_request.require_reasoning,
             ret,
             int(time.time()),
         )
@@ -942,6 +1026,7 @@ class OpenAIServingChat(OpenAIServingBase):
     def _build_chat_response(
         self,
         request: ChatCompletionRequest,
+        require_reasoning: bool,
         ret: List[Dict[str, Any]],
         created: int,
     ) -> Union[ChatCompletionResponse, ORJSONResponse]:
@@ -978,8 +1063,7 @@ class OpenAIServingChat(OpenAIServingBase):
             reasoning_parser = self.reasoning_parser
             if reasoning_parser and request.separate_reasoning:
                 is_force_reasoning = (
-                    self.template_manager.force_reasoning
-                    or self._get_reasoning_from_request(request)
+                    self.template_manager.force_reasoning or require_reasoning
                 )
                 try:
                     parser = ReasoningParser(
@@ -1129,76 +1213,112 @@ class OpenAIServingChat(OpenAIServingBase):
         tool_choice: Optional[Union[str, ToolChoice]] = None,
         history_tool_calls_cnt: int = 0,
     ) -> ToolCallProcessingResult:
-        """Process tool calls in the response"""
+        """Process tool calls in the response.
+
+        When ``_tool_call_validator.activate`` (``kimi_k2`` only), validates generated
+        parameters against each tool's JSON Schema and may adjust ``finish_reason``.
+        When inactive, the validator bypasses: no validation and no ``finish_reason`` changes
+        (plain deep copy of the engine finish).
+        """
 
         # Handle required or named tool choice
         if tool_choice == "required" or (
             isinstance(tool_choice, ToolChoice) and tool_choice.type == "function"
         ):
-            # Set finish reason to tool_calls since we're processing tool calls
-            if finish_reason["type"] == "stop":
-                finish_reason["type"] = "tool_calls"
-                finish_reason["matched"] = None
+            engine_finish = copy.deepcopy(finish_reason)
             try:
-                # For required tool choice, we expect a JSON array of tool calls
                 tool_call_data = orjson.loads(text)
-                tool_calls = []
-                for i, tool in enumerate(tool_call_data):
-                    # Create a ToolCallItem from the JSON data
-                    call_info = ToolCallItem(
-                        tool_index=i,  # Use the loop index as tool_index
-                        name=tool["name"],
-                        parameters=json.dumps(tool["parameters"], ensure_ascii=False),
-                    )
-                    tool_id = self._process_tool_call_id(
-                        call_info, history_tool_calls_cnt
-                    )
-                    tool_calls.append(
-                        ToolCall(
-                            id=tool_id,
-                            index=i,
-                            function=FunctionResponse(
-                                name=tool["name"],
-                                arguments=json.dumps(
-                                    tool["parameters"], ensure_ascii=False
-                                ),
-                            ),
-                        )
-                    )
-                return ToolCallProcessingResult(tool_calls, "", finish_reason)
-            except json.JSONDecodeError as e:
+            except orjson.JSONDecodeError as e:
                 logger.error(f"Tool call parsing error: {e}")
-                return ToolCallProcessingResult(None, text, finish_reason)
+                return ToolCallProcessingResult(None, text, copy.deepcopy(finish_reason))
+
+            validation_ok = True
+            try:
+                self._tool_call_validator.validate_required_payload(
+                    tool_call_data, tools
+                )
+            except ToolCallValidationError as exc:
+                validation_ok = False
+                logger.error(
+                    "Tool-call schema validation failed (required/named tool-choice path): %s",
+                    exc,
+                )
+
+            tool_calls = []
+            for i, tool in enumerate(tool_call_data):
+                call_info = ToolCallItem(
+                    tool_index=i,
+                    name=tool["name"],
+                    parameters=json.dumps(tool["parameters"], ensure_ascii=False),
+                )
+                tool_id = self._process_tool_call_id(
+                    call_info, history_tool_calls_cnt
+                )
+                tool_calls.append(
+                    ToolCall(
+                        id=tool_id,
+                        index=i,
+                        function=FunctionResponse(
+                            name=tool["name"],
+                            arguments=json.dumps(
+                                tool["parameters"], ensure_ascii=False
+                            ),
+                        ),
+                    )
+                )
+            out_finish = (
+                self._tool_call_validator.finish_reason_after_non_stream_validation(
+                    validation_ok=validation_ok,
+                    has_parsed_tools=bool(tool_calls),
+                    engine_finish=engine_finish,
+                )
+            )
+            return ToolCallProcessingResult(tool_calls, "", out_finish)
 
         # Use parser since output is not constrained by JSON schema
         parser = FunctionCallParser(tools, self.tool_call_parser)
         if parser.has_tool_call(text):
-            if finish_reason["type"] == "stop":
-                finish_reason["type"] = "tool_calls"
-                finish_reason["matched"] = None
+            engine_finish = copy.deepcopy(finish_reason)
             try:
-                text, call_info_list = parser.parse_non_stream(text)
-                tool_calls = []
-                for call_info in call_info_list:
-                    tool_id = self._process_tool_call_id(
-                        call_info, history_tool_calls_cnt
-                    )
-                    tool_calls.append(
-                        ToolCall(
-                            id=tool_id,
-                            index=getattr(call_info, "tool_index", None),
-                            function=FunctionResponse(
-                                name=call_info.name, arguments=call_info.parameters
-                            ),
-                        )
-                    )
-                return ToolCallProcessingResult(tool_calls, text, finish_reason)
+                remaining_text, call_info_list = parser.parse_non_stream(text)
             except Exception as e:
                 logger.error(f"Tool call parsing error: {e}")
-                # Return error but don't fail the whole request
-                return ToolCallProcessingResult(None, text, finish_reason)
+                return ToolCallProcessingResult(None, text, copy.deepcopy(finish_reason))
 
-        return ToolCallProcessingResult(None, text, finish_reason)
+            validation_ok = True
+            try:
+                self._tool_call_validator.validate_parsed_items(call_info_list, tools)
+            except ToolCallValidationError as exc:
+                validation_ok = False
+                logger.error(
+                    "Tool-call schema validation failed (parser path): %s",
+                    exc,
+                )
+
+            tool_calls = []
+            for call_info in call_info_list:
+                tool_id = self._process_tool_call_id(
+                    call_info, history_tool_calls_cnt
+                )
+                tool_calls.append(
+                    ToolCall(
+                        id=tool_id,
+                        index=getattr(call_info, "tool_index", None),
+                        function=FunctionResponse(
+                            name=call_info.name, arguments=call_info.parameters
+                        ),
+                    )
+                )
+            out_finish = (
+                self._tool_call_validator.finish_reason_after_non_stream_validation(
+                    validation_ok=validation_ok,
+                    has_parsed_tools=bool(tool_calls),
+                    engine_finish=engine_finish,
+                )
+            )
+            return ToolCallProcessingResult(tool_calls, remaining_text, out_finish)
+
+        return ToolCallProcessingResult(None, text, copy.deepcopy(finish_reason))
 
     def _process_streaming_logprobs(
         self,
@@ -1226,12 +1346,12 @@ class OpenAIServingChat(OpenAIServingBase):
         reasoning_parser_dict: Dict[int, ReasoningParser],
         content: Dict[str, Any],
         request: ChatCompletionRequest,
+        require_reasoning: bool,
     ) -> tuple[Optional[str], str]:
         """Process reasoning content in streaming response"""
         if index not in reasoning_parser_dict:
             is_force_reasoning = (
-                self.template_manager.force_reasoning
-                or self._get_reasoning_from_request(request)
+                self.template_manager.force_reasoning or require_reasoning
             )
             reasoning_parser_dict[index] = ReasoningParser(
                 self.reasoning_parser,
@@ -1261,6 +1381,21 @@ class OpenAIServingChat(OpenAIServingBase):
                 tool_calls = getattr(msg, "tool_calls", None)
                 idx += len(list(tool_calls)) if tool_calls is not None else 0  # noqa
         return idx
+
+    def _inject_reasoning_chat_template_kwarg(
+        self, extra_template_kwargs: Dict[str, Any], require_reasoning: bool
+    ) -> None:
+        """Align ``apply_chat_template`` kwargs with hybrid reasoning request state."""
+        if self.reasoning_parser in ["deepseek-v3", "kimi_k2"]:
+            extra_template_kwargs.setdefault("thinking", require_reasoning)
+        elif self.reasoning_parser in [
+            "qwen3",
+            "glm45",
+            "nemotron_3",
+            "interns1",
+            "mimo",
+        ]:
+            extra_template_kwargs.setdefault("enable_thinking", require_reasoning)
 
     def _patch_mistral_skip_special_tokens(
         self, request: ChatCompletionRequest
@@ -1317,11 +1452,13 @@ class OpenAIServingChat(OpenAIServingBase):
         self,
         index: int,
         delta: str,
-        parser_dict: Dict[int, FunctionCallParser],
+        parser_dict: Dict[int, Union[FunctionCallParser, JsonArrayParser]],
         content: Dict[str, Any],
         request: ChatCompletionRequest,
         has_tool_calls: Dict[int, bool],
-        continuous_usage_stats: bool = False,
+        finish_reasons: Dict[int, Any],
+        continuous_usage_stats: bool,
+        tool_stream: ToolCallStreamSession,
     ):
         """Process tool calls in streaming response"""
         if index not in parser_dict:
@@ -1375,7 +1512,6 @@ class OpenAIServingChat(OpenAIServingBase):
         # Yield tool calls
         history_tool_calls_cnt = self._get_history_tool_calls_cnt(request)
         for call_item in calls:
-            # Mark that this choice has tool calls
             has_tool_calls[index] = True
 
             # Tool call ID should be generated only once per tool call
@@ -1424,12 +1560,21 @@ class OpenAIServingChat(OpenAIServingBase):
 
             yield f"data: {chunk.model_dump_json()}\n\n"
 
+            tool_stream.ingest_after_tool_chunk(
+                index,
+                call_item,
+                content["meta_info"].get("finish_reason"),
+                finish_reasons,
+                has_tool_calls,
+            )
+
     def _check_for_unstreamed_tool_args(
         self,
         parser: Union[FunctionCallParser, JsonArrayParser],
         content: Dict[str, Any],
         request: ChatCompletionRequest,
         index: int,
+        tool_stream: ToolCallStreamSession,
     ) -> Optional[str]:
         """
         Check for any remaining tool call arguments that need to be streamed
@@ -1493,6 +1638,8 @@ class OpenAIServingChat(OpenAIServingBase):
                 model=request.model,
             )
 
-            return f"data: {chunk.model_dump_json()}\n\n"
+            out = f"data: {chunk.model_dump_json()}\n\n"
+            tool_stream.ingest_remaining_args(index, tool_index, remaining_call)
+            return out
 
         return None

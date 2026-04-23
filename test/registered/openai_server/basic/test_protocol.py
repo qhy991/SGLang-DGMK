@@ -24,11 +24,13 @@ from sglang.srt.entrypoints.openai.protocol import (
     ChatCompletionResponseChoice,
     ChatMessage,
     CompletionRequest,
+    DeltaMessage,
     ModelCard,
     ModelList,
     UsageInfo,
 )
 from sglang.test.ci.ci_register import register_amd_ci, register_cuda_ci
+from sglang.test.test_utils import CustomTestCase
 
 register_cuda_ci(est_time=3, suite="stage-b-test-1-gpu-small")
 register_amd_ci(est_time=10, suite="stage-b-test-1-gpu-small-amd")
@@ -335,6 +337,35 @@ class TestModelSerialization(unittest.TestCase):
         data = response.model_dump(exclude_none=True)
         self.assertIn("hidden_states", data["choices"][0])
         self.assertEqual(data["choices"][0]["hidden_states"], [0.1, 0.2, 0.3])
+
+
+class TestOpenAIProtocolValidateAssignment(CustomTestCase):
+    """OpenAIProtocolModelBase uses validate_assignment=True; field validators must run on setattr."""
+
+    def test_delta_message_content_assignment_sanitizes_special_tokens(self):
+        d = DeltaMessage(content="init")
+        d.content = "a<|im_end|>b"
+        self.assertEqual(d.content, "ab")
+
+    def test_delta_message_content_assignment_empty_becomes_none(self):
+        d = DeltaMessage()
+        d.content = ""
+        self.assertIsNone(d.content)
+
+    def test_delta_message_reasoning_content_assignment_sanitizes(self):
+        d = DeltaMessage()
+        d.reasoning_content = "x<|im_end|>y"
+        self.assertEqual(d.reasoning_content, "xy")
+
+    def test_chat_message_content_assignment_sanitizes_special_tokens(self):
+        m = ChatMessage(role="assistant", content="init")
+        m.content = "a<|im_end|>b"
+        self.assertEqual(m.content, "ab")
+
+    def test_delta_message_invalid_assignment_type_raises(self):
+        d = DeltaMessage(content="ok")
+        with self.assertRaises(ValidationError):
+            d.content = 123  # type: ignore[assignment]
 
 
 class TestValidationEdgeCases(unittest.TestCase):

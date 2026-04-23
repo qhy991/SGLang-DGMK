@@ -14,7 +14,6 @@
 """The baseclass of a backend for grammar-guided constrained decoding."""
 
 import logging
-import os
 import time
 from collections import OrderedDict
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -23,6 +22,7 @@ from typing import List, Optional, Tuple
 
 import torch
 
+from sglang.srt.environ import envs
 from sglang.srt.server_args import ServerArgs
 
 logger = logging.getLogger(__name__)
@@ -130,14 +130,16 @@ class InvalidGrammarObject(BaseGrammarObject):
         return f"InvalidGrammarObject(error_message={self.error_message!r})"
 
 
+# Singleton used by `loom` and tests that compare with ``grammar is INVALID_GRAMMAR_OBJ``.
+INVALID_GRAMMAR_OBJ = InvalidGrammarObject("invalid grammar")
+
+
 class BaseGrammarBackend:
     # Maximum number of compiled grammar templates to keep in the LRU cache.
     # Each entry holds a GrammarMatcher + CompiledGrammar (~1–3 MB C++ heap per
-    # entry in xgrammar). Tune via the SGLANG_GRAMMAR_CACHE_MAX_ENTRIES env var
-    # or override this class attribute in a subclass.
-    GRAMMAR_CACHE_MAX_ENTRIES = int(
-        os.environ.get("SGLANG_GRAMMAR_CACHE_MAX_ENTRIES", "256")
-    )
+    # entry in xgrammar). Default from :data:`envs.SGLANG_GRAMMAR_CACHE_MAX_ENTRIES`
+    # (``SGLANG_GRAMMAR_CACHE_MAX_ENTRIES``); override this class attribute in a subclass.
+    GRAMMAR_CACHE_MAX_ENTRIES = envs.SGLANG_GRAMMAR_CACHE_MAX_ENTRIES.get()
 
     def __init__(self):
         self.executor = ThreadPoolExecutor()
@@ -283,6 +285,22 @@ def create_grammar_backend(
             any_whitespace=not server_args.constrained_json_disable_any_whitespace,
             whitespace_pattern=server_args.constrained_json_whitespace_pattern,
         )
+    elif name == "loom":
+        from sglang.srt.constrained.loom_backend import create_loom_backend
+
+        try:
+            grammar_backend = create_loom_backend(
+                server_args, tokenizer, vocab_size, eos_token_ids
+            )
+        except ImportError as e:
+            logger.warning(
+                "grammar_backend='loom' is unavailable (%s). "
+                "Falling back to grammar_backend='none'. "
+                "Install/build the loom package and native extension to use native Kimi-wire grammar.",
+                e,
+            )
+            server_args.grammar_backend = "none"
+            return None
     elif name == "none":
         return None
     else:

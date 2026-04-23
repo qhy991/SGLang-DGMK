@@ -33,6 +33,7 @@ from typing import Any, Awaitable, Dict, List, Optional, Tuple, Union
 
 import fastapi
 import pybase64
+import torch
 import uvloop
 import zmq
 import zmq.asyncio
@@ -121,6 +122,49 @@ asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 _REQUEST_STATE_WAIT_TIMEOUT = envs.SGLANG_REQUEST_STATE_WAIT_TIMEOUT.get()
 
 logger = logging.getLogger(__name__)
+
+
+def _top_logprob_segment_is_empty(val: Any) -> bool:
+    """Return True if this position has no top-logprob data (safe for torch tensors)."""
+    if val is None:
+        return True
+    if isinstance(val, (list, tuple)):
+        return len(val) == 0
+    if torch.is_tensor(val):
+        return val.numel() == 0
+    try:
+        return not val
+    except (RuntimeError, ValueError) as e:
+        if "ambiguous" in str(e).lower():
+            return False
+        raise
+
+
+def _coerce_top_logprob_segment_to_lists(val: Any, idx: Any) -> Tuple[Any, Any]:
+    """Convert tensor / array-like segments to plain lists for detokenization."""
+    if torch.is_tensor(val):
+        val = val.detach().cpu().tolist()
+    elif (
+        hasattr(val, "tolist")
+        and callable(val.tolist)
+        and hasattr(val, "shape")
+        and not isinstance(val, (list, tuple, str, bytes))
+    ):
+        val = val.tolist()
+    if torch.is_tensor(idx):
+        idx = idx.detach().cpu().tolist()
+    elif (
+        hasattr(idx, "tolist")
+        and callable(idx.tolist)
+        and hasattr(idx, "shape")
+        and not isinstance(idx, (list, tuple, str, bytes))
+    ):
+        idx = idx.tolist()
+    if isinstance(val, (int, float)):
+        val = [val]
+    if isinstance(idx, (int, float)):
+        idx = [idx]
+    return val, idx
 
 
 @dataclasses.dataclass
@@ -1881,22 +1925,21 @@ class TokenizerManager(TokenizerCommunicatorMixin, TokenizerManagerScoreMixin):
 
     def detokenize_top_logprobs_tokens(
         self,
-        token_logprobs_val: List[float],
-        token_logprobs_idx: List[int],
+        token_logprobs_val: List[Any],
+        token_logprobs_idx: List[Any],
         decode_to_text: bool,
     ):
         # TODO: The current implementation only batches the detokenization for top-k tokens per single position.
         # We should batch all top-k tokens in all positions.
         ret = []
         for i in range(len(token_logprobs_val)):
-            if token_logprobs_val[i]:
-                ret.append(
-                    self.detokenize_logprob_tokens(
-                        token_logprobs_val[i], token_logprobs_idx[i], decode_to_text
-                    )
-                )
-            else:
+            v = token_logprobs_val[i]
+            if _top_logprob_segment_is_empty(v):
                 ret.append(None)
+                continue
+            idx = token_logprobs_idx[i]
+            v, idx = _coerce_top_logprob_segment_to_lists(v, idx)
+            ret.append(self.detokenize_logprob_tokens(v, idx, decode_to_text))
         return ret
 
     def _calculate_spec_decoding_metrics(

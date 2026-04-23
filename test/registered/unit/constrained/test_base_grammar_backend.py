@@ -375,6 +375,25 @@ class TestCreateGrammarBackend(unittest.TestCase):
         )
         self.assertIs(result, mock_backend)
 
+    @patch("sglang.srt.constrained.loom_backend.create_loom_backend")
+    def test_loom_backend(self, mock_create_loom):
+        mock_backend = MagicMock(spec=BaseGrammarBackend)
+        mock_create_loom.return_value = mock_backend
+        args = self._make_server_args("loom")
+
+        result = create_grammar_backend(args, "tok", 32000, {1, 2})
+        mock_create_loom.assert_called_once_with(args, "tok", 32000, {1, 2})
+        self.assertIs(result, mock_backend)
+
+    @patch("sglang.srt.constrained.loom_backend.create_loom_backend")
+    def test_loom_backend_import_error_falls_back_to_none(self, mock_create_loom):
+        mock_create_loom.side_effect = ImportError("loom package not installed")
+        args = self._make_server_args("loom")
+
+        result = create_grammar_backend(args, "tok", 32000)
+        self.assertIsNone(result)
+        self.assertEqual(args.grammar_backend, "none")
+
     @patch("sglang.srt.constrained.outlines_backend.OutlinesGrammarBackend")
     def test_reasoner_wrapping_on_builtin_backend(self, mock_outlines_cls):
         """Non-custom backends get wrapped with ReasonerGrammarBackend."""
