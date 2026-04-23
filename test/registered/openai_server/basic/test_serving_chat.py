@@ -21,6 +21,7 @@ from sglang.srt.entrypoints.openai.protocol import (
 )
 from sglang.srt.entrypoints.openai.serving_chat import OpenAIServingChat
 from sglang.srt.infini.tool_call_processing import StreamToolCallCollector
+from sglang.srt.infini.tool_call_validation import ToolCallValidationError
 from sglang.srt.managers.io_struct import GenerateReqInput
 from sglang.srt.utils import get_or_create_event_loop
 from sglang.test.ci.ci_register import register_amd_ci, register_cuda_ci
@@ -814,6 +815,99 @@ class ServingChatTestCase(unittest.TestCase):
             )
         self.assertIn("Tool call validation failed for 'get_weather'", str(context.exception))
 
+    def test_nonstream_tool_schema_violation_sets_unexpected_state_finish(self):
+        """Invalid tool args against schema: HTTP 200, finish_reason ``unexpected_state`` (not ``stop``) when engine stopped normally."""
+        self.chat.tool_call_parser = "kimi_k2"
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_weather",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"days": {"type": "integer"}},
+                        "required": ["days"],
+                    },
+                },
+            }
+        ]
+        req = ChatCompletionRequest(
+            model="x",
+            messages=[{"role": "user", "content": "Hi?"}],
+            tools=tools,
+            tool_choice="required",
+            stream=False,
+        )
+        ret = [
+            {
+                "text": '[{"name":"get_weather","parameters":{"days":"two"}}]',
+                "meta_info": {
+                    "id": "chatcmpl-test",
+                    "finish_reason": {"type": "stop", "matched": None},
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "cached_tokens": 0,
+                    "weight_version": 1,
+                    "output_token_logprobs": [],
+                    "output_top_logprobs": [],
+                },
+            }
+        ]
+        response = self.chat._build_chat_response(
+            request=req,
+            require_reasoning=False,
+            ret=ret,
+            created=0,
+        )
+        self.assertEqual(response.choices[0].finish_reason, "unexpected_state")
+        self.assertIsNone(response.choices[0].message.content)
+        self.assertIsNone(response.choices[0].message.tool_calls)
+
+    def test_nonstream_tool_invalid_json_sets_unexpected_state_finish(self):
+        """``ValueError`` from ``_process_tool_calls`` (e.g. not JSON) also maps to
+        ``unexpected_state``, not a failed HTTP request.
+        """
+        self.chat.tool_call_parser = "kimi_k2"
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_weather",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+        ]
+        req = ChatCompletionRequest(
+            model="x",
+            messages=[{"role": "user", "content": "Hi?"}],
+            tools=tools,
+            tool_choice="required",
+            stream=False,
+        )
+        ret = [
+            {
+                "text": "this is not valid json for required tool output",
+                "meta_info": {
+                    "id": "chatcmpl-test",
+                    "finish_reason": {"type": "stop", "matched": None},
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "cached_tokens": 0,
+                    "weight_version": 1,
+                    "output_token_logprobs": [],
+                    "output_top_logprobs": [],
+                },
+            }
+        ]
+        response = self.chat._build_chat_response(
+            request=req,
+            require_reasoning=False,
+            ret=ret,
+            created=0,
+        )
+        self.assertEqual(response.choices[0].finish_reason, "unexpected_state")
+        self.assertIsNone(response.choices[0].message.content)
+
     def test_nonstream_validation_runs_without_tools(self):
         self.chat.tool_call_parser = "kimi_k2"
         with self.assertRaises(ValueError) as context:
@@ -869,14 +963,166 @@ class ServingChatTestCase(unittest.TestCase):
                 async for _ in gen:
                     pass
 
-            with self.assertRaises(ValueError) as context:
+            with self.assertRaises((ValueError, ToolCallValidationError)) as context:
                 get_or_create_event_loop().run_until_complete(consume())
             self.assertIn(
                 "Tool call validation failed for 'get_weather'",
                 str(context.exception),
             )
 
-    def test_nonstream_fc_special_token_marks_unexpected_state(self):
+    def test_stream_tool_validation_failed_emits_unexpected_state_not_error_sse(
+        self,
+    ):
+        """On-stream schema validation must not turn into a top-level error SSE; use finish_reason only."""
+
+        self.chat.tool_call_parser = "kimi_k2"
+        req = ChatCompletionRequest(
+            model="x",
+            messages=[{"role": "user", "content": "Hi?"}],
+            tools=[
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "get_weather",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"days": {"type": "integer"}},
+                        },
+                    },
+                }
+            ],
+            stream=True,
+        )
+
+        async def _one_chunk_with_finish():
+            yield {
+                "text": "x",
+                "meta_info": {
+                    "id": "chatcmpl-test",
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "cached_tokens": 0,
+                    "finish_reason": {"type": "stop", "matched": None},
+                    "output_token_logprobs": None,
+                    "output_top_logprobs": None,
+                },
+                "index": 0,
+            }
+
+        self.tm.generate_request.return_value = _one_chunk_with_finish()
+        adapted_request = GenerateReqInput(
+            text="prompt",
+            sampling_params={},
+            rid="r1",
+            stream=True,
+        )
+        with patch.object(
+            StreamToolCallCollector,
+            "finalize_choice",
+            side_effect=ToolCallValidationError(
+                "Tool call validation failed for 'get_weather': test"
+            ),
+        ):
+
+            async def run():
+                chunks = []
+                async for chunk in self.chat._generate_chat_stream(
+                    adapted_request, req, self.fastapi_request
+                ):
+                    chunks.append(chunk)
+                return chunks
+
+            chunks = get_or_create_event_loop().run_until_complete(run())
+
+        for c in chunks:
+            if c.startswith("data: ") and '"error"' in c and "[DONE]" not in c:
+                if '"object": "error"' in c or '"error":' in c:
+                    self.fail("unexpected streaming error payload: " + c[:200])
+        fr = None
+        for c in chunks:
+            if not c.startswith("data: {") or c.strip() == "data: [DONE]":
+                continue
+            payload = json.loads(c[len("data: ") :])
+            ch0 = (payload.get("choices") or [{}])[0]
+            if ch0.get("finish_reason") is not None:
+                fr = ch0["finish_reason"]
+        self.assertEqual(fr, "unexpected_state")
+        self.assertEqual(chunks[-1], "data: [DONE]\n\n")
+
+    def test_stream_tool_validation_failed_preserves_length_finish(self):
+        """Truncation (length) with incomplete tool JSON must report length, not unexpected_state."""
+        self.chat.tool_call_parser = "kimi_k2"
+        req = ChatCompletionRequest(
+            model="x",
+            messages=[{"role": "user", "content": "Hi?"}],
+            tools=[
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "get_weather",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"days": {"type": "integer"}},
+                        },
+                    },
+                }
+            ],
+            stream=True,
+        )
+
+        async def _one_chunk_length():
+            yield {
+                "text": "x",
+                "meta_info": {
+                    "id": "chatcmpl-test",
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "cached_tokens": 0,
+                    "finish_reason": {"type": "length", "matched": None},
+                    "output_token_logprobs": None,
+                    "output_top_logprobs": None,
+                },
+                "index": 0,
+            }
+
+        self.tm.generate_request.return_value = _one_chunk_length()
+        adapted_request = GenerateReqInput(
+            text="prompt",
+            sampling_params={},
+            rid="r1",
+            stream=True,
+        )
+        with patch.object(
+            StreamToolCallCollector,
+            "finalize_choice",
+            side_effect=ToolCallValidationError(
+                "Tool call validation failed for 'get_weather': test"
+            ),
+        ):
+
+            async def run():
+                chunks = []
+                async for chunk in self.chat._generate_chat_stream(
+                    adapted_request, req, self.fastapi_request
+                ):
+                    chunks.append(chunk)
+                return chunks
+
+            chunks = get_or_create_event_loop().run_until_complete(run())
+
+        fr = None
+        for c in chunks:
+            if not c.startswith("data: {") or c.strip() == "data: [DONE]":
+                continue
+            payload = json.loads(c[len("data: ") :])
+            ch0 = (payload.get("choices") or [{}])[0]
+            if ch0.get("finish_reason") is not None:
+                fr = ch0["finish_reason"]
+        self.assertEqual(fr, "length")
+        self.assertEqual(chunks[-1], "data: [DONE]\n\n")
+
+    def test_nonstream_kimi_strips_fc_special_substrings(self):
+        self.chat.tool_call_parser = "kimi_k2"
         req = ChatCompletionRequest(
             model="x",
             messages=[{"role": "user", "content": "Hi?"}],
@@ -903,11 +1149,13 @@ class ServingChatTestCase(unittest.TestCase):
             ret=ret,
             created=0,
         )
-        self.assertEqual(response.choices[0].finish_reason, "unexpected_state")
-        self.assertIsNone(response.choices[0].message.content)
-        self.assertIsNone(response.choices[0].message.tool_calls)
+        self.assertEqual(response.choices[0].finish_reason, "stop")
+        c = response.choices[0].message.content
+        self.assertIsNotNone(c)
+        self.assertNotIn("redacted_tool_calls_section_begin", c)
 
-    def test_stream_fc_special_token_marks_unexpected_state(self):
+    def test_stream_kimi_strips_fc_special_substrings_in_content_delta(self):
+        self.chat.tool_call_parser = "kimi_k2"
         async def _mock_generate_fc_token():
             yield {
                 "text": "safe-prefix <|tool_calls_section_begin|> leaked",
@@ -948,15 +1196,139 @@ class ServingChatTestCase(unittest.TestCase):
 
         chunks = get_or_create_event_loop().run_until_complete(collect_chunks())
         finish_reason = None
+        saw_bad = False
         for chunk in chunks:
             if not chunk.startswith("data: {"):
                 continue
             payload = json.loads(chunk[len("data: ") :])
             if payload.get("choices"):
-                fr = payload["choices"][0].get("finish_reason")
+                c0 = payload["choices"][0]
+                fr = c0.get("finish_reason")
                 if fr is not None:
                     finish_reason = fr
-        self.assertEqual(finish_reason, "unexpected_state")
+                d = c0.get("delta") or {}
+                t = d.get("content")
+                if t and "redacted_tool_calls_section_begin" in t:
+                    saw_bad = True
+        self.assertEqual(finish_reason, "stop")
+        self.assertFalse(saw_bad)
+
+    def test_nonstream_fc_special_token_preserves_length_finish_reason(self):
+        """``length`` finish_reason is kept; Kimi FC literals are stripped from text."""
+        self.chat.tool_call_parser = "kimi_k2"
+        req = ChatCompletionRequest(
+            model="x",
+            messages=[{"role": "user", "content": "Hi?"}],
+            stream=False,
+        )
+        ret = [
+            {
+                "text": "hello <|tool_calls_section_begin|> leaked token",
+                "meta_info": {
+                    "id": "chatcmpl-test",
+                    "finish_reason": {"type": "length", "matched": None},
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "cached_tokens": 0,
+                    "weight_version": 1,
+                    "output_token_logprobs": [],
+                    "output_top_logprobs": [],
+                },
+            }
+        ]
+        response = self.chat._build_chat_response(
+            request=req,
+            require_reasoning=False,
+            ret=ret,
+            created=0,
+        )
+        self.assertEqual(response.choices[0].finish_reason, "length")
+        c = response.choices[0].message.content
+        self.assertIsNotNone(c)
+        self.assertNotIn("redacted_tool_calls_section_begin", c)
+
+    def test_stream_fc_special_token_preserves_length_finish_reason(self):
+        """Stream still reports ``length`` when the engine used it; FC literals stripped."""
+        self.chat.tool_call_parser = "kimi_k2"
+        async def _mock_generate_fc_len():
+            yield {
+                "text": "a",
+                "meta_info": {
+                    "id": "chatcmpl-test",
+                    "prompt_tokens": 10,
+                    "completion_tokens": 1,
+                    "cached_tokens": 0,
+                    "finish_reason": None,
+                    "output_token_logprobs": None,
+                    "output_top_logprobs": None,
+                },
+                "index": 0,
+            }
+            yield {
+                "text": "a" + " <|tool_calls_section_begin|>",
+                "meta_info": {
+                    "id": "chatcmpl-test",
+                    "prompt_tokens": 10,
+                    "completion_tokens": 2,
+                    "cached_tokens": 0,
+                    "finish_reason": {"type": "length", "matched": None},
+                    "output_token_logprobs": None,
+                    "output_top_logprobs": None,
+                },
+                "index": 0,
+            }
+
+        self.tm.generate_request.return_value = _mock_generate_fc_len()
+        req = ChatCompletionRequest(
+            model="x",
+            messages=[{"role": "user", "content": "Hi?"}],
+            temperature=0.7,
+            max_tokens=100,
+            stream=True,
+        )
+        adapted_request = GenerateReqInput(
+            text="prompt",
+            sampling_params={},
+            rid="r1",
+            stream=True,
+        )
+
+        async def collect_chunks():
+            chunks = []
+            async for chunk in self.chat._generate_chat_stream(
+                adapted_request, req, self.fastapi_request
+            ):
+                chunks.append(chunk)
+            return chunks
+
+        chunks = get_or_create_event_loop().run_until_complete(collect_chunks())
+        fr = None
+        saw_leak = False
+        for chunk in chunks:
+            if not chunk.startswith("data: {"):
+                continue
+            payload = json.loads(chunk[len("data: ") :])
+            if payload.get("choices"):
+                c0 = payload["choices"][0]
+                if c0.get("finish_reason") is not None:
+                    fr = c0["finish_reason"]
+                d = c0.get("delta") or {}
+                if d.get("content") and "redacted_tool_calls_section_begin" in d["content"]:
+                    saw_leak = True
+        self.assertEqual(fr, "length")
+        self.assertFalse(saw_leak)
+
+    def test_strip_kimi_fc_special_substrings(self):
+        from sglang.srt.infini.fc_token_guard import (
+            FC_SPECIAL_TOKENS,
+            strip_kimi_fc_special_substrings,
+        )
+
+        s = f"a<|tool_calls_section_begin|>b"
+        out = strip_kimi_fc_special_substrings(s)
+        self.assertEqual(out, "ab")
+        for tok in FC_SPECIAL_TOKENS:
+            self.assertNotIn(tok, out)
 
     # ------------- X-Data-Parallel-Rank header tests -------------
     def test_extract_routed_dp_rank_from_header_no_header(self):

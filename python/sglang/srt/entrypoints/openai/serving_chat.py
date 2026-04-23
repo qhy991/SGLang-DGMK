@@ -53,10 +53,11 @@ from sglang.srt.infini.tool_call_processing import (
     validate_required_tool_call_payload,
 )
 from sglang.srt.infini.fc_token_guard import (
-    choice_has_fc_special_tokens,
-    contains_fc_special_tokens,
-    stream_sse_chunk_has_fc_special_tokens,
+    prefer_engine_finish_on_fc_leak,
+    strip_kimi_fc_special_substrings,
 )
+from sglang.srt.infini.tool_call_validation import ToolCallValidationError
+from sglang.srt.infini.kimi_fc_openai_serving import is_kimi_k2_openai_serving
 from sglang.srt.function_call.utils import get_json_schema_constraint
 from sglang.srt.managers.io_struct import GenerateReqInput
 from sglang.srt.parser.conversation import generate_chat_conv
@@ -68,6 +69,40 @@ if TYPE_CHECKING:
     from sglang.srt.managers.tokenizer_manager import TokenizerManager
 
 logger = logging.getLogger(__name__)
+
+
+def _sse_tool_stream_line(
+    index: int,
+    chatcmpl_id: str,
+    model: str,
+    meta_info: Dict[str, Any],
+    continuous_usage_stats: bool,
+    *,
+    content: Optional[str] = None,
+    tool_calls: Optional[List[ToolCall]] = None,
+) -> str:
+    if content is not None:
+        delta = DeltaMessage(content=content)
+    else:
+        delta = DeltaMessage(tool_calls=tool_calls or [])
+    choice_data = ChatCompletionResponseStreamChoice(
+        index=index,
+        delta=delta,
+        finish_reason=None,
+    )
+    chunk = ChatCompletionStreamResponse(
+        id=chatcmpl_id,
+        created=int(time.time()),
+        choices=[choice_data],
+        model=model,
+    )
+    if continuous_usage_stats:
+        chunk.usage = UsageProcessor.calculate_token_usage(
+            prompt_tokens=meta_info.get("prompt_tokens", 0),
+            completion_tokens=meta_info.get("completion_tokens", 0),
+            reasoning_tokens=meta_info.get("reasoning_tokens", 0),
+        )
+    return f"data: {chunk.model_dump_json()}\n\n"
 
 
 def _extract_max_dynamic_patch(request: ChatCompletionRequest):
@@ -688,7 +723,7 @@ class OpenAIServingChat(OpenAIServingBase):
         n_prev_tokens = {}
         has_tool_calls = {}
         finish_reasons = {}
-        blocked_indexes = set()
+        is_kimi = is_kimi_k2_openai_serving(self.tool_call_parser)
 
         # Usage tracking
         prompt_tokens = {}
@@ -709,9 +744,6 @@ class OpenAIServingChat(OpenAIServingBase):
                 adapted_request, raw_request
             ):
                 index = content.get("index", 0)
-                if index in blocked_indexes:
-                    continue
-
                 prompt_tokens[index] = content["meta_info"].get("prompt_tokens", 0)
                 completion_tokens[index] = content["meta_info"].get(
                     "completion_tokens", 0
@@ -790,88 +822,116 @@ class OpenAIServingChat(OpenAIServingBase):
                         adapted_request.require_reasoning,
                     )
                     if reasoning_text:
-                        if contains_fc_special_tokens(reasoning_text):
-                            finish_reasons[index] = {
-                                "type": "unexpected_state",
-                                "matched": None,
-                            }
-                            blocked_indexes.add(index)
-                            continue
-                        choice_data = ChatCompletionResponseStreamChoice(
-                            index=index,
-                            delta=DeltaMessage(reasoning_content=reasoning_text),
-                            finish_reason=None,
+                        r_to_emit = (
+                            strip_kimi_fc_special_substrings(reasoning_text)
+                            if is_kimi
+                            else reasoning_text
                         )
-                        chunk = ChatCompletionStreamResponse(
-                            id=content["meta_info"]["id"],
-                            created=int(time.time()),
-                            choices=[choice_data],
-                            model=request.model,
-                        )
-
-                        # Add usage stats if continuous_usage_stats is enabled
-                        if continuous_usage_stats:
-                            chunk.usage = UsageProcessor.calculate_token_usage(
-                                prompt_tokens=prompt_tokens.get(index, 0),
-                                reasoning_tokens=reasoning_tokens.get(index, 0),
-                                completion_tokens=completion_tokens.get(index, 0),
+                        if r_to_emit:
+                            choice_data = ChatCompletionResponseStreamChoice(
+                                index=index,
+                                delta=DeltaMessage(reasoning_content=r_to_emit),
+                                finish_reason=None,
+                            )
+                            chunk = ChatCompletionStreamResponse(
+                                id=content["meta_info"]["id"],
+                                created=int(time.time()),
+                                choices=[choice_data],
+                                model=request.model,
                             )
 
-                        yield f"data: {chunk.model_dump_json()}\n\n"
+                            # Add usage stats if continuous_usage_stats is enabled
+                            if continuous_usage_stats:
+                                chunk.usage = UsageProcessor.calculate_token_usage(
+                                    prompt_tokens=prompt_tokens.get(index, 0),
+                                    reasoning_tokens=reasoning_tokens.get(index, 0),
+                                    completion_tokens=completion_tokens.get(index, 0),
+                                )
+
+                            yield f"data: {chunk.model_dump_json()}\n\n"
 
                 # Handle tool calls
                 if (
                     request.tool_choice != "none"
                     and self.tool_call_parser
                 ):
-                    async for chunk in self._process_tool_call_stream(
-                        index,
-                        delta,
-                        parser_dict,
-                        content,
-                        request,
-                        has_tool_calls,
-                        stream_tool_call_collector,
-                        continuous_usage_stats,
-                    ):
-                        if chunk:
-                            if stream_sse_chunk_has_fc_special_tokens(chunk):
-                                finish_reasons[index] = {
-                                    "type": "unexpected_state",
-                                    "matched": None,
-                                }
-                                blocked_indexes.add(index)
-                                break
-                            yield chunk
-
-                    # Send any remaining tool call arguments when generation finishes
-                    if finish_reason_type is not None and index in parser_dict:
-                        parser = parser_dict[index]
-                        remaining_chunk = self._check_for_unstreamed_tool_args(
-                            parser,
+                    try:
+                        async for chunk in self._process_tool_call_stream(
+                            index,
+                            delta,
+                            parser_dict,
                             content,
                             request,
-                            index,
+                            has_tool_calls,
                             stream_tool_call_collector,
-                        )
-                        if remaining_chunk:
-                            yield remaining_chunk
-                        if stream_tool_call_collector:
-                            stream_tool_call_collector.finalize_choice(index)
-
-                else:
-                    # Regular content
-                    if delta:
-                        if contains_fc_special_tokens(delta):
-                            finish_reasons[index] = {
+                            continuous_usage_stats,
+                            is_kimi=is_kimi,
+                        ):
+                            if chunk:
+                                yield chunk
+                    except ToolCallValidationError:
+                        finish_reasons[index] = prefer_engine_finish_on_fc_leak(
+                            finish_reason,
+                            default_unexpected={
                                 "type": "unexpected_state",
                                 "matched": None,
-                            }
-                            blocked_indexes.add(index)
-                            continue
+                            },
+                        )
+                        has_tool_calls[index] = False
+                    else:
+                        # Send any remaining tool call args when generation finishes
+                        if (
+                            finish_reason_type is not None
+                            and index in parser_dict
+                        ):
+                            parser = parser_dict[index]
+                            try:
+                                remaining_chunk = self._check_for_unstreamed_tool_args(
+                                    parser,
+                                    content,
+                                    request,
+                                    index,
+                                    stream_tool_call_collector,
+                                )
+                            except ToolCallValidationError:
+                                finish_reasons[index] = prefer_engine_finish_on_fc_leak(
+                                    finish_reason,
+                                    default_unexpected={
+                                        "type": "unexpected_state",
+                                        "matched": None,
+                                    },
+                                )
+                                has_tool_calls[index] = False
+                            else:
+                                if remaining_chunk:
+                                    yield remaining_chunk
+                                if stream_tool_call_collector:
+                                    try:
+                                        stream_tool_call_collector.finalize_choice(
+                                            index
+                                        )
+                                    except ToolCallValidationError:
+                                        finish_reasons[index] = (
+                                            prefer_engine_finish_on_fc_leak(
+                                                finish_reason,
+                                                default_unexpected={
+                                                    "type": "unexpected_state",
+                                                    "matched": None,
+                                                },
+                                            )
+                                        )
+                                        has_tool_calls[index] = False
+
+                else:
+                    to_emit: Optional[str] = (
+                        strip_kimi_fc_special_substrings(delta)
+                        if is_kimi
+                        else delta
+                    )
+                    if to_emit:
                         choice_data = ChatCompletionResponseStreamChoice(
                             index=index,
-                            delta=DeltaMessage(content=delta),
+                            delta=DeltaMessage(content=to_emit),
                             finish_reason=None,
                             matched_stop=None,
                             logprobs=choice_logprobs,
@@ -986,8 +1046,14 @@ class OpenAIServingChat(OpenAIServingBase):
         except ValueError as e:
             if not stream_started:
                 raise
-            error = self.create_streaming_error_response(str(e))
-            yield f"data: {error}\n\n"
+            if isinstance(e, ToolCallValidationError):
+                logger.warning(
+                    "Tool call validation should be handled in the tool path: %s",
+                    e,
+                )
+            else:
+                error = self.create_streaming_error_response(str(e))
+                yield f"data: {error}\n\n"
 
         yield "data: [DONE]\n\n"
 
@@ -1049,7 +1115,9 @@ class OpenAIServingChat(OpenAIServingBase):
             # Handle hidden states
             hidden_states = process_hidden_states_from_ret(ret_item, request)
 
-            finish_reason = ret_item["meta_info"]["finish_reason"]
+            is_kimi = is_kimi_k2_openai_serving(self.tool_call_parser)
+            fr_raw = ret_item["meta_info"]["finish_reason"]
+            finish_reason = copy.copy(fr_raw)
             text = ret_item["text"]
 
             # Handle reasoning content
@@ -1079,19 +1147,51 @@ class OpenAIServingChat(OpenAIServingBase):
                 and self.tool_call_parser
             ):
                 history_tool_calls_cnt = self._get_history_tool_calls_cnt(request)
-                tool_calls, text, finish_reason = self._process_tool_calls(
-                    text,
-                    request.tools or [],
-                    finish_reason,
-                    request.tool_choice,
-                    history_tool_calls_cnt,
-                )
+                try:
+                    tool_calls, text, finish_reason = self._process_tool_calls(
+                        text,
+                        request.tools or [],
+                        finish_reason,
+                        request.tool_choice,
+                        history_tool_calls_cnt,
+                    )
+                except (ToolCallValidationError, ValueError):
+                    # ``ToolCallValidationError``: jsonschema validation. ``ValueError``:
+                    # invalid JSON, parse, or other tool output rejected in
+                    # ``_process_tool_calls``. Do not fail the request; return a normal
+                    # completion and map engine ``stop`` to ``unexpected_state`` (see
+                    # ``prefer_engine_finish_on_fc_leak``).
+                    tool_calls = None
+                    text = None
+                    reasoning_text = None
+                    finish_reason = prefer_engine_finish_on_fc_leak(
+                        fr_raw,
+                        default_unexpected={
+                            "type": "unexpected_state",
+                            "matched": None,
+                        },
+                    )
 
-            if choice_has_fc_special_tokens(text, reasoning_text, tool_calls):
-                finish_reason = {"type": "unexpected_state", "matched": None}
-                text = None
-                reasoning_text = None
-                tool_calls = None
+            if is_kimi:
+                text = strip_kimi_fc_special_substrings(text)
+                if reasoning_text is not None:
+                    reasoning_text = strip_kimi_fc_special_substrings(reasoning_text)
+                if tool_calls is not None:
+                    stripped_tcs = []
+                    for tc in tool_calls:
+                        args = tc.function.arguments
+                        if isinstance(args, str):
+                            args = strip_kimi_fc_special_substrings(args)
+                        stripped_tcs.append(
+                            tc.model_copy(
+                                update={
+                                    "function": tc.function.model_copy(
+                                        update={"arguments": args}
+                                    )
+                                }
+                            )
+                        )
+                    tool_calls = stripped_tcs
 
             choice_data = ChatCompletionResponseChoice(
                 index=idx,
@@ -1249,6 +1349,8 @@ class OpenAIServingChat(OpenAIServingBase):
                     )
                 return ToolCallProcessingResult(tool_calls, "", finish_reason)
             except Exception as e:
+                if isinstance(e, ToolCallValidationError):
+                    raise
                 logger.debug(f"Rejecting generated tool call payload: {e}")
                 raise ValueError(str(e)) from e
 
@@ -1278,6 +1380,8 @@ class OpenAIServingChat(OpenAIServingBase):
                     )
                 return ToolCallProcessingResult(tool_calls, text, finish_reason)
             except Exception as e:
+                if isinstance(e, ToolCallValidationError):
+                    raise
                 logger.error(f"Tool call parsing error: {e}")
                 raise ValueError(str(e)) from e
 
@@ -1412,6 +1516,8 @@ class OpenAIServingChat(OpenAIServingBase):
         has_tool_calls: Dict[int, bool],
         stream_tool_call_collector: Optional[StreamToolCallCollector],
         continuous_usage_stats: bool = False,
+        *,
+        is_kimi: bool = False,
     ):
         """Process tool calls in streaming response"""
         if index not in parser_dict:
@@ -1435,86 +1541,58 @@ class OpenAIServingChat(OpenAIServingBase):
         else:
             normal_text, calls = parser.parse_stream_chunk(delta)
 
-        # Yield normal text
         if normal_text:
-            choice_data = ChatCompletionResponseStreamChoice(
-                index=index,
-                delta=DeltaMessage(content=normal_text),
-                finish_reason=None,
+            out_text = (
+                strip_kimi_fc_special_substrings(normal_text)
+                if is_kimi
+                else normal_text
             )
-            chunk = ChatCompletionStreamResponse(
-                id=content["meta_info"]["id"],
-                created=int(time.time()),
-                choices=[choice_data],
-                model=request.model,
-            )
-
-            # Add usage stats if continuous_usage_stats is enabled
-            if continuous_usage_stats:
-                prompt_tokens = content["meta_info"].get("prompt_tokens", 0)
-                completion_tokens = content["meta_info"].get("completion_tokens", 0)
-                reasoning_tokens = content["meta_info"].get("reasoning_tokens", 0)
-                chunk.usage = UsageProcessor.calculate_token_usage(
-                    prompt_tokens=prompt_tokens,
-                    completion_tokens=completion_tokens,
-                    reasoning_tokens=reasoning_tokens,
+            if out_text:
+                yield _sse_tool_stream_line(
+                    index,
+                    content["meta_info"]["id"],
+                    request.model,
+                    content["meta_info"],
+                    continuous_usage_stats,
+                    content=out_text,
                 )
 
-            yield f"data: {chunk.model_dump_json()}\n\n"
-
-        # Yield tool calls
         history_tool_calls_cnt = self._get_history_tool_calls_cnt(request)
+        mid = content["meta_info"]["id"]
         for call_item in calls:
-            # Mark that this choice has tool calls
             has_tool_calls[index] = True
-            if stream_tool_call_collector:
-                stream_tool_call_collector.ingest_call_item(index, call_item)
 
-            # Tool call ID should be generated only once per tool call
             if call_item.name:
-                # First chunk: include ID and function name
                 tool_call_id = self._process_tool_call_id(
                     call_item, history_tool_calls_cnt
                 )
                 function_name = call_item.name
             else:
-                # Subsequent chunks: null ID and name for argument deltas
                 tool_call_id = None
                 function_name = None
+
+            args_for_sse: Optional[str] = call_item.parameters
+            if is_kimi and call_item.parameters:
+                args_for_sse = strip_kimi_fc_special_substrings(call_item.parameters)
 
             tool_call = ToolCall(
                 id=tool_call_id,
                 index=call_item.tool_index,
                 function=FunctionResponse(
                     name=function_name,
-                    arguments=call_item.parameters,
+                    arguments=args_for_sse,
                 ),
             )
-
-            choice_data = ChatCompletionResponseStreamChoice(
-                index=index,
-                delta=DeltaMessage(tool_calls=[tool_call]),
-                finish_reason=None,
+            yield _sse_tool_stream_line(
+                index,
+                mid,
+                request.model,
+                content["meta_info"],
+                continuous_usage_stats,
+                tool_calls=[tool_call],
             )
-            chunk = ChatCompletionStreamResponse(
-                id=content["meta_info"]["id"],
-                created=int(time.time()),
-                choices=[choice_data],
-                model=request.model,
-            )
-
-            # Add usage stats if continuous_usage_stats is enabled
-            if continuous_usage_stats:
-                prompt_tokens = content["meta_info"].get("prompt_tokens", 0)
-                completion_tokens = content["meta_info"].get("completion_tokens", 0)
-                reasoning_tokens = content["meta_info"].get("reasoning_tokens", 0)
-                chunk.usage = UsageProcessor.calculate_token_usage(
-                    prompt_tokens=prompt_tokens,
-                    completion_tokens=completion_tokens,
-                    reasoning_tokens=reasoning_tokens,
-                )
-
-            yield f"data: {chunk.model_dump_json()}\n\n"
+            if stream_tool_call_collector:
+                stream_tool_call_collector.ingest_call_item(index, call_item)
 
     def _check_for_unstreamed_tool_args(
         self,
@@ -1563,19 +1641,17 @@ class OpenAIServingChat(OpenAIServingBase):
         )
 
         if remaining_call:
-            if stream_tool_call_collector:
-                stream_tool_call_collector.ingest_remaining_args(
-                    choice_index=index,
-                    tool_index=tool_index,
-                    arguments_fragment=remaining_call,
-                )
-            # Create tool call chunk with remaining arguments
+            emit_args = remaining_call
+            if is_kimi_k2_openai_serving(self.tool_call_parser):
+                emit_args = strip_kimi_fc_special_substrings(remaining_call) or ""
+            # Create tool call chunk with remaining arguments (emit before validation ingest
+            # so a failing collector never swallows the last tool delta)
             tool_call = ToolCall(
                 id=None,  # No ID for argument deltas
                 index=tool_index,
                 function=FunctionResponse(
                     name=None,  # No name for argument deltas
-                    arguments=remaining_call,
+                    arguments=emit_args,
                 ),
             )
 
@@ -1592,6 +1668,17 @@ class OpenAIServingChat(OpenAIServingBase):
                 model=request.model,
             )
 
-            return f"data: {chunk.model_dump_json()}\n\n"
+            out = f"data: {chunk.model_dump_json()}\n\n"
+            if stream_tool_call_collector:
+                try:
+                    stream_tool_call_collector.ingest_remaining_args(
+                        choice_index=index,
+                        tool_index=tool_index,
+                        arguments_fragment=remaining_call,
+                    )
+                except ToolCallValidationError:
+                    # Chunk is still valid to stream; finalize_choice will re-validate.
+                    pass
+            return out
 
         return None

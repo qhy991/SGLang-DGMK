@@ -6,6 +6,11 @@ from jsonschema import Draft202012Validator, ValidationError
 
 from sglang.srt.entrypoints.openai.protocol import Tool
 
+
+class ToolCallValidationError(ValueError):
+    """Schema or JSON validation failed for a model-emitted tool call (Kimi, etc.)."""
+
+
 _PERMISSIVE_OBJECT_SCHEMA: Dict[str, Any] = {
     "type": "object",
     "properties": {},
@@ -38,11 +43,13 @@ def validate_tool_call(
     validators = schema_index or build_tool_schema_index(tools or [])
     validator = validators.get(name)
     if validator is None:
-        raise ValueError(f"Tool call validation failed for '{name}': unknown tool name")
+        raise ToolCallValidationError(
+            f"Tool call validation failed for '{name}': unknown tool name"
+        )
     try:
         validator.validate(parameters_obj)
     except ValidationError as exc:
-        raise ValueError(
+        raise ToolCallValidationError(
             f"Tool call validation failed for '{name}': {_format_validation_error(exc)}"
         ) from exc
 

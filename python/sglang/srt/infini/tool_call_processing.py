@@ -10,6 +10,7 @@ from sglang.srt.entrypoints.openai.protocol import Tool
 from sglang.srt.function_call.core_types import ToolCallItem
 from sglang.srt.function_call.utils import _is_complete_json
 from sglang.srt.infini.tool_call_validation import (
+    ToolCallValidationError,
     build_tool_schema_index,
     validate_tool_call,
 )
@@ -36,13 +37,13 @@ def validate_parsed_tool_call_items(
 ) -> None:
     for call_info in call_info_list:
         if not call_info.name:
-            raise ValueError(
+            raise ToolCallValidationError(
                 "Tool call validation failed for '<unknown>': missing function name"
             )
         try:
             parameters_obj = orjson.loads(call_info.parameters)
         except orjson.JSONDecodeError as exc:
-            raise ValueError(
+            raise ToolCallValidationError(
                 f"Tool call validation failed for '{call_info.name}': arguments are not valid JSON"
             ) from exc
         validate_tool_call(
@@ -102,11 +103,11 @@ class StreamToolCallCollector:
             if call_state.validated:
                 continue
             if not call_state.name:
-                raise ValueError(
+                raise ToolCallValidationError(
                     "Tool call validation failed for '<unknown>': missing function name"
                 )
             if not _is_complete_json(call_state.arguments):
-                raise ValueError(
+                raise ToolCallValidationError(
                     f"Tool call validation failed for '{call_state.name}': arguments are not valid JSON"
                 )
             self._validate_call(call_state)
@@ -124,7 +125,7 @@ class StreamToolCallCollector:
         try:
             parameters_obj = orjson.loads(call_state.arguments)
         except orjson.JSONDecodeError as exc:
-            raise ValueError(
+            raise ToolCallValidationError(
                 f"Tool call validation failed for '{call_state.name}': arguments are not valid JSON"
             ) from exc
         validate_tool_call(
