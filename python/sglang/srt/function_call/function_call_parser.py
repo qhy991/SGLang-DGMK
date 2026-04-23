@@ -183,6 +183,14 @@ class FunctionCallParser:
             triggers=list(tool_trigger_set),
         )
 
+    @staticmethod
+    def get_empty_structural_tag() -> LegacyStructuralTagResponseFormat:
+        return LegacyStructuralTagResponseFormat(
+            type="structural_tag",
+            structures=[],
+            triggers=[],
+        )
+
     def get_structure_constraint(
         self,
         tool_choice: Union[ToolChoice, Literal["auto", "required"]],

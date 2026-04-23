@@ -13,7 +13,7 @@
 # ==============================================================================
 """The baseclass of a backend for reasoner grammar-guided constrained decoding."""
 
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import torch
 
@@ -23,6 +23,37 @@ from .base_grammar_backend import (
     InvalidGrammarObject,
 )
 
+_MODEL_REASONING_BLOCKED_TOKEN_IDS = {
+    "kimi_k2": (
+        163595, # <|tool_calls_section_begin|>
+        163596, # <|tool_calls_section_end|>
+        163597, # <|tool_call_begin|>
+        163598, # <|tool_call_argument_begin|>
+        163599, # <|tool_call_end|>
+        163606, # <think>
+        163585, # EOS
+    ),
+}
+
+REASONING_BLOCKED_TOKEN_IDS = _MODEL_REASONING_BLOCKED_TOKEN_IDS.get("kimi_k2", ())
+
+class Int32Mask:
+    def __init__(self, block: int, or_mask: int):
+        self.block = block
+        self.or_mask = or_mask
+
+
+def _build_block_or_masks(token_ids: Tuple[int, ...]) -> Tuple[Int32Mask]:
+    """Pack token ids into per-int32 block OR masks."""
+    block_or_masks: List[Int32Mask] = []
+    for token_id in token_ids:
+        block, bit = divmod(token_id, 32)
+        block_or_masks.append(Int32Mask(block, 1 << bit))
+    return tuple(block_or_masks)
+
+
+REASONING_BLOCKED_BLOCK_OR_MASKS = _build_block_or_masks(REASONING_BLOCKED_TOKEN_IDS)
+print(f"REASONING_BLOCKED_BLOCK_OR_MASKS={REASONING_BLOCKED_BLOCK_OR_MASKS}")
 
 class ReasonerGrammarObject(BaseGrammarObject):
     def __init__(self, grammar: BaseGrammarObject, think_end_id: int):
@@ -70,9 +101,19 @@ class ReasonerGrammarObject(BaseGrammarObject):
     ) -> torch.Tensor:
         return self.grammar.allocate_vocab_mask(vocab_size, batch_size, device)
 
+    def block_reasoning_tokens(self, vocab_mask: torch.Tensor, idx: int) -> None:
+        row = vocab_mask[idx]
+        row_blocks = row.numel()
+        for mask in REASONING_BLOCKED_BLOCK_OR_MASKS:
+            block = mask.block
+            or_mask = mask.or_mask
+            row[block] &= ~or_mask
+
     def fill_vocab_mask(self, vocab_mask: torch.Tensor, idx: int) -> None:
         if self.tokens_after_think_end >= 0:
             self.grammar.fill_vocab_mask(vocab_mask, idx)
+        elif self.tokens_after_think_end < 0:
+            self.block_reasoning_tokens(vocab_mask, idx)
 
     def move_vocab_mask(self, vocab_mask: torch.Tensor, device) -> torch.Tensor:
         return self.grammar.move_vocab_mask(vocab_mask, device)
@@ -93,7 +134,12 @@ class ReasonerGrammarObject(BaseGrammarObject):
         self.grammar.set_cache(key, value)
 
     def copy(self) -> BaseGrammarObject:
-        return ReasonerGrammarObject(self.grammar.copy(), self.think_end_id)
+        obj = ReasonerGrammarObject(
+            self.grammar.copy(),
+            self.think_end_id
+        )
+        obj.tokens_after_think_end = self.tokens_after_think_end
+        return obj
 
     @property
     def finished(self):
@@ -118,7 +164,7 @@ class ReasonerGrammarObject(BaseGrammarObject):
 
 
 class ReasonerGrammarBackend(BaseGrammarBackend):
-    def __init__(self, grammar_backend: BaseGrammarBackend, think_end_id):
+    def __init__(self, grammar_backend: BaseGrammarBackend, think_end_id: int):
         super().__init__()
         self.grammar_backend = grammar_backend
         self.think_end_id = think_end_id

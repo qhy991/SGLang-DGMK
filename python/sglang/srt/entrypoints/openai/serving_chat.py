@@ -260,8 +260,13 @@ class OpenAIServingChat(OpenAIServingBase):
         """Convert OpenAI chat completion request to internal format"""
         is_multimodal = self.tokenizer_manager.model_config.is_multimodal
 
+        # Compute once and pass through all downstream reasoning consumers.
+        require_reasoning = self._get_reasoning_from_request(request)
+
         # Process messages and apply chat template
-        processed_messages = self._process_messages(request, is_multimodal)
+        processed_messages = self._process_messages(
+            request, is_multimodal, require_reasoning
+        )
 
         # Build sampling parameters
         sampling_params = request.to_sampling_params(
@@ -314,7 +319,7 @@ class OpenAIServingChat(OpenAIServingBase):
             return_routed_experts=request.return_routed_experts,
             rid=request.rid,
             extra_key=self._compute_extra_key(request),
-            require_reasoning=self._get_reasoning_from_request(request),
+            require_reasoning=require_reasoning,
             priority=request.priority,
             routing_key=self.extract_routing_key(raw_request),
             custom_labels=custom_labels,
@@ -327,7 +332,10 @@ class OpenAIServingChat(OpenAIServingBase):
         return adapted_request, request
 
     def _process_messages(
-        self, request: ChatCompletionRequest, is_multimodal: bool
+        self,
+        request: ChatCompletionRequest,
+        is_multimodal: bool,
+        require_reasoning: bool,
     ) -> MessageProcessingResult:
         """Process chat messages and apply chat template"""
         # GptOss model needs to keep special tokens for harmony parsing
@@ -366,12 +374,20 @@ class OpenAIServingChat(OpenAIServingBase):
                     parallel_tool_calls=request.parallel_tool_calls,
                 )
                 tool_call_constraint = ("json_schema", json_schema)
+        else:
+            # construct a structural tag constraint with empty tools;
+            tools = []
+            tool_call_constraint = ("structural_tag", FunctionCallParser.get_empty_structural_tag())
 
         # Use chat template
         if self.template_manager.chat_template_name is None:
-            result = self._apply_jinja_template(request, tools, is_multimodal)
+            result = self._apply_jinja_template(
+                request, tools, is_multimodal, require_reasoning
+            )
         else:
-            result = self._apply_conversation_template(request, is_multimodal)
+            result = self._apply_conversation_template(
+                request, is_multimodal, require_reasoning
+            )
 
         result.tool_call_constraint = tool_call_constraint
         return result
@@ -381,6 +397,7 @@ class OpenAIServingChat(OpenAIServingBase):
         request: ChatCompletionRequest,
         tools: Optional[List[Dict]],
         is_multimodal: bool,
+        require_reasoning: bool,
     ) -> MessageProcessingResult:
         """Apply Jinja chat template"""
         prompt = ""
@@ -394,11 +411,7 @@ class OpenAIServingChat(OpenAIServingBase):
         template_content_format = self.template_manager.jinja_template_content_format
 
         if self.use_dpsk_v32_encoding:
-            thinking_mode = (
-                "thinking"
-                if (request.chat_template_kwargs or {}).get("thinking")
-                else "chat"
-            )
+            thinking_mode = "thinking" if require_reasoning else "chat"
             messages = request.messages
             messages = [msg.model_dump() for msg in messages]
 
@@ -480,6 +493,9 @@ class OpenAIServingChat(OpenAIServingBase):
                 extra_template_kwargs["reasoning_effort"] = request.reasoning_effort
             if request.chat_template_kwargs:
                 extra_template_kwargs.update(request.chat_template_kwargs)
+            self._inject_reasoning_chat_template_kwarg(
+                extra_template_kwargs, require_reasoning
+            )
 
             try:
                 prompt_ids = self.tokenizer_manager.tokenizer.apply_chat_template(
@@ -540,6 +556,7 @@ class OpenAIServingChat(OpenAIServingBase):
         self,
         request: ChatCompletionRequest,
         is_multimodal: bool,
+        require_reasoning: bool,
     ) -> MessageProcessingResult:
         """Apply conversation template"""
         prompt = ""
@@ -570,9 +587,11 @@ class OpenAIServingChat(OpenAIServingBase):
                 prompt = prompt[: -len(conv.sep2)]
         else:
             prompt = conv.get_prompt()
-            if self._get_reasoning_from_request(
-                request
-            ) and self.reasoning_parser not in ["qwen3", "qwen3-thinking", "glm4"]:
+            if require_reasoning and self.reasoning_parser not in [
+                "qwen3",
+                "qwen3-thinking",
+                "glm4",
+            ]:
                 # qwen3 and glm4 think internally without a leading <think> token
                 prompt += "<think>"  # Note(Xinyuan): hard code thinking token
 
@@ -737,7 +756,12 @@ class OpenAIServingChat(OpenAIServingBase):
                 # Handle reasoning content
                 if self.reasoning_parser and request.separate_reasoning:
                     reasoning_text, delta = self._process_reasoning_stream(
-                        index, delta, reasoning_parser_dict, content, request
+                        index,
+                        delta,
+                        reasoning_parser_dict,
+                        content,
+                        request,
+                        adapted_request.require_reasoning,
                     )
                     if reasoning_text:
                         choice_data = ChatCompletionResponseStreamChoice(
@@ -933,6 +957,7 @@ class OpenAIServingChat(OpenAIServingBase):
 
         response = self._build_chat_response(
             request,
+            adapted_request.require_reasoning,
             ret,
             int(time.time()),
         )
@@ -942,6 +967,7 @@ class OpenAIServingChat(OpenAIServingBase):
     def _build_chat_response(
         self,
         request: ChatCompletionRequest,
+        require_reasoning: bool,
         ret: List[Dict[str, Any]],
         created: int,
     ) -> Union[ChatCompletionResponse, ORJSONResponse]:
@@ -977,15 +1003,11 @@ class OpenAIServingChat(OpenAIServingBase):
             reasoning_text = None
             reasoning_parser = self.reasoning_parser
             if reasoning_parser and request.separate_reasoning:
-                is_force_reasoning = (
-                    self.template_manager.force_reasoning
-                    or self._get_reasoning_from_request(request)
-                )
                 try:
                     parser = ReasoningParser(
                         model_type=reasoning_parser,
                         stream_reasoning=False,
-                        force_reasoning=is_force_reasoning,
+                        force_reasoning=require_reasoning,
                         request=request,
                     )
                     reasoning_text, text = parser.parse_non_stream(text)
@@ -1226,21 +1248,27 @@ class OpenAIServingChat(OpenAIServingBase):
         reasoning_parser_dict: Dict[int, ReasoningParser],
         content: Dict[str, Any],
         request: ChatCompletionRequest,
+        require_reasoning: bool,
     ) -> tuple[Optional[str], str]:
         """Process reasoning content in streaming response"""
         if index not in reasoning_parser_dict:
-            is_force_reasoning = (
-                self.template_manager.force_reasoning
-                or self._get_reasoning_from_request(request)
-            )
             reasoning_parser_dict[index] = ReasoningParser(
                 self.reasoning_parser,
                 request.stream_reasoning,
-                is_force_reasoning,
+                require_reasoning,
                 request,
             )
         reasoning_parser = reasoning_parser_dict[index]
         return reasoning_parser.parse_stream_chunk(delta)
+
+    def _inject_reasoning_chat_template_kwarg(
+        self, extra_template_kwargs: Dict[str, Any], require_reasoning: bool
+    ) -> None:
+        """Forward serving_chat's reasoning state into chat template kwargs."""
+        if self.reasoning_parser in ["deepseek-v3", "kimi_k2"]:
+            extra_template_kwargs.setdefault("thinking", require_reasoning)
+        elif self.reasoning_parser in ["qwen3", "glm45", "nemotron_3", "interns1", "mimo"]:
+            extra_template_kwargs.setdefault("enable_thinking", require_reasoning)
 
     def _get_history_tool_calls_cnt(self, request: ChatCompletionRequest) -> int:
         """Counts the number of tool calls in the request's message history.

@@ -16,9 +16,10 @@
 import dataclasses
 import json
 import logging
+import re
 import time
 import weakref
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 from xgrammar import (
@@ -299,23 +300,46 @@ class XGrammarGrammarBackend(BaseGrammarBackend):
             return InvalidGrammarObject(str(e))
         return self._from_context(ctx, key_string, GrammarStats(dispatch_type="regex"))
 
+
+    def dispatch_kimi_structural_tag(self, key_string: str) -> BaseGrammarObject:
+        from sglang.srt.infini.tag_v1 import get_kimi_structural_tag_with_tool_marker_excludes
+
+        structural_tag_input = json.loads(key_string)
+        if isinstance(structural_tag_input, dict) and structural_tag_input.get("structures") is not None:
+            tools: List[Dict[str, Any]] = []
+            for structure in structural_tag_input.get("structures", []):
+                begin = structure.get("begin", "")
+                schema = structure.get("schema") or {}
+                match = re.search(
+                    r"<\|tool_call_begin\|>\s*(?:functions\.)?(?P<name>[\w.\-]+):\d+\s*<\|tool_call_argument_begin\|>",
+                    begin,
+                )
+                if not match:
+                    continue
+                tools.append(
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": match.group("name"),
+                            "parameters": schema,
+                        },
+                    }
+                )
+            if tools:
+                structural_tag_input = {"tools": tools}
+
+        structural_tag = get_kimi_structural_tag_with_tool_marker_excludes(
+            structural_tag_input
+        )
+        key_string = structural_tag.model_dump_json(indent=None)
+        return self.dispatch_structural_tag(key_string)
+
     def dispatch_structural_tag(self, key_string: str) -> BaseGrammarObject:
         try:
             # TODO(dark): it's REALLY stupid to construct object from string and decode it again
             structural_tag = json.loads(key_string)
             if is_legacy_structural_tag(structural_tag):
-                self._sanitize_structural_tag_structures(structural_tag)
-                tags = [
-                    StructuralTagItem(
-                        begin=structure["begin"],
-                        schema=json.dumps(structure["schema"]),
-                        end=structure["end"],
-                    )
-                    for structure in structural_tag["structures"]
-                ]
-                ctx = self.grammar_compiler.compile_structural_tag(
-                    tags, structural_tag["triggers"]
-                )
+                return self.dispatch_kimi_structural_tag(key_string)
             else:
                 format_dict = structural_tag.get("format")
                 if isinstance(format_dict, dict):
