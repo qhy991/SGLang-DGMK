@@ -20,6 +20,7 @@ from sglang.srt.entrypoints.openai.protocol import (
     MessageProcessingResult,
 )
 from sglang.srt.entrypoints.openai.serving_chat import OpenAIServingChat
+from sglang.srt.infini.tool_call_processing import StreamToolCallCollector
 from sglang.srt.managers.io_struct import GenerateReqInput
 from sglang.srt.utils import get_or_create_event_loop
 from sglang.test.ci.ci_register import register_amd_ci, register_cuda_ci
@@ -303,6 +304,7 @@ class ServingChatTestCase(unittest.TestCase):
             content=content,
             request=request,
             index=0,
+            stream_tool_call_collector=StreamToolCallCollector(request.tools),
         )
 
         # Should return a chunk with remaining arguments
@@ -356,6 +358,7 @@ class ServingChatTestCase(unittest.TestCase):
             content=content,
             request=request,
             index=0,
+            stream_tool_call_collector=StreamToolCallCollector(request.tools),
         )
 
         # Should return None since no completion is needed
@@ -389,6 +392,7 @@ class ServingChatTestCase(unittest.TestCase):
             content=content,
             request=request,
             index=0,
+            stream_tool_call_collector=StreamToolCallCollector(request.tools),
         )
 
         # Should return None since there's no parser data
@@ -472,6 +476,7 @@ class ServingChatTestCase(unittest.TestCase):
                     content={"meta_info": {"id": "chatcmpl-test"}},
                     request=req,
                     has_tool_calls={},
+                    stream_tool_call_collector=StreamToolCallCollector(req.tools),
                 )
                 # Get first yielded SSE line
                 line = None
@@ -647,6 +652,7 @@ class ServingChatTestCase(unittest.TestCase):
                     content={"meta_info": {"id": "chatcmpl-test"}},
                     request=req,
                     has_tool_calls={},
+                    stream_tool_call_collector=StreamToolCallCollector(req.tools),
                 )
                 # Get first yielded SSE line
                 line = None
@@ -783,6 +789,174 @@ class ServingChatTestCase(unittest.TestCase):
         # Check that there is an error chunk and a DONE chunk
         self.assertEqual(len(chunks), 2)
         self.assertIn("error", chunks[0])
+
+    def test_nonstream_tool_schema_violation_raises(self):
+        self.chat.tool_call_parser = "kimi_k2"
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_weather",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"days": {"type": "integer"}},
+                        "required": ["days"],
+                    },
+                },
+            }
+        ]
+        with self.assertRaises(ValueError) as context:
+            self.chat._process_tool_calls(
+                text='[{"name":"get_weather","parameters":{"days":"two"}}]',
+                tools=tools,
+                finish_reason={"type": "stop", "matched": None},
+                tool_choice="required",
+            )
+        self.assertIn("Tool call validation failed for 'get_weather'", str(context.exception))
+
+    def test_nonstream_validation_runs_without_tools(self):
+        self.chat.tool_call_parser = "kimi_k2"
+        with self.assertRaises(ValueError) as context:
+            self.chat._process_tool_calls(
+                text='[{"name":"get_weather","parameters":{"city":"Paris"}}]',
+                tools=[],
+                finish_reason={"type": "stop", "matched": None},
+                tool_choice="required",
+            )
+        self.assertIn("unknown tool name", str(context.exception))
+
+    def test_stream_tool_schema_violation_raises(self):
+        self.chat.tool_call_parser = "kimi_k2"
+        req = ChatCompletionRequest(
+            model="x",
+            messages=[{"role": "user", "content": "Hi?"}],
+            tools=[
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "get_weather",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"days": {"type": "integer"}},
+                            "required": ["days"],
+                        },
+                    },
+                }
+            ],
+            stream=True,
+        )
+
+        with patch(
+            "sglang.srt.entrypoints.openai.serving_chat.FunctionCallParser"
+        ) as parser_mock:
+            parser_instance = parser_mock.return_value
+            call_item = Mock()
+            call_item.tool_index = 0
+            call_item.name = "get_weather"
+            call_item.parameters = '{"days":"two"}'
+            parser_instance.parse_stream_chunk.return_value = ("", [call_item])
+
+            async def consume():
+                gen = self.chat._process_tool_call_stream(
+                    index=0,
+                    delta="irrelevant",
+                    parser_dict={},
+                    content={"meta_info": {"id": "chatcmpl-test"}},
+                    request=req,
+                    has_tool_calls={},
+                    stream_tool_call_collector=StreamToolCallCollector(req.tools),
+                )
+                async for _ in gen:
+                    pass
+
+            with self.assertRaises(ValueError) as context:
+                get_or_create_event_loop().run_until_complete(consume())
+            self.assertIn(
+                "Tool call validation failed for 'get_weather'",
+                str(context.exception),
+            )
+
+    def test_nonstream_fc_special_token_marks_unexpected_state(self):
+        req = ChatCompletionRequest(
+            model="x",
+            messages=[{"role": "user", "content": "Hi?"}],
+            stream=False,
+        )
+        ret = [
+            {
+                "text": "hello <|tool_calls_section_begin|> leaked token",
+                "meta_info": {
+                    "id": "chatcmpl-test",
+                    "finish_reason": {"type": "stop", "matched": None},
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "cached_tokens": 0,
+                    "weight_version": 1,
+                    "output_token_logprobs": [],
+                    "output_top_logprobs": [],
+                },
+            }
+        ]
+        response = self.chat._build_chat_response(
+            request=req,
+            require_reasoning=False,
+            ret=ret,
+            created=0,
+        )
+        self.assertEqual(response.choices[0].finish_reason, "unexpected_state")
+        self.assertIsNone(response.choices[0].message.content)
+        self.assertIsNone(response.choices[0].message.tool_calls)
+
+    def test_stream_fc_special_token_marks_unexpected_state(self):
+        async def _mock_generate_fc_token():
+            yield {
+                "text": "safe-prefix <|tool_calls_section_begin|> leaked",
+                "meta_info": {
+                    "id": "chatcmpl-test",
+                    "prompt_tokens": 10,
+                    "completion_tokens": 2,
+                    "cached_tokens": 0,
+                    "finish_reason": {"type": "stop", "matched": None},
+                    "output_token_logprobs": None,
+                    "output_top_logprobs": None,
+                },
+                "index": 0,
+            }
+
+        self.tm.generate_request.return_value = _mock_generate_fc_token()
+        req = ChatCompletionRequest(
+            model="x",
+            messages=[{"role": "user", "content": "Hi?"}],
+            temperature=0.7,
+            max_tokens=100,
+            stream=True,
+        )
+        adapted_request = GenerateReqInput(
+            text="prompt",
+            sampling_params={},
+            rid="r1",
+            stream=True,
+        )
+
+        async def collect_chunks():
+            chunks = []
+            async for chunk in self.chat._generate_chat_stream(
+                adapted_request, req, self.fastapi_request
+            ):
+                chunks.append(chunk)
+            return chunks
+
+        chunks = get_or_create_event_loop().run_until_complete(collect_chunks())
+        finish_reason = None
+        for chunk in chunks:
+            if not chunk.startswith("data: {"):
+                continue
+            payload = json.loads(chunk[len("data: ") :])
+            if payload.get("choices"):
+                fr = payload["choices"][0].get("finish_reason")
+                if fr is not None:
+                    finish_reason = fr
+        self.assertEqual(finish_reason, "unexpected_state")
 
     # ------------- X-Data-Parallel-Rank header tests -------------
     def test_extract_routed_dp_rank_from_header_no_header(self):

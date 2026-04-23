@@ -86,12 +86,9 @@ def get_kimi_structural_tag_with_tool_marker_excludes(input_dict: Dict[str, Any]
     tools = input_dict.get("tools", [])
     use_exclude_tokens = input_dict.get("use_exclude_tokens", False)
     logger.debug(
-        "kimi_structural_tag input: tools=%d use_exclude_tokens=%s fc_token_ids_keys=%s",
+        "kimi_structural_tag input: tools=%d use_exclude_tokens=%s",
         len(tools),
         use_exclude_tokens,
-        sorted(input_dict.get("fc_token_ids", {}).keys())
-        if isinstance(input_dict.get("fc_token_ids"), dict)
-        else None,
     )
 
     tool_calls_section_begin = _get_fc_marker_input(

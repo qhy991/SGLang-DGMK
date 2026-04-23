@@ -94,6 +94,10 @@ class BaseFormatDetector(ABC):
 
         return results
 
+    def sanitize_normal_text(self, text: str) -> str:
+        """Sanitize detector-specific control tokens from normal text."""
+        return text
+
     @abstractmethod
     def detect_and_parse(self, text: str, tools: List[Tool]) -> StreamingParseResult:
         """

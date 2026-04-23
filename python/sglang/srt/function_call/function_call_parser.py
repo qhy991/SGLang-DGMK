@@ -110,13 +110,13 @@ class FunctionCallParser:
             - A list of tool calls parsed from the text
         """
         if not self.tools:
-            return full_text, []
+            return self.detector.sanitize_normal_text(full_text), []
         parsed_result = self.detector.detect_and_parse(full_text, self.tools)
         tool_call_list = parsed_result.calls
         if tool_call_list:
-            return parsed_result.normal_text, tool_call_list
+            return self.detector.sanitize_normal_text(parsed_result.normal_text), tool_call_list
         else:
-            return full_text, []
+            return self.detector.sanitize_normal_text(full_text), []
 
     def parse_stream_chunk(self, chunk_text: str) -> Tuple[str, list[ToolCallItem]]:
         """
@@ -131,7 +131,7 @@ class FunctionCallParser:
             - A list of tool calls parsed from the chunk
         """
         if not self.tools:
-            return chunk_text, []
+            return self.detector.sanitize_normal_text(chunk_text), []
         final_normal_text = ""
         final_calls = []
 
@@ -142,7 +142,7 @@ class FunctionCallParser:
             final_calls.extend(sp_result.calls)
             final_normal_text = sp_result.normal_text
 
-        return final_normal_text, final_calls
+        return self.detector.sanitize_normal_text(final_normal_text), final_calls
 
     def get_structure_tag(self) -> LegacyStructuralTagResponseFormat:
         """

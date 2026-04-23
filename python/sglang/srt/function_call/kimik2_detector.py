@@ -73,6 +73,9 @@ class KimiK2Detector(BaseFormatDetector):
             r"^(?:functions\.)?(?P<name>[\w.\-]+):(?P<index>\d+)$"
         )
 
+    def sanitize_normal_text(self, text: str) -> str:
+        return _strip_special_tokens(text)
+
     def has_tool_call(self, text: str) -> bool:
         """Check if the text contains a KimiK2 format tool call."""
         return self.bot_token in text
@@ -86,7 +89,7 @@ class KimiK2Detector(BaseFormatDetector):
         :return: ParseResult indicating success or failure, consumed text, leftover text, and parsed calls.
         """
         if self.bot_token not in text:
-            return StreamingParseResult(normal_text=text, calls=[])
+            return StreamingParseResult(normal_text=self.sanitize_normal_text(text), calls=[])
         try:
             # there are two possible captures - between tags, or between a
             # tag and end-of-string so the result of
@@ -116,13 +119,13 @@ class KimiK2Detector(BaseFormatDetector):
                     )
                 )
 
-            content = text[: text.find(self.bot_token)]
+            content = self.sanitize_normal_text(text[: text.find(self.bot_token)])
             return StreamingParseResult(normal_text=content, calls=tool_calls)
 
         except Exception as e:
             logger.error(f"Error in detect_and_parse: {e}")
             # return the normal text if parsing fails
-            return StreamingParseResult(normal_text=text)
+            return StreamingParseResult(normal_text=self.sanitize_normal_text(text))
 
     def parse_streaming_increment(
         self, new_text: str, tools: List[Tool]
@@ -140,7 +143,7 @@ class KimiK2Detector(BaseFormatDetector):
 
         if not has_tool_call:
             self._buffer = ""
-            normal_text = _strip_special_tokens(new_text)
+            normal_text = self.sanitize_normal_text(new_text)
             return StreamingParseResult(normal_text=normal_text)
 
         if not hasattr(self, "_tool_indices"):
@@ -240,7 +243,7 @@ class KimiK2Detector(BaseFormatDetector):
 
         except Exception as e:
             logger.error(f"Error in parse_streaming_increment: {e}")
-            return StreamingParseResult(normal_text=_strip_special_tokens(current_text))
+            return StreamingParseResult(normal_text=self.sanitize_normal_text(current_text))
 
     def structure_info(self) -> _GetInfoFunc:
         """Return function that creates StructureInfo for guided generation."""
