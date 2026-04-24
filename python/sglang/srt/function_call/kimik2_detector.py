@@ -29,6 +29,7 @@ _KIMI_K2_SPECIAL_TOKENS = [
 def _strip_special_tokens(text: str) -> str:
     """Remove all Kimi-K2 tool-call special tokens from text."""
     for token in _KIMI_K2_SPECIAL_TOKENS:
+        logger.debug(f"Stripping special token in detector: {token}")
         text = text.replace(token, "")
     return text
 

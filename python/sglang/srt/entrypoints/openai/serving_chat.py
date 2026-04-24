@@ -70,6 +70,23 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Greppable prefix for diagnosing missing SSE after reasoning in tool streaming.
+_STREAM_TOOL_DEBUG = "[stream_tool_debug]"
+
+
+def _parser_incremental_buffer_len(parser: object) -> int:
+    inner = getattr(parser, "detector", parser)
+    buf = getattr(inner, "_buffer", None)
+    return len(buf) if isinstance(buf, str) else 0
+
+
+def _short_repr(s: str, max_len: int = 96) -> str:
+    if not s:
+        return "<empty>"
+    if len(s) <= max_len:
+        return repr(s)
+    return repr(s[:max_len]) + f"... (+{len(s) - max_len} chars)"
+
 
 def _sse_tool_stream_line(
     index: int,
@@ -103,6 +120,56 @@ def _sse_tool_stream_line(
             reasoning_tokens=meta_info.get("reasoning_tokens", 0),
         )
     return f"data: {chunk.model_dump_json()}\n\n"
+
+
+def _sse_stream_plain_text_line(
+    index: int,
+    chatcmpl_id: str,
+    model: str,
+    to_emit: str,
+    choice_logprobs: Optional[ChoiceLogprobs],
+    continuous_usage_stats: bool,
+    *,
+    usage_prompt_tokens: int = 0,
+    usage_completion_tokens: int = 0,
+    usage_reasoning_tokens: int = 0,
+) -> str:
+    """Stream one assistant `content` delta (used for normal text and as tool-parse fallback)."""
+    choice_data = ChatCompletionResponseStreamChoice(
+        index=index,
+        delta=DeltaMessage(content=to_emit),
+        finish_reason=None,
+        matched_stop=None,
+        logprobs=choice_logprobs,
+    )
+    chunk = ChatCompletionStreamResponse(
+        id=chatcmpl_id,
+        created=int(time.time()),
+        choices=[choice_data],
+        model=model,
+    )
+    if continuous_usage_stats:
+        chunk.usage = UsageProcessor.calculate_token_usage(
+            prompt_tokens=usage_prompt_tokens,
+            reasoning_tokens=usage_reasoning_tokens,
+            completion_tokens=usage_completion_tokens,
+        )
+    return f"data: {chunk.model_dump_json()}\n\n"
+
+
+def _tool_parameters_to_json_argument_str(parameters: Any) -> str:
+    """Build OpenAI ``function.arguments`` from a decoded ``parameters`` field.
+
+    In ``tool_choice: required`` mode, ``orjson.loads`` may yield ``parameters`` as
+    either an object (``dict``) or, if the model nested JSON in a string, a ``str``.
+    Applying :func:`json.dumps` to an existing JSON *string* double-encodes it and
+    corrupts ``arguments`` for clients.
+    """
+    if parameters is None:
+        return ""
+    if isinstance(parameters, str):
+        return parameters
+    return json.dumps(parameters, ensure_ascii=False)
 
 
 def _extract_max_dynamic_patch(request: ChatCompletionRequest):
@@ -809,9 +876,11 @@ class OpenAIServingChat(OpenAIServingBase):
 
                 stream_buffer = stream_buffers.get(index, "")
                 delta = content["text"][len(stream_buffer) :]
+                engine_text_delta_len = len(delta)
                 stream_buffers[index] = stream_buffer + delta
 
                 # Handle reasoning content
+                reasoning_text: Optional[str] = None
                 if self.reasoning_parser and request.separate_reasoning:
                     reasoning_text, delta = self._process_reasoning_stream(
                         index,
@@ -855,7 +924,25 @@ class OpenAIServingChat(OpenAIServingBase):
                     request.tool_choice != "none"
                     and self.tool_call_parser
                 ):
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(
+                            "%s post_reasoning_step rid=%s index=%s finish=%s "
+                            "engine_delta_len=%d post_reason_delta_len=%d "
+                            "post_reason_preview=%s reasoning_parser_out=%s",
+                            _STREAM_TOOL_DEBUG,
+                            content["meta_info"].get("id"),
+                            index,
+                            finish_reason_type,
+                            engine_text_delta_len,
+                            len(delta) if delta else 0,
+                            _short_repr(delta),
+                            _short_repr(reasoning_text)
+                            if reasoning_text
+                            else None,
+                        )
+                    tool_path_chunks: List[str] = []
                     try:
+                        tool_chunks_emitted = 0
                         async for chunk in self._process_tool_call_stream(
                             index,
                             delta,
@@ -868,8 +955,61 @@ class OpenAIServingChat(OpenAIServingBase):
                             is_kimi=is_kimi,
                         ):
                             if chunk:
+                                tool_path_chunks.append(chunk)
+                                tool_chunks_emitted += 1
                                 yield chunk
-                    except ToolCallValidationError:
+                        if (
+                            logger.isEnabledFor(logging.DEBUG)
+                            and tool_chunks_emitted == 0
+                            and (delta or engine_text_delta_len)
+                        ):
+                            logger.debug(
+                                "%s tool_stream_emitted_zero_chunks rid=%s index=%s "
+                                "finish=%s engine_delta_len=%d post_reason_delta_len=%d",
+                                _STREAM_TOOL_DEBUG,
+                                content["meta_info"].get("id"),
+                                index,
+                                finish_reason_type,
+                                engine_text_delta_len,
+                                len(delta) if delta else 0,
+                            )
+                    except (ToolCallValidationError, ValueError):
+                        # If the tool path failed before emitting anything for this
+                        # delta, stream it as normal ``content`` so the client still
+                        # receives text on ``length`` / ``unexpected_state``-style ends.
+                        if logger.isEnabledFor(logging.DEBUG):
+                            logger.debug(
+                                "%s tool_path_exception rid=%s index=%s "
+                                "tool_path_chunks_so_far=%d delta_len=%d",
+                                _STREAM_TOOL_DEBUG,
+                                content["meta_info"].get("id"),
+                                index,
+                                len(tool_path_chunks),
+                                len(delta) if delta else 0,
+                                exc_info=True,
+                            )
+                        if not tool_path_chunks:
+                            to_emit = (
+                                strip_kimi_fc_special_substrings(delta)
+                                if is_kimi
+                                else delta
+                            )
+                            if to_emit:
+                                yield _sse_stream_plain_text_line(
+                                    index=index,
+                                    chatcmpl_id=content["meta_info"]["id"],
+                                    model=request.model,
+                                    to_emit=to_emit,
+                                    choice_logprobs=choice_logprobs,
+                                    continuous_usage_stats=continuous_usage_stats,
+                                    usage_prompt_tokens=prompt_tokens.get(index, 0),
+                                    usage_completion_tokens=completion_tokens.get(
+                                        index, 0
+                                    ),
+                                    usage_reasoning_tokens=reasoning_tokens.get(
+                                        index, 0
+                                    ),
+                                )
                         finish_reasons[index] = prefer_engine_finish_on_fc_leak(
                             finish_reason,
                             default_unexpected={
@@ -974,25 +1114,26 @@ class OpenAIServingChat(OpenAIServingBase):
                             created=int(time.time()),
                             choices=[choice_data],
                             model=request.model,
+                            to_emit=to_emit,
+                            choice_logprobs=choice_logprobs,
+                            continuous_usage_stats=continuous_usage_stats,
+                            usage_prompt_tokens=prompt_tokens.get(index, 0),
+                            usage_completion_tokens=completion_tokens.get(index, 0),
+                            usage_reasoning_tokens=reasoning_tokens.get(index, 0),
                         )
-
-                        # Add usage stats if continuous_usage_stats is enabled
-                        if continuous_usage_stats:
-                            chunk.usage = UsageProcessor.calculate_token_usage(
-                                prompt_tokens=prompt_tokens.get(index, 0),
-                                reasoning_tokens=reasoning_tokens.get(index, 0),
-                                completion_tokens=completion_tokens.get(index, 0),
-                            )
-
-                        yield f"data: {chunk.model_dump_json()}\n\n"
 
             # Send finish_reason chunks for each index that completed
             for idx, finish_reason_data in finish_reasons.items():
                 finish_reason_type = finish_reason_data["type"]
 
-                # Change finish_reason to "tool_calls" if we had tool calls and stopped naturally
+                # Surface ``tool_calls`` when we emitted tool deltas, including when the
+                # engine still reports ``length`` (avoids tool output looking "consumed"
+                # by length alone).
                 final_finish_reason = finish_reason_type
-                if has_tool_calls.get(idx, False) and finish_reason_type == "stop":
+                if has_tool_calls.get(idx, False) and finish_reason_type in (
+                    "stop",
+                    "length",
+                ):
                     final_finish_reason = "tool_calls"
 
                 finish_reason_chunk = ChatCompletionStreamResponse(
@@ -1180,23 +1321,24 @@ class OpenAIServingChat(OpenAIServingBase):
                 and self.tool_call_parser
             ):
                 history_tool_calls_cnt = self._get_history_tool_calls_cnt(request)
+                # Snapshot: ``_process_tool_calls`` may raise after partial work; on failure
+                # we must not discard parsed reasoning or raw model text (partial tool
+                # markup/args should remain visible in ``content`` / ``reasoning_content``).
+                text_before_tool_calls = text
                 try:
                     tool_calls, text, finish_reason = self._process_tool_calls(
-                        text,
+                        text_before_tool_calls,
                         request.tools or [],
                         finish_reason,
                         request.tool_choice,
                         history_tool_calls_cnt,
                     )
-                except (ToolCallValidationError, ValueError):
-                    # ``ToolCallValidationError``: jsonschema validation. ``ValueError``:
-                    # invalid JSON, parse, or other tool output rejected in
-                    # ``_process_tool_calls``. Do not fail the request; return a normal
-                    # completion and map engine ``stop`` to ``unexpected_state`` (see
-                    # ``prefer_engine_finish_on_fc_leak``).
+                except ValueError:
+                    # Parse / decode failure in ``_process_tool_calls`` (not schema
+                    # validation). Validation affects ``finish_reason`` only; see
+                    # ``_process_tool_calls``. Restore pre-tool text for the message.
                     tool_calls = None
-                    text = None
-                    reasoning_text = None
+                    text = text_before_tool_calls
                     finish_reason = prefer_engine_finish_on_fc_leak(
                         fr_raw,
                         default_unexpected={
@@ -1230,9 +1372,11 @@ class OpenAIServingChat(OpenAIServingBase):
                 index=idx,
                 message=ChatMessage(
                     role="assistant",
-                    content=text if text else None,
+                    # Do not coalesce to None on ``""``; clients need visible strings on
+                    # ``length`` / ``unexpected_state`` and after partial tool parse.
+                    content=text,
                     tool_calls=tool_calls,
-                    reasoning_content=reasoning_text if reasoning_text else None,
+                    reasoning_content=reasoning_text,
                 ),
                 logprobs=choice_logprobs,
                 finish_reason=finish_reason["type"] if finish_reason else None,
@@ -1342,83 +1486,121 @@ class OpenAIServingChat(OpenAIServingBase):
         tool_choice: Optional[Union[str, ToolChoice]] = None,
         history_tool_calls_cnt: int = 0,
     ) -> ToolCallProcessingResult:
-        """Process tool calls in the response"""
+        """Process tool calls in the response.
+
+        Schema validation never strips parsed function names or argument strings: if
+        validation fails, the same parsed ``ToolCall`` objects are still returned and
+        only ``finish_reason`` is adjusted (e.g. to ``unexpected_state`` for a normal
+        engine ``stop``). Parse / decode errors still raise ``ValueError``.
+
+        When the engine ends with ``length`` but we still parsed at least one tool
+        call, the client-visible ``finish_reason`` is set to ``tool_calls`` (same as
+        for ``stop``), so tool usage is not left under ``length`` alone.
+        """
+        engine_finish = copy.deepcopy(finish_reason)
+
+        def _finish_after_validation(
+            validation_ok: bool, has_parsed_tools: bool
+        ) -> Dict[str, Any]:
+            if not validation_ok:
+                return prefer_engine_finish_on_fc_leak(
+                    engine_finish,
+                    default_unexpected={
+                        "type": "unexpected_state",
+                        "matched": None,
+                    },
+                )
+            if (
+                has_parsed_tools
+                and engine_finish.get("type") in ("stop", "length")
+            ):
+                out = copy.deepcopy(engine_finish)
+                out["type"] = "tool_calls"
+                out["matched"] = None
+                return out
+            return copy.deepcopy(engine_finish)
 
         # Handle required or named tool choice
         if tool_choice == "required" or (
             isinstance(tool_choice, ToolChoice) and tool_choice.type == "function"
         ):
-            # Set finish reason to tool_calls since we're processing tool calls
-            if finish_reason["type"] == "stop":
-                finish_reason["type"] = "tool_calls"
-                finish_reason["matched"] = None
             try:
-                # For required tool choice, we expect a JSON array of tool calls
                 tool_call_data = orjson.loads(text)
-                if self._is_generated_tool_call_validation_enabled():
-                    validate_required_tool_call_payload(tool_call_data, tools)
-                tool_calls = []
-                for i, tool in enumerate(tool_call_data):
-                    # Create a ToolCallItem from the JSON data
-                    call_info = ToolCallItem(
-                        tool_index=i,  # Use the loop index as tool_index
-                        name=tool["name"],
-                        parameters=json.dumps(tool["parameters"], ensure_ascii=False),
-                    )
-                    tool_id = self._process_tool_call_id(
-                        call_info, history_tool_calls_cnt
-                    )
-                    tool_calls.append(
-                        ToolCall(
-                            id=tool_id,
-                            index=i,
-                            function=FunctionResponse(
-                                name=tool["name"],
-                                arguments=json.dumps(
-                                    tool["parameters"], ensure_ascii=False
-                                ),
-                            ),
-                        )
-                    )
-                return ToolCallProcessingResult(tool_calls, "", finish_reason)
             except Exception as e:
-                if isinstance(e, ToolCallValidationError):
-                    raise
                 logger.debug(f"Rejecting generated tool call payload: {e}")
                 raise ValueError(str(e)) from e
+
+            validation_ok = True
+            if self._is_generated_tool_call_validation_enabled():
+                try:
+                    validate_required_tool_call_payload(tool_call_data, tools)
+                except ToolCallValidationError:
+                    validation_ok = False
+
+            tool_calls: List[ToolCall] = []
+            for i, tool in enumerate(tool_call_data):
+                arg_str = _tool_parameters_to_json_argument_str(tool.get("parameters"))
+                call_info = ToolCallItem(
+                    tool_index=i,  # Use the loop index as tool_index
+                    name=tool["name"],
+                    parameters=arg_str,
+                )
+                tool_id = self._process_tool_call_id(
+                    call_info, history_tool_calls_cnt
+                )
+                tool_calls.append(
+                    ToolCall(
+                        id=tool_id,
+                        index=i,
+                        function=FunctionResponse(
+                            name=tool["name"],
+                            arguments=arg_str,
+                        ),
+                    )
+                )
+            return ToolCallProcessingResult(
+                tool_calls,
+                "",
+                _finish_after_validation(validation_ok, bool(tool_calls)),
+            )
 
         # Use parser since output is not constrained by JSON schema
         parser = FunctionCallParser(tools, self.tool_call_parser)
         if parser.has_tool_call(text):
-            if finish_reason["type"] == "stop":
-                finish_reason["type"] = "tool_calls"
-                finish_reason["matched"] = None
             try:
-                text, call_info_list = parser.parse_non_stream(text)
-                if self._is_generated_tool_call_validation_enabled():
-                    validate_parsed_tool_call_items(call_info_list, tools)
-                tool_calls = []
-                for call_info in call_info_list:
-                    tool_id = self._process_tool_call_id(
-                        call_info, history_tool_calls_cnt
-                    )
-                    tool_calls.append(
-                        ToolCall(
-                            id=tool_id,
-                            index=getattr(call_info, "tool_index", None),
-                            function=FunctionResponse(
-                                name=call_info.name, arguments=call_info.parameters
-                            ),
-                        )
-                    )
-                return ToolCallProcessingResult(tool_calls, text, finish_reason)
+                remaining_text, call_info_list = parser.parse_non_stream(text)
             except Exception as e:
-                if isinstance(e, ToolCallValidationError):
-                    raise
                 logger.error(f"Tool call parsing error: {e}")
                 raise ValueError(str(e)) from e
 
-        return ToolCallProcessingResult(None, text, finish_reason)
+            validation_ok = True
+            if self._is_generated_tool_call_validation_enabled():
+                try:
+                    validate_parsed_tool_call_items(call_info_list, tools)
+                except ToolCallValidationError:
+                    validation_ok = False
+
+            tool_calls = []
+            for call_info in call_info_list:
+                tool_id = self._process_tool_call_id(
+                    call_info, history_tool_calls_cnt
+                )
+                tool_calls.append(
+                    ToolCall(
+                        id=tool_id,
+                        index=getattr(call_info, "tool_index", None),
+                        function=FunctionResponse(
+                            name=call_info.name, arguments=call_info.parameters
+                        ),
+                    )
+                )
+            return ToolCallProcessingResult(
+                tool_calls,
+                remaining_text,
+                _finish_after_validation(validation_ok, bool(tool_calls)),
+            )
+
+        return ToolCallProcessingResult(None, text, copy.deepcopy(engine_finish))
 
     def _process_streaming_logprobs(
         self,
@@ -1574,12 +1756,45 @@ class OpenAIServingChat(OpenAIServingBase):
         else:
             normal_text, calls = parser.parse_stream_chunk(delta)
 
+        if logger.isEnabledFor(logging.DEBUG):
+            buf_len = _parser_incremental_buffer_len(parser)
+            logger.debug(
+                "%s parse_tool_stream rid=%s index=%s parser=%s "
+                "delta_in_len=%d normal_text_len=%d num_calls=%d buf_len=%d is_kimi=%s",
+                _STREAM_TOOL_DEBUG,
+                content["meta_info"].get("id"),
+                index,
+                type(parser).__name__,
+                len(delta) if delta else 0,
+                len(normal_text) if normal_text else 0,
+                len(calls) if calls else 0,
+                buf_len,
+                is_kimi,
+            )
+            if not (normal_text or calls):
+                logger.debug(
+                    "%s parse_silent_after_increment rid=%s index=%s "
+                    "delta_in_preview=%s (parser produced no normal_text and no calls)",
+                    _STREAM_TOOL_DEBUG,
+                    content["meta_info"].get("id"),
+                    index,
+                    _short_repr(delta),
+                )
         if normal_text:
             out_text = (
                 strip_kimi_fc_special_substrings(normal_text)
                 if is_kimi
                 else normal_text
             )
+            if logger.isEnabledFor(logging.DEBUG) and normal_text and not out_text:
+                logger.debug(
+                    "%s kimi_strip_dropped_entire_normal_text rid=%s index=%s "
+                    "normal_text_len=%d",
+                    _STREAM_TOOL_DEBUG,
+                    content["meta_info"].get("id"),
+                    index,
+                    len(normal_text),
+                )
             if out_text:
                 yield _sse_tool_stream_line(
                     index,

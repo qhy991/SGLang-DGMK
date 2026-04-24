@@ -791,7 +791,8 @@ class ServingChatTestCase(unittest.TestCase):
         self.assertEqual(len(chunks), 2)
         self.assertIn("error", chunks[0])
 
-    def test_nonstream_tool_schema_violation_raises(self):
+    def test_nonstream_tool_schema_violation_returns_unvalidated_tools(self):
+        """Schema validation failure does not drop parsed tool calls; only finish_reason."""
         self.chat.tool_call_parser = "kimi_k2"
         tools = [
             {
@@ -806,17 +807,20 @@ class ServingChatTestCase(unittest.TestCase):
                 },
             }
         ]
-        with self.assertRaises(ValueError) as context:
-            self.chat._process_tool_calls(
-                text='[{"name":"get_weather","parameters":{"days":"two"}}]',
-                tools=tools,
-                finish_reason={"type": "stop", "matched": None},
-                tool_choice="required",
-            )
-        self.assertIn("Tool call validation failed for 'get_weather'", str(context.exception))
+        tool_calls, remaining_text, finish_reason = self.chat._process_tool_calls(
+            text='[{"name":"get_weather","parameters":{"days":"two"}}]',
+            tools=tools,
+            finish_reason={"type": "stop", "matched": None},
+            tool_choice="required",
+        )
+        self.assertEqual(finish_reason["type"], "unexpected_state")
+        self.assertEqual(remaining_text, "")
+        self.assertIsNotNone(tool_calls)
+        self.assertEqual(tool_calls[0].function.name, "get_weather")
+        self.assertIn("two", tool_calls[0].function.arguments)
 
     def test_nonstream_tool_schema_violation_sets_unexpected_state_finish(self):
-        """Invalid tool args against schema: HTTP 200, finish_reason ``unexpected_state`` (not ``stop``) when engine stopped normally."""
+        """Invalid tool args against schema: ``unexpected_state`` but message still has tool_calls."""
         self.chat.tool_call_parser = "kimi_k2"
         tools = [
             {
@@ -860,8 +864,11 @@ class ServingChatTestCase(unittest.TestCase):
             created=0,
         )
         self.assertEqual(response.choices[0].finish_reason, "unexpected_state")
-        self.assertIsNone(response.choices[0].message.content)
-        self.assertIsNone(response.choices[0].message.tool_calls)
+        self.assertEqual(response.choices[0].message.content, "")
+        tcs = response.choices[0].message.tool_calls
+        self.assertIsNotNone(tcs)
+        self.assertEqual(tcs[0].function.name, "get_weather")
+        self.assertIn("two", tcs[0].function.arguments)
 
     def test_nonstream_tool_invalid_json_sets_unexpected_state_finish(self):
         """``ValueError`` from ``_process_tool_calls`` (e.g. not JSON) also maps to
@@ -906,18 +913,24 @@ class ServingChatTestCase(unittest.TestCase):
             created=0,
         )
         self.assertEqual(response.choices[0].finish_reason, "unexpected_state")
-        self.assertIsNone(response.choices[0].message.content)
+        self.assertEqual(
+            response.choices[0].message.content,
+            "this is not valid json for required tool output",
+        )
 
     def test_nonstream_validation_runs_without_tools(self):
+        """Empty tools list => validation fails but parsed tool_calls are still returned."""
         self.chat.tool_call_parser = "kimi_k2"
-        with self.assertRaises(ValueError) as context:
-            self.chat._process_tool_calls(
-                text='[{"name":"get_weather","parameters":{"city":"Paris"}}]',
-                tools=[],
-                finish_reason={"type": "stop", "matched": None},
-                tool_choice="required",
-            )
-        self.assertIn("unknown tool name", str(context.exception))
+        tool_calls, remaining_text, finish_reason = self.chat._process_tool_calls(
+            text='[{"name":"get_weather","parameters":{"city":"Paris"}}]',
+            tools=[],
+            finish_reason={"type": "stop", "matched": None},
+            tool_choice="required",
+        )
+        self.assertEqual(finish_reason["type"], "unexpected_state")
+        self.assertIsNotNone(tool_calls)
+        self.assertEqual(remaining_text, "")
+        self.assertEqual(tool_calls[0].function.name, "get_weather")
 
     def test_stream_tool_schema_violation_raises(self):
         self.chat.tool_call_parser = "kimi_k2"

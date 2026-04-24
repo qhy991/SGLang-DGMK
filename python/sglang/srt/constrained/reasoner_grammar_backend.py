@@ -32,7 +32,6 @@ _MODEL_REASONING_BLOCKED_TOKEN_IDS = {
         163599, # <|tool_call_end|>
         163606, # <think>
         163585, # EOS
-        163586, # <im_end>
     ),
 }
 

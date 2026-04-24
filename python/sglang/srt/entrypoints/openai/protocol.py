@@ -14,6 +14,7 @@
 """Pydantic models for OpenAI API protocol"""
 
 import logging
+import os
 import time
 import uuid
 from dataclasses import dataclass
@@ -488,7 +489,7 @@ class ToolCall(BaseModel):
 
 class ChatCompletionMessageGenericParam(BaseModel):
     role: Literal["system", "assistant", "tool", "function", "developer", "_input"]
-    content: Union[str, List[ChatCompletionMessageContentPart], None] = Field(
+    content: Optional[Union[str, List[ChatCompletionMessageContentPart]]] = Field(
         default=None
     )
     tool_call_id: Optional[str] = None
@@ -520,6 +521,119 @@ ChatCompletionMessageParam = Union[
 ]
 
 
+# JSON Schema (Draft 2020-12) meta-schema: many keywords must be non-null. Clients
+# / proxies sometimes emit `null` where the keyword should be absent.
+# Do not strip `default` or `const` when the value is null — that can be a valid instance.
+_NO_STRIP_KEYWORD_NONE: frozenset[str] = frozenset({"default", "const"})
+
+# Replace null with {} (empty object) for these keywords.
+_JSON_SCHEMA_KEY_EMPTY_OBJECT_IF_NONE: frozenset[str] = frozenset(
+    {
+        "properties",
+        "patternProperties",
+        "$defs",
+        "dependentSchemas",
+        "dependentRequired",
+    }
+)
+
+# Remove the keyword when the value is null.
+_JSON_SCHEMA_KEY_DELETE_IF_NONE: frozenset[str] = frozenset(
+    {
+        "required",
+        "enum",
+        "allOf",
+        "anyOf",
+        "oneOf",
+        "prefixItems",
+        "items",
+        "examples",
+        "type",
+        "title",
+        "description",
+        "$ref",
+        "$schema",
+        "$id",
+        "$anchor",
+        "$dynamicRef",
+        "$vocabulary",
+        "$comment",
+        "format",
+        "contentEncoding",
+        "contentMediaType",
+        "contentSchema",
+        "if",
+        "then",
+        "else",
+        "not",
+        "contains",
+        "propertyNames",
+        "unevaluatedProperties",
+        "unevaluatedItems",
+        "additionalProperties",
+        "additionalItems",
+        "definitions",
+        "dependencies",
+        "minLength",
+        "maxLength",
+        "minItems",
+        "maxItems",
+        "minimum",
+        "maximum",
+        "multipleOf",
+        "minContains",
+        "maxContains",
+        "exclusiveMaximum",
+        "exclusiveMinimum",
+        "minProperties",
+        "maxProperties",
+        "pattern",
+        "readOnly",
+        "writeOnly",
+        "deprecated",
+        "uniqueItems",
+    }
+)
+
+
+def _normalize_client_json_schema_nulls(obj: Any) -> None:
+    """In-place: coerce invalid ``null`` keyword values in JSON Schema trees.
+
+    Some OpenAI clients send null for array/object/string/number-typed JSON Schema
+    keywords where the keyword should be absent or (for object-valued keywords) be ``{}``.
+    ``default``/``const`` with value null are left unchanged — null can be a valid
+    instance for those keywords.
+    """
+    if isinstance(obj, dict):
+        for key in list(obj.keys()):
+            v = obj[key]
+            if v is not None:
+                continue
+            if key in _NO_STRIP_KEYWORD_NONE:
+                continue
+            if key in _JSON_SCHEMA_KEY_EMPTY_OBJECT_IF_NONE:
+                obj[key] = {}
+            elif key in _JSON_SCHEMA_KEY_DELETE_IF_NONE or key.startswith("$"):
+                del obj[key]
+        for v in obj.values():
+            _normalize_client_json_schema_nulls(v)
+    elif isinstance(obj, list):
+        for item in obj:
+            _normalize_client_json_schema_nulls(item)
+
+
+def _is_client_json_schema_normalization_enabled() -> bool:
+    """Whether to coerce null JSON Schema keyword values in tool ``parameters``.
+
+    Set env ``SGLANG_NORMALIZE_CLIENT_JSON_SCHEMA`` to ``0``/``false``/``no``/``off``
+    to disable. When unset, normalization is **on** (default).
+    """
+    v = os.environ.get("SGLANG_NORMALIZE_CLIENT_JSON_SCHEMA", "1").strip().lower()
+    if v in ("0", "false", "no", "off", "n", "f", ""):
+        return False
+    return True
+
+
 class Function(BaseModel):
     """Function descriptions."""
 
@@ -527,6 +641,15 @@ class Function(BaseModel):
     name: str
     parameters: Optional[object] = None
     strict: bool = False
+
+    @model_validator(mode="after")
+    def _normalize_client_json_schema_in_parameters(self) -> "Function":
+        if (
+            _is_client_json_schema_normalization_enabled()
+            and isinstance(self.parameters, dict)
+        ):
+            _normalize_client_json_schema_nulls(self.parameters)
+        return self
 
 
 class Tool(BaseModel):
@@ -833,6 +956,39 @@ class ChatMessage(BaseModel):
     reasoning_content: Optional[str] = None
     tool_calls: Optional[List[ToolCall]] = Field(default=None, examples=[None])
 
+    @field_validator("content", "reasoning_content", mode="after")
+    @classmethod
+    def _sanitize_string_fields(cls, v: Optional[str]) -> Optional[str]:
+        from sglang.srt.infini.fc_token_guard import strip_kimi_fc_special_substrings
+        return strip_kimi_fc_special_substrings(v)
+
+    @field_validator("tool_calls", mode="after")
+    @classmethod
+    def _sanitize_tool_call_function_arguments(
+        cls, v: Optional[List[ToolCall]]
+    ) -> Optional[List[ToolCall]]:
+        if not v:
+            return v
+        from sglang.srt.infini.fc_token_guard import strip_kimi_fc_special_substrings
+
+        new_list: List[ToolCall] = []
+        for tc in v:
+            args = tc.function.arguments
+            if isinstance(args, str):
+                na = strip_kimi_fc_special_substrings(args) or None
+                new_list.append(
+                    tc.model_copy(
+                        update={
+                            "function": tc.function.model_copy(
+                                update={"arguments": na}
+                            )
+                        }
+                    )
+                )
+            else:
+                new_list.append(tc)
+        return new_list
+
 
 class ChatCompletionResponseChoice(BaseModel):
     index: int
@@ -847,6 +1003,7 @@ class ChatCompletionResponseChoice(BaseModel):
             "function_call",
             "abort",
             "unexpected_state",
+            "transfer_failed",
         ]
     ] = None
     matched_stop: Union[None, int, str] = None
@@ -885,6 +1042,12 @@ class DeltaMessage(BaseModel):
     tool_calls: Optional[List[ToolCall]] = Field(default=None, examples=[None])
     hidden_states: Optional[object] = None
 
+    @field_validator("content", "reasoning_content", mode="after")
+    @classmethod
+    def _strip_kimi_fc_token_literals(cls, v: Optional[str]) -> Optional[str]:
+        from sglang.srt.infini.fc_token_guard import strip_kimi_fc_special_substrings
+        return strip_kimi_fc_special_substrings(v)
+
     @model_serializer(mode="wrap")
     def _serialize(self, handler):
         data = handler(self)
@@ -906,6 +1069,7 @@ class ChatCompletionResponseStreamChoice(BaseModel):
             "function_call",
             "abort",
             "unexpected_state",
+            "transfer_failed"
         ]
     ] = None
     matched_stop: Union[None, int, str] = None

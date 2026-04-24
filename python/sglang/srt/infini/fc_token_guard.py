@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 from typing import Any, Dict, Optional
+import logging
 
 FC_SPECIAL_TOKENS = (
     "<|tool_calls_section_begin|>",
@@ -13,6 +14,8 @@ FC_SPECIAL_TOKENS = (
     "</think>",
 )
 
+logger = logging.getLogger(__name__)
+
 
 def strip_kimi_fc_special_substrings(s: Optional[str]) -> Optional[str]:
     """Remove all Kimi FC special literal substrings from text (e.g. for OpenAI output)."""
@@ -21,6 +24,7 @@ def strip_kimi_fc_special_substrings(s: Optional[str]) -> Optional[str]:
     out: str = s
     for tok in FC_SPECIAL_TOKENS:
         if tok in out:
+            logger.debug(f"Stripping special substring: {tok}")
             out = out.replace(tok, "")
     return out
 
