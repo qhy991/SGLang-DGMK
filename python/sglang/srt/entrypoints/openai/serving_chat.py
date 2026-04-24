@@ -4,7 +4,6 @@ import copy
 import json
 import logging
 import time
-import uuid
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional, Union
 
@@ -52,12 +51,22 @@ from sglang.srt.infini.tool_call_processing import (
     validate_parsed_tool_call_items,
     validate_required_tool_call_payload,
 )
-from sglang.srt.infini.fc_token_guard import (
-    prefer_engine_finish_on_fc_leak,
-    strip_kimi_fc_special_substrings,
-)
+from sglang.srt.infini.fc_token_guard import prefer_engine_finish_on_fc_leak
 from sglang.srt.infini.tool_call_validation import ToolCallValidationError
-from sglang.srt.infini.kimi_fc_openai_serving import is_kimi_k2_openai_serving
+from sglang.srt.infini.kimi_fc_openai_serving import (
+    format_openai_tool_call_id,
+    history_tool_calls_count,
+    is_kimi_k2_openai_serving,
+    maybe_strip_kimi_fc_substrings,
+    maybe_strip_remaining_tool_args,
+    strip_kimi_openai_choice_fields,
+)
+from sglang.srt.infini.kimi_openai_tool_stream import iter_tool_call_stream_sse_chunks
+from sglang.srt.infini.openai_chat_stream_helpers import (
+    STREAM_TOOL_DEBUG,
+    short_repr,
+    sse_stream_plain_text_line,
+)
 from sglang.srt.function_call.utils import get_json_schema_constraint
 from sglang.srt.managers.io_struct import GenerateReqInput
 from sglang.srt.parser.conversation import generate_chat_conv
@@ -69,92 +78,6 @@ if TYPE_CHECKING:
     from sglang.srt.managers.tokenizer_manager import TokenizerManager
 
 logger = logging.getLogger(__name__)
-
-# Greppable prefix for diagnosing missing SSE after reasoning in tool streaming.
-_STREAM_TOOL_DEBUG = "[stream_tool_debug]"
-
-
-def _parser_incremental_buffer_len(parser: object) -> int:
-    inner = getattr(parser, "detector", parser)
-    buf = getattr(inner, "_buffer", None)
-    return len(buf) if isinstance(buf, str) else 0
-
-
-def _short_repr(s: str, max_len: int = 96) -> str:
-    if not s:
-        return "<empty>"
-    if len(s) <= max_len:
-        return repr(s)
-    return repr(s[:max_len]) + f"... (+{len(s) - max_len} chars)"
-
-
-def _sse_tool_stream_line(
-    index: int,
-    chatcmpl_id: str,
-    model: str,
-    meta_info: Dict[str, Any],
-    continuous_usage_stats: bool,
-    *,
-    content: Optional[str] = None,
-    tool_calls: Optional[List[ToolCall]] = None,
-) -> str:
-    if content is not None:
-        delta = DeltaMessage(content=content)
-    else:
-        delta = DeltaMessage(tool_calls=tool_calls or [])
-    choice_data = ChatCompletionResponseStreamChoice(
-        index=index,
-        delta=delta,
-        finish_reason=None,
-    )
-    chunk = ChatCompletionStreamResponse(
-        id=chatcmpl_id,
-        created=int(time.time()),
-        choices=[choice_data],
-        model=model,
-    )
-    if continuous_usage_stats:
-        chunk.usage = UsageProcessor.calculate_token_usage(
-            prompt_tokens=meta_info.get("prompt_tokens", 0),
-            completion_tokens=meta_info.get("completion_tokens", 0),
-            reasoning_tokens=meta_info.get("reasoning_tokens", 0),
-        )
-    return f"data: {chunk.model_dump_json()}\n\n"
-
-
-def _sse_stream_plain_text_line(
-    index: int,
-    chatcmpl_id: str,
-    model: str,
-    to_emit: str,
-    choice_logprobs: Optional[ChoiceLogprobs],
-    continuous_usage_stats: bool,
-    *,
-    usage_prompt_tokens: int = 0,
-    usage_completion_tokens: int = 0,
-    usage_reasoning_tokens: int = 0,
-) -> str:
-    """Stream one assistant `content` delta (used for normal text and as tool-parse fallback)."""
-    choice_data = ChatCompletionResponseStreamChoice(
-        index=index,
-        delta=DeltaMessage(content=to_emit),
-        finish_reason=None,
-        matched_stop=None,
-        logprobs=choice_logprobs,
-    )
-    chunk = ChatCompletionStreamResponse(
-        id=chatcmpl_id,
-        created=int(time.time()),
-        choices=[choice_data],
-        model=model,
-    )
-    if continuous_usage_stats:
-        chunk.usage = UsageProcessor.calculate_token_usage(
-            prompt_tokens=usage_prompt_tokens,
-            reasoning_tokens=usage_reasoning_tokens,
-            completion_tokens=usage_completion_tokens,
-        )
-    return f"data: {chunk.model_dump_json()}\n\n"
 
 
 def _tool_parameters_to_json_argument_str(parameters: Any) -> str:
@@ -858,7 +781,7 @@ class OpenAIServingChat(OpenAIServingBase):
                 # First chunk with role
                 if is_firsts.get(index, True):
                     is_firsts[index] = False
-                    delta = DeltaMessage(role="assistant", content="")
+                    delta = DeltaMessage(role="assistant")
                     choice_data = ChatCompletionResponseStreamChoice(
                         index=index,
                         delta=delta,
@@ -891,10 +814,8 @@ class OpenAIServingChat(OpenAIServingBase):
                         adapted_request.require_reasoning,
                     )
                     if reasoning_text:
-                        r_to_emit = (
-                            strip_kimi_fc_special_substrings(reasoning_text)
-                            if is_kimi
-                            else reasoning_text
+                        r_to_emit = maybe_strip_kimi_fc_substrings(
+                            reasoning_text, is_kimi=is_kimi
                         )
                         if r_to_emit:
                             choice_data = ChatCompletionResponseStreamChoice(
@@ -929,30 +850,31 @@ class OpenAIServingChat(OpenAIServingBase):
                             "%s post_reasoning_step rid=%s index=%s finish=%s "
                             "engine_delta_len=%d post_reason_delta_len=%d "
                             "post_reason_preview=%s reasoning_parser_out=%s",
-                            _STREAM_TOOL_DEBUG,
+                            STREAM_TOOL_DEBUG,
                             content["meta_info"].get("id"),
                             index,
                             finish_reason_type,
                             engine_text_delta_len,
                             len(delta) if delta else 0,
-                            _short_repr(delta),
-                            _short_repr(reasoning_text)
+                            short_repr(delta),
+                            short_repr(reasoning_text)
                             if reasoning_text
                             else None,
                         )
                     tool_path_chunks: List[str] = []
                     try:
                         tool_chunks_emitted = 0
-                        async for chunk in self._process_tool_call_stream(
-                            index,
-                            delta,
-                            parser_dict,
-                            content,
-                            request,
-                            has_tool_calls,
-                            stream_tool_call_collector,
-                            continuous_usage_stats,
+                        async for chunk in iter_tool_call_stream_sse_chunks(
+                            index=index,
+                            delta=delta,
+                            parser_dict=parser_dict,
+                            content=content,
+                            request=request,
+                            has_tool_calls=has_tool_calls,
+                            stream_tool_call_collector=stream_tool_call_collector,
+                            continuous_usage_stats=continuous_usage_stats,
                             is_kimi=is_kimi,
+                            tool_call_parser=self.tool_call_parser,
                         ):
                             if chunk:
                                 tool_path_chunks.append(chunk)
@@ -966,7 +888,7 @@ class OpenAIServingChat(OpenAIServingBase):
                             logger.debug(
                                 "%s tool_stream_emitted_zero_chunks rid=%s index=%s "
                                 "finish=%s engine_delta_len=%d post_reason_delta_len=%d",
-                                _STREAM_TOOL_DEBUG,
+                                STREAM_TOOL_DEBUG,
                                 content["meta_info"].get("id"),
                                 index,
                                 finish_reason_type,
@@ -981,7 +903,7 @@ class OpenAIServingChat(OpenAIServingBase):
                             logger.debug(
                                 "%s tool_path_exception rid=%s index=%s "
                                 "tool_path_chunks_so_far=%d delta_len=%d",
-                                _STREAM_TOOL_DEBUG,
+                                STREAM_TOOL_DEBUG,
                                 content["meta_info"].get("id"),
                                 index,
                                 len(tool_path_chunks),
@@ -989,13 +911,11 @@ class OpenAIServingChat(OpenAIServingBase):
                                 exc_info=True,
                             )
                         if not tool_path_chunks:
-                            to_emit = (
-                                strip_kimi_fc_special_substrings(delta)
-                                if is_kimi
-                                else delta
+                            to_emit = maybe_strip_kimi_fc_substrings(
+                                delta, is_kimi=is_kimi
                             )
                             if to_emit:
-                                yield _sse_stream_plain_text_line(
+                                yield sse_stream_plain_text_line(
                                     index=index,
                                     chatcmpl_id=content["meta_info"]["id"],
                                     model=request.model,
@@ -1090,29 +1010,17 @@ class OpenAIServingChat(OpenAIServingBase):
                         yield f"data: {chunk.model_dump_json()}\n\n"
 
                 else:
-                    to_emit: Optional[str] = (
-                        strip_kimi_fc_special_substrings(delta)
-                        if is_kimi
-                        else delta
+                    to_emit: Optional[str] = maybe_strip_kimi_fc_substrings(
+                        delta, is_kimi=is_kimi
                     )
                     # Emit when there is visible text, or when we must forward logprobs for
                     # this step (e.g. empty string delta after strip, or decode-only tokens).
                     if to_emit or (
                         request.logprobs and choice_logprobs is not None
                     ):
-                        choice_data = ChatCompletionResponseStreamChoice(
+                        yield sse_stream_plain_text_line(
                             index=index,
-                            delta=DeltaMessage(
-                                content=to_emit if to_emit else None
-                            ),
-                            finish_reason=None,
-                            matched_stop=None,
-                            logprobs=choice_logprobs,
-                        )
-                        chunk = ChatCompletionStreamResponse(
-                            id=content["meta_info"]["id"],
-                            created=int(time.time()),
-                            choices=[choice_data],
+                            chatcmpl_id=content["meta_info"]["id"],
                             model=request.model,
                             to_emit=to_emit,
                             choice_logprobs=choice_logprobs,
@@ -1347,26 +1255,9 @@ class OpenAIServingChat(OpenAIServingBase):
                         },
                     )
 
-            if is_kimi:
-                text = strip_kimi_fc_special_substrings(text)
-                if reasoning_text is not None:
-                    reasoning_text = strip_kimi_fc_special_substrings(reasoning_text)
-                if tool_calls is not None:
-                    stripped_tcs = []
-                    for tc in tool_calls:
-                        args = tc.function.arguments
-                        if isinstance(args, str):
-                            args = strip_kimi_fc_special_substrings(args)
-                        stripped_tcs.append(
-                            tc.model_copy(
-                                update={
-                                    "function": tc.function.model_copy(
-                                        update={"arguments": args}
-                                    )
-                                }
-                            )
-                        )
-                    tool_calls = stripped_tcs
+            text, reasoning_text, tool_calls = strip_kimi_openai_choice_fields(
+                is_kimi, text, reasoning_text, tool_calls
+            )
 
             choice_data = ChatCompletionResponseChoice(
                 index=idx,
@@ -1464,19 +1355,9 @@ class OpenAIServingChat(OpenAIServingBase):
         history_tool_calls_cnt: int,
     ) -> str:
         """Process for generating a new and unique `tool_call_id`"""
-        if self.tool_call_parser != "kimi_k2":
-            # A simple uuid is sufficient for all models except for Kimi-K2.
-            tool_call_id = f"call_{uuid.uuid4().hex[:24]}"
-            return tool_call_id
-        else:
-            # Align with Kimi-K2 format: functions.{name}:{index}
-            # Kimi-K2 allows multiple tool_calls in one message; SGLang sets call_item.tool_index to the *local* position inside that message.
-            # Therefore, the index must be corrected by using `history_tool_calls_cnt + call_item.tool_index` to ensure globally unique and properly ordered.
-            tool_call_id = f"functions.{call_item.name}:{history_tool_calls_cnt+call_item.tool_index}"
-            logger.debug(
-                f"Process tool call idx, parser: {self.tool_call_parser}, tool_call_id: {tool_call_id}, history_cnt: {history_tool_calls_cnt}"
-            )
-            return tool_call_id
+        return format_openai_tool_call_id(
+            self.tool_call_parser, call_item, history_tool_calls_cnt
+        )
 
     def _process_tool_calls(
         self,
@@ -1662,13 +1543,7 @@ class OpenAIServingChat(OpenAIServingBase):
         Returns:
             The total number of tool calls in the history, or 0 if not applicable.
         """
-        messages = getattr(request, "messages", [])
-        idx = 0
-        for msg in messages:
-            if msg.role == "assistant":
-                tool_calls = getattr(msg, "tool_calls", None)
-                idx += len(list(tool_calls)) if tool_calls is not None else 0  # noqa
-        return idx
+        return history_tool_calls_count(request)
 
     def _patch_mistral_skip_special_tokens(
         self, request: ChatCompletionRequest
@@ -1721,127 +1596,6 @@ class OpenAIServingChat(OpenAIServingBase):
             )
         return True  # default
 
-    async def _process_tool_call_stream(
-        self,
-        index: int,
-        delta: str,
-        parser_dict: Dict[int, FunctionCallParser],
-        content: Dict[str, Any],
-        request: ChatCompletionRequest,
-        has_tool_calls: Dict[int, bool],
-        stream_tool_call_collector: Optional[StreamToolCallCollector],
-        continuous_usage_stats: bool = False,
-        *,
-        is_kimi: bool = False,
-    ):
-        """Process tool calls in streaming response"""
-        if index not in parser_dict:
-            # Use JSON detector directly for required or named tool choice
-            if request.tool_choice == "required" or isinstance(
-                request.tool_choice, ToolChoice
-            ):
-                parser_dict[index] = JsonArrayParser()
-            else:
-                parser_dict[index] = FunctionCallParser(
-                    tools=request.tools or [],
-                    tool_call_parser=self.tool_call_parser,
-                )
-
-        parser = parser_dict[index]
-
-        # Handle both FunctionCallParser and JsonArrayParser
-        if isinstance(parser, JsonArrayParser):
-            result = parser.parse_streaming_increment(delta, request.tools or [])
-            normal_text, calls = result.normal_text, result.calls
-        else:
-            normal_text, calls = parser.parse_stream_chunk(delta)
-
-        if logger.isEnabledFor(logging.DEBUG):
-            buf_len = _parser_incremental_buffer_len(parser)
-            logger.debug(
-                "%s parse_tool_stream rid=%s index=%s parser=%s "
-                "delta_in_len=%d normal_text_len=%d num_calls=%d buf_len=%d is_kimi=%s",
-                _STREAM_TOOL_DEBUG,
-                content["meta_info"].get("id"),
-                index,
-                type(parser).__name__,
-                len(delta) if delta else 0,
-                len(normal_text) if normal_text else 0,
-                len(calls) if calls else 0,
-                buf_len,
-                is_kimi,
-            )
-            if not (normal_text or calls):
-                logger.debug(
-                    "%s parse_silent_after_increment rid=%s index=%s "
-                    "delta_in_preview=%s (parser produced no normal_text and no calls)",
-                    _STREAM_TOOL_DEBUG,
-                    content["meta_info"].get("id"),
-                    index,
-                    _short_repr(delta),
-                )
-        if normal_text:
-            out_text = (
-                strip_kimi_fc_special_substrings(normal_text)
-                if is_kimi
-                else normal_text
-            )
-            if logger.isEnabledFor(logging.DEBUG) and normal_text and not out_text:
-                logger.debug(
-                    "%s kimi_strip_dropped_entire_normal_text rid=%s index=%s "
-                    "normal_text_len=%d",
-                    _STREAM_TOOL_DEBUG,
-                    content["meta_info"].get("id"),
-                    index,
-                    len(normal_text),
-                )
-            if out_text:
-                yield _sse_tool_stream_line(
-                    index,
-                    content["meta_info"]["id"],
-                    request.model,
-                    content["meta_info"],
-                    continuous_usage_stats,
-                    content=out_text,
-                )
-
-        history_tool_calls_cnt = self._get_history_tool_calls_cnt(request)
-        mid = content["meta_info"]["id"]
-        for call_item in calls:
-            has_tool_calls[index] = True
-
-            if call_item.name:
-                tool_call_id = self._process_tool_call_id(
-                    call_item, history_tool_calls_cnt
-                )
-                function_name = call_item.name
-            else:
-                tool_call_id = None
-                function_name = None
-
-            args_for_sse: Optional[str] = call_item.parameters
-            if is_kimi and call_item.parameters:
-                args_for_sse = strip_kimi_fc_special_substrings(call_item.parameters)
-
-            tool_call = ToolCall(
-                id=tool_call_id,
-                index=call_item.tool_index,
-                function=FunctionResponse(
-                    name=function_name,
-                    arguments=args_for_sse,
-                ),
-            )
-            yield _sse_tool_stream_line(
-                index,
-                mid,
-                request.model,
-                content["meta_info"],
-                continuous_usage_stats,
-                tool_calls=[tool_call],
-            )
-            if stream_tool_call_collector:
-                stream_tool_call_collector.ingest_call_item(index, call_item)
-
     def _check_for_unstreamed_tool_args(
         self,
         parser: Union[FunctionCallParser, JsonArrayParser],
@@ -1889,9 +1643,9 @@ class OpenAIServingChat(OpenAIServingBase):
         )
 
         if remaining_call:
-            emit_args = remaining_call
-            if is_kimi_k2_openai_serving(self.tool_call_parser):
-                emit_args = strip_kimi_fc_special_substrings(remaining_call) or ""
+            emit_args = maybe_strip_remaining_tool_args(
+                remaining_call, self.tool_call_parser
+            )
             # Create tool call chunk with remaining arguments (emit before validation ingest
             # so a failing collector never swallows the last tool delta)
             tool_call = ToolCall(

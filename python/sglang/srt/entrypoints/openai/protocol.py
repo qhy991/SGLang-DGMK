@@ -1046,11 +1046,18 @@ class DeltaMessage(BaseModel):
     @classmethod
     def _strip_kimi_fc_token_literals(cls, v: Optional[str]) -> Optional[str]:
         from sglang.srt.infini.fc_token_guard import strip_kimi_fc_special_substrings
-        return strip_kimi_fc_special_substrings(v)
+
+        sanitized = strip_kimi_fc_special_substrings(v)
+        # Never stream empty-string deltas; omit the field instead.
+        return sanitized if sanitized else None
 
     @model_serializer(mode="wrap")
     def _serialize(self, handler):
         data = handler(self)
+        if data.get("content") == "":
+            data.pop("content", None)
+        if data.get("reasoning_content") == "":
+            data.pop("reasoning_content", None)
         if self.hidden_states is None:
             data.pop("hidden_states", None)
         return data
