@@ -9,6 +9,8 @@ FC_SPECIAL_TOKENS = (
     "<|tool_call_begin|>",
     "<|tool_call_end|>",
     "<|tool_call_argument_begin|>",
+    "<think>",
+    "</think>",
 )
 
 

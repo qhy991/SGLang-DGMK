@@ -922,16 +922,49 @@ class OpenAIServingChat(OpenAIServingBase):
                                         )
                                         has_tool_calls[index] = False
 
+                        else:
+                            pass
+
+                    # Tool path buffers JSON / markers into the parser; ``delta`` can be empty
+                    # while new output tokens still produced logprobs. Emit logprob-only chunks.
+                    if request.logprobs and choice_logprobs is not None:
+                        choice_data = ChatCompletionResponseStreamChoice(
+                            index=index,
+                            delta=DeltaMessage(),
+                            finish_reason=None,
+                            matched_stop=None,
+                            logprobs=choice_logprobs,
+                        )
+                        chunk = ChatCompletionStreamResponse(
+                            id=content["meta_info"]["id"],
+                            created=int(time.time()),
+                            choices=[choice_data],
+                            model=request.model,
+                        )
+                        if continuous_usage_stats:
+                            chunk.usage = UsageProcessor.calculate_token_usage(
+                                prompt_tokens=prompt_tokens.get(index, 0),
+                                reasoning_tokens=reasoning_tokens.get(index, 0),
+                                completion_tokens=completion_tokens.get(index, 0),
+                            )
+                        yield f"data: {chunk.model_dump_json()}\n\n"
+
                 else:
                     to_emit: Optional[str] = (
                         strip_kimi_fc_special_substrings(delta)
                         if is_kimi
                         else delta
                     )
-                    if to_emit:
+                    # Emit when there is visible text, or when we must forward logprobs for
+                    # this step (e.g. empty string delta after strip, or decode-only tokens).
+                    if to_emit or (
+                        request.logprobs and choice_logprobs is not None
+                    ):
                         choice_data = ChatCompletionResponseStreamChoice(
                             index=index,
-                            delta=DeltaMessage(content=to_emit),
+                            delta=DeltaMessage(
+                                content=to_emit if to_emit else None
+                            ),
                             finish_reason=None,
                             matched_stop=None,
                             logprobs=choice_logprobs,
