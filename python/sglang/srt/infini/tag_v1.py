@@ -41,7 +41,7 @@ fc_token_ids = {
     "tool_call_argument_begin": 163598,
     "tool_call_end": 163599,
     "think": 163606,
-    
+    "end_of_think": 163607,
 }
 
 token_id_tool_calls_section_begin = 163595
@@ -50,6 +50,7 @@ token_id_tool_call_begin = 163597
 token_id_tool_call_argument_begin = 163598
 token_id_tool_call_end = 163599
 token_id_think = 163606
+token_id_end_of_think = 163607
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +122,9 @@ def get_kimi_structural_tag_with_tool_marker_excludes(input_dict: Dict[str, Any]
     )
     tool_call_end = _get_fc_marker_input(input_dict, "tool_call_end", _KIMI_TOOL_CALL_END)
 
+    think_id = _get_fc_marker_input(input_dict, "think", "<think>")
+    end_of_think_id = _get_fc_marker_input(input_dict, "end_of_think", "</think>")
+
     tags = []
     for tool in tools:
         if "function" not in tool:
@@ -137,8 +141,6 @@ def get_kimi_structural_tag_with_tool_marker_excludes(input_dict: Dict[str, Any]
                 RegexFormat(pattern=r"\d+"),
                 (
                     TokenFormat(token=tool_call_argument_begin)
-                    if use_exclude_tokens
-                    else ConstStringFormat(value=_KIMI_TOOL_CALL_ARGUMENTS_BEGIN)
                 ),
                 JSONSchemaFormat(json_schema=parameters),
             ]
@@ -147,106 +149,58 @@ def get_kimi_structural_tag_with_tool_marker_excludes(input_dict: Dict[str, Any]
             TagFormat(
                 begin=(
                     TokenFormat(token=tool_call_begin)
-                    if use_exclude_tokens
-                    else f"{_KIMI_TOOL_CALL_BEGIN}functions.{name}:"
                 ),
                 content=SequenceFormat(elements=content_elements),
-                end=TokenFormat(token=tool_call_end) if use_exclude_tokens else _KIMI_TOOL_CALL_END,
+                end=TokenFormat(token=tool_call_end),
             )
         )
 
     if len(tags) > 0:
-        if use_exclude_tokens:
-            section_dispatch_exclude_tokens: List[Union[int, str]] = [
-                tool_calls_section_begin,
-                tool_call_argument_begin,
-                tool_call_end,
-                "<think>",
-                "</think>",
-            ]
-            section_content = TokenTriggeredTagsFormat(
-                trigger_tokens=[tool_call_begin],
-                tags=tags,
-                exclude_tokens=section_dispatch_exclude_tokens,
-            )
-        else:
-            section_dispatch_excludes = _unique_strings_keep_order(
-                [
-                    _KIMI_TOOL_CALLS_SECTION_BEGIN,
-                    _KIMI_TOOL_CALL_ARGUMENTS_BEGIN,
-                    _KIMI_TOOL_CALL_END,
-                    "<think>",
-                    "</think>",
-                ]
-            )
-            section_content = TriggeredTagsFormat(
-                triggers=[_KIMI_TOOL_CALL_BEGIN],
-                tags=tags,
-                excludes=section_dispatch_excludes,
-            )
-
-        tool_section_tag = TagFormat(
-            begin=TokenFormat(token=tool_calls_section_begin)
-            if use_exclude_tokens
-            else _KIMI_TOOL_CALLS_SECTION_BEGIN,
-            content=section_content,
-            end=TokenFormat(token=tool_calls_section_end)
-            if use_exclude_tokens
-            else _KIMI_TOOL_CALLS_SECTION_END,
+        section_dispatch_exclude_tokens: List[Union[int, str]] = [
+            tool_calls_section_begin,
+            tool_call_argument_begin,
+            tool_call_end,
+            think_id,
+            end_of_think_id,
+        ]
+        section_content = TokenTriggeredTagsFormat(
+            trigger_tokens=[tool_call_begin],
+            tags=tags,
+            exclude_tokens=section_dispatch_exclude_tokens,
         )
-        if use_exclude_tokens:
-            # Allow free text and trigger into tool-call section on section_begin.
-            # Block all other FC markers and think tags outside the section.
-            suffix_dispatch_exclude_tokens: List[Union[int, str]] = [
+        tool_section_tag = TagFormat(
+            begin=TokenFormat(token=tool_calls_section_begin),
+            content=section_content,
+            end=TokenFormat(token=tool_calls_section_end),
+        )
+        # Allow free text and trigger into tool-call section on section_begin.
+        # Block all other FC markers and think tags outside the section.
+        suffix_dispatch_exclude_tokens: List[Union[int, str]] = [
+            tool_calls_section_end,
+            tool_call_begin,
+            tool_call_argument_begin,
+            tool_call_end,
+            think_id,
+            end_of_think_id,
+        ]
+        suffix_tag = TokenTriggeredTagsFormat(
+            trigger_tokens=[tool_calls_section_begin],
+            tags=[tool_section_tag],
+            exclude_tokens=suffix_dispatch_exclude_tokens,
+        )
+        
+    else:
+        suffix_tag = AnyTokensFormat(
+            exclude_tokens=[
+                tool_calls_section_begin,
                 tool_calls_section_end,
                 tool_call_begin,
                 tool_call_argument_begin,
                 tool_call_end,
-                "<think>",
-                "</think>",
+                think_id,
+                end_of_think_id,
             ]
-            suffix_tag = TokenTriggeredTagsFormat(
-                trigger_tokens=[tool_calls_section_begin],
-                tags=[tool_section_tag],
-                exclude_tokens=suffix_dispatch_exclude_tokens,
-            )
-        else:
-            # Allow free text and trigger into tool-call section on section_begin.
-            # Block all other FC markers and think tags outside the section.
-            suffix_dispatch_excludes = _unique_strings_keep_order(
-                [
-                    _KIMI_TOOL_CALLS_SECTION_END,
-                    _KIMI_TOOL_CALL_BEGIN,
-                    _KIMI_TOOL_CALL_ARGUMENTS_BEGIN,
-                    _KIMI_TOOL_CALL_END,
-                    "<think>",
-                    "</think>",
-                ]
-            )
-            suffix_tag = TriggeredTagsFormat(
-                triggers=[_KIMI_TOOL_CALLS_SECTION_BEGIN],
-                tags=[tool_section_tag],
-                excludes=suffix_dispatch_excludes,
-            )
-    else:
-        if use_exclude_tokens:
-            suffix_tag = AnyTokensFormat(
-                exclude_tokens=[
-                    tool_calls_section_begin,
-                    tool_calls_section_end,
-                    tool_call_begin,
-                    tool_call_argument_begin,
-                    tool_call_end,
-                    "<think>",
-                    "</think>",
-                ]
-            )
-        else:
-            suffix_tag = AnyTextFormat(
-                excludes=_unique_strings_keep_order(
-                    ["<think>", "</think>"] + list(_KIMI_FC_MARKERS_ALL)
-                )
-            )
+        )
     logger.debug(
         "kimi_structural_tag resolved: tags=%d use_exclude_tokens=%s",
         len(tags),

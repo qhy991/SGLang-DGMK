@@ -32,6 +32,19 @@ class TestStreamingParseResult(CustomTestCase):
         self.assertEqual(result.normal_text, "normal")
         self.assertEqual(result.reasoning_text, "reasoning")
 
+    def test_normal_text_preserves_fc_markers_for_tool_parser(self):
+        """Wire-format Kimi FC markers must survive ``normal_text`` (tool parser input)."""
+        marked = (
+            "<|tool_calls_section_begin|>"
+            "<|tool_call_begin|>functions.f:0"
+        )
+        result = StreamingParseResult(
+            normal_text=marked,
+            reasoning_text="ok<|tool_calls_section_begin|>",
+        )
+        self.assertEqual(result.normal_text, marked)
+        self.assertEqual(result.reasoning_text, "ok")
+
 
 class TestBaseReasoningFormatDetector(CustomTestCase):
     def setUp(self):
