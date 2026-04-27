@@ -32,6 +32,7 @@ from openai.types.responses.response import ToolChoice
 from openai.types.responses.tool import Tool
 from pydantic import (
     BaseModel,
+    ConfigDict,
     Field,
     field_validator,
     model_serializer,
@@ -50,8 +51,21 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL_NAME = "default"
 
+from sglang.srt.infini.fc_token_guard import strip_special_tokens
 
-class ModelCard(BaseModel):
+
+def _sanitize_client_visible_model_text(v: Optional[str]) -> Optional[str]:
+    """Strip internal / wire-format literal substrings from model-sourced strings in API payloads."""
+    return strip_special_tokens(v)
+
+
+class OpenAIProtocolModelBase(BaseModel):
+    """Base for OpenAI API protocol models; re-run field validators on attribute assignment."""
+
+    model_config = ConfigDict(validate_assignment=True)
+
+
+class ModelCard(OpenAIProtocolModelBase):
     """Model cards."""
 
     id: str
@@ -63,14 +77,14 @@ class ModelCard(BaseModel):
     max_model_len: Optional[int] = None
 
 
-class ModelList(BaseModel):
+class ModelList(OpenAIProtocolModelBase):
     """Model list consists of model cards."""
 
     object: str = "list"
     data: List[ModelCard] = Field(default_factory=list)
 
 
-class ErrorResponse(BaseModel):
+class ErrorResponse(OpenAIProtocolModelBase):
     object: str = "error"
     message: str
     type: str
@@ -78,32 +92,47 @@ class ErrorResponse(BaseModel):
     code: int
 
 
-class LogProbs(BaseModel):
+class LogProbs(OpenAIProtocolModelBase):
     text_offset: List[int] = Field(default_factory=list)
     token_logprobs: List[Optional[float]] = Field(default_factory=list)
     tokens: List[str] = Field(default_factory=list)
     top_logprobs: List[Optional[Dict[str, float]]] = Field(default_factory=list)
 
+    @field_validator("tokens", mode="after")
+    @classmethod
+    def _sanitize_tokens(cls, v: List[str]) -> List[str]:
+        return [strip_special_tokens(t) for t in v]
 
-class TopLogprob(BaseModel):
+
+class TopLogprob(OpenAIProtocolModelBase):
     token: str
     bytes: List[int]
     logprob: float
 
+    @field_validator("token", mode="after")
+    @classmethod
+    def _sanitize_token(cls, v: str) -> str:
+        return strip_special_tokens(v) or ""
 
-class ChatCompletionTokenLogprob(BaseModel):
+
+class ChatCompletionTokenLogprob(OpenAIProtocolModelBase):
     token: str
     bytes: List[int]
     logprob: float
     top_logprobs: List[TopLogprob]
 
+    @field_validator("token", mode="after")
+    @classmethod
+    def _sanitize_token(cls, v: str) -> str:
+        return strip_special_tokens(v) or ""
 
-class ChoiceLogprobs(BaseModel):
+
+class ChoiceLogprobs(OpenAIProtocolModelBase):
     # build for v1/chat/completions response
     content: List[ChatCompletionTokenLogprob]
 
 
-class CachedTokensDetails(BaseModel):
+class CachedTokensDetails(OpenAIProtocolModelBase):
     """Detailed breakdown of cached tokens by cache source."""
 
     device: int = 0  # Tokens from device cache (GPU)
@@ -123,13 +152,13 @@ class CachedTokensDetails(BaseModel):
         return data
 
 
-class PromptTokensDetails(BaseModel):
+class PromptTokensDetails(OpenAIProtocolModelBase):
     """Details about prompt tokens."""
 
     cached_tokens: int = 0
 
 
-class UsageInfo(BaseModel):
+class UsageInfo(OpenAIProtocolModelBase):
     prompt_tokens: int = 0
     total_tokens: int = 0
     completion_tokens: Optional[int] = 0
@@ -138,12 +167,12 @@ class UsageInfo(BaseModel):
     reasoning_tokens: Optional[int] = 0
 
 
-class StreamOptions(BaseModel):
+class StreamOptions(OpenAIProtocolModelBase):
     include_usage: Optional[bool] = False
     continuous_usage_stats: Optional[bool] = False
 
 
-class JsonSchemaResponseFormat(BaseModel):
+class JsonSchemaResponseFormat(OpenAIProtocolModelBase):
     name: str
     description: Optional[str] = None
     # use alias to workaround pydantic conflict
@@ -151,19 +180,19 @@ class JsonSchemaResponseFormat(BaseModel):
     strict: Optional[bool] = False
 
 
-class ResponseFormat(BaseModel):
+class ResponseFormat(OpenAIProtocolModelBase):
     type: Literal["text", "json_object", "json_schema"]
     json_schema: Optional[JsonSchemaResponseFormat] = None
 
 
-class StructuresResponseFormat(BaseModel):
+class StructuresResponseFormat(OpenAIProtocolModelBase):
     begin: str
     schema_: Optional[Dict[str, object]] = Field(alias="schema", default=None)
     end: str
 
 
 # NOTE(dark): keep this for backward compatibility
-class LegacyStructuralTagResponseFormat(BaseModel):
+class LegacyStructuralTagResponseFormat(OpenAIProtocolModelBase):
     type: Literal["structural_tag"]
     structures: List[StructuresResponseFormat]
     triggers: List[str]
@@ -179,7 +208,7 @@ ToolCallConstraint: TypeAlias = Union[
 ]
 
 
-class FileRequest(BaseModel):
+class FileRequest(OpenAIProtocolModelBase):
     # https://platform.openai.com/docs/api-reference/files/create
     file: bytes  # The File object (not file name) to be uploaded
     purpose: str = (
@@ -187,7 +216,7 @@ class FileRequest(BaseModel):
     )
 
 
-class FileResponse(BaseModel):
+class FileResponse(OpenAIProtocolModelBase):
     id: str
     object: str = "file"
     bytes: int
@@ -196,13 +225,13 @@ class FileResponse(BaseModel):
     purpose: str
 
 
-class FileDeleteResponse(BaseModel):
+class FileDeleteResponse(OpenAIProtocolModelBase):
     id: str
     object: str = "file"
     deleted: bool
 
 
-class BatchRequest(BaseModel):
+class BatchRequest(OpenAIProtocolModelBase):
     input_file_id: (
         str  # The ID of an uploaded file that contains requests for the new batch
     )
@@ -211,7 +240,7 @@ class BatchRequest(BaseModel):
     metadata: Optional[dict] = None  # Optional custom metadata for the batch
 
 
-class BatchResponse(BaseModel):
+class BatchResponse(OpenAIProtocolModelBase):
     id: str
     object: str = "batch"
     endpoint: str
@@ -248,7 +277,7 @@ def _migrate_deprecated_dp_rank(values: dict) -> dict:
     return values
 
 
-class CompletionRequest(BaseModel):
+class CompletionRequest(OpenAIProtocolModelBase):
     # Ordered by official OpenAI API documentation
     # https://platform.openai.com/docs/api-reference/completions/create
     model: str = Field(
@@ -332,7 +361,7 @@ class CompletionRequest(BaseModel):
         return v
 
 
-class SglExt(BaseModel):
+class SglExt(OpenAIProtocolModelBase):
     """SGLang extension fields for OpenAI-compatible responses.
 
     Future SGLang-specific extensions to OpenAI-compatible response objects
@@ -349,13 +378,18 @@ class SglExt(BaseModel):
         return {k: v for k, v in data.items() if v is not None}
 
 
-class CompletionResponseChoice(BaseModel):
+class CompletionResponseChoice(OpenAIProtocolModelBase):
     index: int
     text: str
     logprobs: Optional[LogProbs] = None
     finish_reason: Optional[Literal["stop", "length", "content_filter", "abort"]] = None
     matched_stop: Union[None, int, str] = None
     hidden_states: Optional[object] = None
+
+    @field_validator("text", mode="after")
+    @classmethod
+    def _sanitize_text(cls, v: str) -> str:
+        return strip_special_tokens(v) or ""
 
     @model_serializer(mode="wrap")
     def _serialize(self, handler):
@@ -365,7 +399,7 @@ class CompletionResponseChoice(BaseModel):
         return data
 
 
-class CompletionResponse(BaseModel):
+class CompletionResponse(OpenAIProtocolModelBase):
     id: str
     object: str = "text_completion"
     created: int = Field(default_factory=lambda: int(time.time()))
@@ -383,13 +417,18 @@ class CompletionResponse(BaseModel):
         return data
 
 
-class CompletionResponseStreamChoice(BaseModel):
+class CompletionResponseStreamChoice(OpenAIProtocolModelBase):
     index: int
     text: str
     logprobs: Optional[LogProbs] = None
     finish_reason: Optional[Literal["stop", "length", "content_filter", "abort"]] = None
     matched_stop: Union[None, int, str] = None
     hidden_states: Optional[object] = None
+
+    @field_validator("text", mode="after")
+    @classmethod
+    def _sanitize_stream_text(cls, v: Optional[str]) -> Optional[str]:
+        return _sanitize_client_visible_model_text(v)
 
     @model_serializer(mode="wrap")
     def _serialize(self, handler):
@@ -399,7 +438,7 @@ class CompletionResponseStreamChoice(BaseModel):
         return data
 
 
-class CompletionStreamResponse(BaseModel):
+class CompletionStreamResponse(OpenAIProtocolModelBase):
     id: str
     object: str = "text_completion"
     created: int = Field(default_factory=lambda: int(time.time()))
@@ -416,40 +455,40 @@ class CompletionStreamResponse(BaseModel):
         return data
 
 
-class ChatCompletionMessageContentTextPart(BaseModel):
+class ChatCompletionMessageContentTextPart(OpenAIProtocolModelBase):
     type: Literal["text"]
     text: str
 
 
-class ChatCompletionMessageContentImageURL(BaseModel):
+class ChatCompletionMessageContentImageURL(OpenAIProtocolModelBase):
     url: str
     detail: Optional[Literal["auto", "low", "high"]] = "auto"
     max_dynamic_patch: Optional[int] = None
     min_dynamic_patch: Optional[int] = None
 
 
-class ChatCompletionMessageContentVideoURL(BaseModel):
+class ChatCompletionMessageContentVideoURL(OpenAIProtocolModelBase):
     url: str
     max_dynamic_patch: Optional[int] = None
     min_dynamic_patch: Optional[int] = None
 
 
-class ChatCompletionMessageContentAudioURL(BaseModel):
+class ChatCompletionMessageContentAudioURL(OpenAIProtocolModelBase):
     url: str
 
 
-class ChatCompletionMessageContentImagePart(BaseModel):
+class ChatCompletionMessageContentImagePart(OpenAIProtocolModelBase):
     type: Literal["image_url"]
     image_url: ChatCompletionMessageContentImageURL
     modalities: Optional[Literal["image", "multi-images", "video"]] = "image"
 
 
-class ChatCompletionMessageContentVideoPart(BaseModel):
+class ChatCompletionMessageContentVideoPart(OpenAIProtocolModelBase):
     type: Literal["video_url"]
     video_url: ChatCompletionMessageContentVideoURL
 
 
-class ChatCompletionMessageContentAudioPart(BaseModel):
+class ChatCompletionMessageContentAudioPart(OpenAIProtocolModelBase):
     type: Literal["audio_url"]
     audio_url: ChatCompletionMessageContentAudioURL
 
@@ -471,14 +510,14 @@ RerankContentPart = Union[
 RerankContent = Union[str, List[RerankContentPart]]
 
 
-class FunctionResponse(BaseModel):
+class FunctionResponse(OpenAIProtocolModelBase):
     """Function response."""
 
     name: Optional[str] = None
     arguments: Optional[str | Dict[str, Any]] = None
 
 
-class ToolCall(BaseModel):
+class ToolCall(OpenAIProtocolModelBase):
     """Tool call response."""
 
     id: Optional[str] = None
@@ -487,7 +526,7 @@ class ToolCall(BaseModel):
     function: FunctionResponse
 
 
-class ChatCompletionMessageGenericParam(BaseModel):
+class ChatCompletionMessageGenericParam(OpenAIProtocolModelBase):
     role: Literal["system", "assistant", "tool", "function", "developer", "_input"]
     content: Optional[Union[str, List[ChatCompletionMessageContentPart]]] = Field(
         default=None
@@ -511,7 +550,7 @@ class ChatCompletionMessageGenericParam(BaseModel):
         raise ValueError("'role' must be a string")
 
 
-class ChatCompletionMessageUserParam(BaseModel):
+class ChatCompletionMessageUserParam(OpenAIProtocolModelBase):
     role: Literal["user"]
     content: Union[str, List[ChatCompletionMessageContentPart]]
 
@@ -634,7 +673,7 @@ def _is_client_json_schema_normalization_enabled() -> bool:
     return True
 
 
-class Function(BaseModel):
+class Function(OpenAIProtocolModelBase):
     """Function descriptions."""
 
     description: Optional[str] = Field(default=None, examples=[None])
@@ -652,27 +691,27 @@ class Function(BaseModel):
         return self
 
 
-class Tool(BaseModel):
+class Tool(OpenAIProtocolModelBase):
     """Function wrapper."""
 
     type: str = Field(default="function", examples=["function"])
     function: Function
 
 
-class ToolChoiceFuncName(BaseModel):
+class ToolChoiceFuncName(OpenAIProtocolModelBase):
     """The name of tool choice function."""
 
     name: Optional[str] = None
 
 
-class ToolChoice(BaseModel):
+class ToolChoice(OpenAIProtocolModelBase):
     """The tool choice definition."""
 
     function: ToolChoiceFuncName
     type: Literal["function"] = Field(default="function", examples=["function"])
 
 
-class ChatCompletionRequest(BaseModel):
+class ChatCompletionRequest(OpenAIProtocolModelBase):
     # Ordered by official OpenAI API documentation
     # https://platform.openai.com/docs/api-reference/chat/create
     messages: List[ChatCompletionMessageParam]
@@ -950,7 +989,7 @@ class ChatCompletionRequest(BaseModel):
         return sampling_params
 
 
-class ChatMessage(BaseModel):
+class ChatMessage(OpenAIProtocolModelBase):
     role: Optional[str] = None
     content: Optional[str] = None
     reasoning_content: Optional[str] = None
@@ -959,8 +998,7 @@ class ChatMessage(BaseModel):
     @field_validator("content", "reasoning_content", mode="after")
     @classmethod
     def _sanitize_string_fields(cls, v: Optional[str]) -> Optional[str]:
-        from sglang.srt.infini.fc_token_guard import strip_kimi_fc_special_substrings
-        return strip_kimi_fc_special_substrings(v)
+        return _sanitize_client_visible_model_text(v)
 
     @field_validator("tool_calls", mode="after")
     @classmethod
@@ -969,13 +1007,12 @@ class ChatMessage(BaseModel):
     ) -> Optional[List[ToolCall]]:
         if not v:
             return v
-        from sglang.srt.infini.fc_token_guard import strip_kimi_fc_special_substrings
 
         new_list: List[ToolCall] = []
         for tc in v:
             args = tc.function.arguments
             if isinstance(args, str):
-                na = strip_kimi_fc_special_substrings(args) or None
+                na = _sanitize_client_visible_model_text(args) or None
                 new_list.append(
                     tc.model_copy(
                         update={
@@ -990,7 +1027,7 @@ class ChatMessage(BaseModel):
         return new_list
 
 
-class ChatCompletionResponseChoice(BaseModel):
+class ChatCompletionResponseChoice(OpenAIProtocolModelBase):
     index: int
     message: ChatMessage
     logprobs: Optional[Union[LogProbs, ChoiceLogprobs]] = None
@@ -1017,7 +1054,7 @@ class ChatCompletionResponseChoice(BaseModel):
         return data
 
 
-class ChatCompletionResponse(BaseModel):
+class ChatCompletionResponse(OpenAIProtocolModelBase):
     id: str
     object: str = "chat.completion"
     created: int = Field(default_factory=lambda: int(time.time()))
@@ -1035,7 +1072,7 @@ class ChatCompletionResponse(BaseModel):
         return data
 
 
-class DeltaMessage(BaseModel):
+class DeltaMessage(OpenAIProtocolModelBase):
     role: Optional[str] = None
     content: Optional[str] = None
     reasoning_content: Optional[str] = None
@@ -1044,12 +1081,38 @@ class DeltaMessage(BaseModel):
 
     @field_validator("content", "reasoning_content", mode="after")
     @classmethod
-    def _strip_kimi_fc_token_literals(cls, v: Optional[str]) -> Optional[str]:
-        from sglang.srt.infini.fc_token_guard import strip_kimi_fc_special_substrings
-
-        sanitized = strip_kimi_fc_special_substrings(v)
+    def _sanitize_stream_text_fields(cls, v: Optional[str]) -> Optional[str]:
+        sanitized = _sanitize_client_visible_model_text(v)
         # Never stream empty-string deltas; omit the field instead.
         return sanitized if sanitized else None
+
+
+    @field_validator("tool_calls", mode="after")
+    @classmethod
+    def _sanitize_tool_call_function_arguments(
+        cls, v: Optional[List[ToolCall]]
+    ) -> Optional[List[ToolCall]]:
+        """Match :class:`ChatMessage` for streamed ``tool_calls[].function.arguments``."""
+        if not v:
+            return v
+
+        new_list: List[ToolCall] = []
+        for tc in v:
+            args = tc.function.arguments
+            if isinstance(args, str):
+                na = _sanitize_client_visible_model_text(args) or None
+                new_list.append(
+                    tc.model_copy(
+                        update={
+                            "function": tc.function.model_copy(
+                                update={"arguments": na}
+                            )
+                        }
+                    )
+                )
+            else:
+                new_list.append(tc)
+        return new_list
 
     @model_serializer(mode="wrap")
     def _serialize(self, handler):
@@ -1063,7 +1126,7 @@ class DeltaMessage(BaseModel):
         return data
 
 
-class ChatCompletionResponseStreamChoice(BaseModel):
+class ChatCompletionResponseStreamChoice(OpenAIProtocolModelBase):
     index: int
     delta: DeltaMessage
     logprobs: Optional[Union[LogProbs, ChoiceLogprobs]] = None
@@ -1082,7 +1145,7 @@ class ChatCompletionResponseStreamChoice(BaseModel):
     matched_stop: Union[None, int, str] = None
 
 
-class ChatCompletionStreamResponse(BaseModel):
+class ChatCompletionStreamResponse(OpenAIProtocolModelBase):
     id: str
     object: str = "chat.completion.chunk"
     created: int = Field(default_factory=lambda: int(time.time()))
@@ -1099,7 +1162,7 @@ class ChatCompletionStreamResponse(BaseModel):
         return data
 
 
-class MultimodalEmbeddingInput(BaseModel):
+class MultimodalEmbeddingInput(OpenAIProtocolModelBase):
     text: Optional[str] = None
     image: Optional[str] = None
     video: Optional[str] = None
@@ -1110,7 +1173,7 @@ EmbeddingInput = Union[
 ]
 
 
-class EmbeddingRequest(BaseModel):
+class EmbeddingRequest(OpenAIProtocolModelBase):
     # Ordered by official OpenAI API documentation
     # https://platform.openai.com/docs/api-reference/embeddings/create
     input: EmbeddingInput
@@ -1127,7 +1190,7 @@ class EmbeddingRequest(BaseModel):
     lora_path: Optional[Union[List[Optional[str]], Optional[str]]] = None
 
 
-class EmbeddingObject(BaseModel):
+class EmbeddingObject(OpenAIProtocolModelBase):
     embedding: List[float]
     index: int
     object: str = "embedding"
@@ -1136,7 +1199,7 @@ class EmbeddingObject(BaseModel):
 ClassifyInput = Union[str, List[str], List[int]]
 
 
-class ClassifyRequest(BaseModel):
+class ClassifyRequest(OpenAIProtocolModelBase):
     # OpenAI-compatible classification request
     model: str = DEFAULT_MODEL_NAME
     input: ClassifyInput
@@ -1148,14 +1211,14 @@ class ClassifyRequest(BaseModel):
     priority: Optional[int] = None
 
 
-class ClassifyData(BaseModel):
+class ClassifyData(OpenAIProtocolModelBase):
     index: int
     label: str
     probs: List[float]
     num_classes: int
 
 
-class ClassifyResponse(BaseModel):
+class ClassifyResponse(OpenAIProtocolModelBase):
     id: str
     object: str = "list"
     created: int
@@ -1164,14 +1227,14 @@ class ClassifyResponse(BaseModel):
     usage: UsageInfo
 
 
-class EmbeddingResponse(BaseModel):
+class EmbeddingResponse(OpenAIProtocolModelBase):
     data: List[EmbeddingObject]
     model: str
     object: str = "list"
     usage: Optional[UsageInfo] = None
 
 
-class ScoringRequest(BaseModel):
+class ScoringRequest(OpenAIProtocolModelBase):
     query: Optional[Union[str, List[int]]] = (
         None  # Query text or pre-tokenized token IDs
     )
@@ -1186,7 +1249,7 @@ class ScoringRequest(BaseModel):
     model: str = DEFAULT_MODEL_NAME
 
 
-class ScoringResponse(BaseModel):
+class ScoringResponse(OpenAIProtocolModelBase):
     scores: List[
         List[float]
     ]  # List of lists of probabilities, each in the order of label_token_ids
@@ -1195,7 +1258,7 @@ class ScoringResponse(BaseModel):
     object: str = "scoring"
 
 
-class V1RerankReqInput(BaseModel):
+class V1RerankReqInput(OpenAIProtocolModelBase):
     query: RerankContent = Field(
         ...,
         description="The query to match against documents. Can be a string (text-only) "
@@ -1237,7 +1300,7 @@ class V1RerankReqInput(BaseModel):
         return False
 
 
-class RerankResponse(BaseModel):
+class RerankResponse(OpenAIProtocolModelBase):
     score: float
     document: Optional[str] = None
     index: int
@@ -1252,7 +1315,7 @@ class RerankResponse(BaseModel):
         return data
 
 
-class TokenizeRequest(BaseModel):
+class TokenizeRequest(OpenAIProtocolModelBase):
     """Request schema for the /tokenize endpoint."""
 
     model: str = DEFAULT_MODEL_NAME
@@ -1263,7 +1326,7 @@ class TokenizeRequest(BaseModel):
     )
 
 
-class TokenizeResponse(BaseModel):
+class TokenizeResponse(OpenAIProtocolModelBase):
     """Response schema for the /tokenize endpoint."""
 
     tokens: Union[List[int], List[List[int]]]
@@ -1271,7 +1334,7 @@ class TokenizeResponse(BaseModel):
     max_model_len: int
 
 
-class DetokenizeRequest(BaseModel):
+class DetokenizeRequest(OpenAIProtocolModelBase):
     """Request schema for the /detokenize endpoint."""
 
     model: str = DEFAULT_MODEL_NAME
@@ -1282,7 +1345,7 @@ class DetokenizeRequest(BaseModel):
     )
 
 
-class DetokenizeResponse(BaseModel):
+class DetokenizeResponse(OpenAIProtocolModelBase):
     """Response schema for the /detokenize endpoint."""
 
     text: Union[str, List[str]]
@@ -1301,7 +1364,7 @@ OpenAIServingRequest = Union[
 
 
 # Response API protocol definitions
-class ResponseReasoningParam(BaseModel):
+class ResponseReasoningParam(OpenAIProtocolModelBase):
     """Reasoning parameters for responses."""
 
     effort: Optional[Literal["low", "medium", "high"]] = Field(
@@ -1310,7 +1373,7 @@ class ResponseReasoningParam(BaseModel):
     )
 
 
-class ResponseTool(BaseModel):
+class ResponseTool(OpenAIProtocolModelBase):
     """Tool definition for responses."""
 
     type: Literal["web_search_preview", "code_interpreter"] = Field(
@@ -1325,7 +1388,7 @@ ResponseInputOutputItem: TypeAlias = Union[
 ]
 
 
-class ResponsesRequest(BaseModel):
+class ResponsesRequest(OpenAIProtocolModelBase):
     """Request body for v1/responses endpoint."""
 
     # Core OpenAI API fields (ordered by official documentation)
@@ -1440,13 +1503,13 @@ class ResponsesRequest(BaseModel):
         return params
 
 
-class PromptTokenUsageInfo(BaseModel):
+class PromptTokenUsageInfo(OpenAIProtocolModelBase):
     """Prompt token usage details."""
 
     cached_tokens: int = 0
 
 
-class ResponsesResponse(BaseModel):
+class ResponsesResponse(OpenAIProtocolModelBase):
     """Response body for v1/responses endpoint."""
 
     id: str = Field(default_factory=lambda: f"resp_{time.time()}")
@@ -1562,7 +1625,7 @@ class ResponsesResponse(BaseModel):
         )
 
 
-class RequestResponseMetadata(BaseModel):
+class RequestResponseMetadata(OpenAIProtocolModelBase):
     """Metadata for request/response tracking."""
 
     request_id: str
@@ -1607,9 +1670,14 @@ class ToolCallProcessingResult(NamedTuple):
     finish_reason: Dict[str, Any]  # Updated finish reason dictionary
 
 
-class ResponseReasoningTextContent(BaseModel):
+class ResponseReasoningTextContent(OpenAIProtocolModelBase):
     text: str
     type: Literal["reasoning_text"] = "reasoning_text"
+
+    @field_validator("text", mode="after")
+    @classmethod
+    def _sanitize_text(cls, v: str) -> str:
+        return strip_special_tokens(v) or ""
 
 
 ResponseInputOutputItem: TypeAlias = Union[
@@ -1620,7 +1688,7 @@ ResponseInputOutputItem: TypeAlias = Union[
 # ================== Transcription API Protocol Definitions ==================
 
 
-class TranscriptionRequest(BaseModel):
+class TranscriptionRequest(OpenAIProtocolModelBase):
     """Request model for audio transcription (OpenAI-compatible)."""
 
     model: str = DEFAULT_MODEL_NAME
@@ -1634,21 +1702,26 @@ class TranscriptionRequest(BaseModel):
     audio_duration_s: float = 0.0
 
 
-class TranscriptionUsage(BaseModel):
+class TranscriptionUsage(OpenAIProtocolModelBase):
     """Usage info for transcription response (duration-based)."""
 
     type: Literal["duration"] = "duration"
     seconds: int  # Audio duration in seconds (rounded up)
 
 
-class TranscriptionResponse(BaseModel):
+class TranscriptionResponse(OpenAIProtocolModelBase):
     """Non-streaming transcription response (OpenAI-compatible)."""
 
     text: str
     usage: Optional[TranscriptionUsage] = None
 
+    @field_validator("text", mode="after")
+    @classmethod
+    def _sanitize_text(cls, v: str) -> str:
+        return strip_special_tokens(v) or ""
 
-class TranscriptionSegment(BaseModel):
+
+class TranscriptionSegment(OpenAIProtocolModelBase):
     """A segment with timestamp information."""
 
     id: int
@@ -1656,8 +1729,13 @@ class TranscriptionSegment(BaseModel):
     end: float
     text: str
 
+    @field_validator("text", mode="after")
+    @classmethod
+    def _sanitize_text(cls, v: str) -> str:
+        return strip_special_tokens(v) or ""
 
-class TranscriptionVerboseResponse(BaseModel):
+
+class TranscriptionVerboseResponse(OpenAIProtocolModelBase):
     """Verbose transcription response with timestamps (OpenAI-compatible)."""
 
     task: str = "transcribe"
@@ -1667,15 +1745,20 @@ class TranscriptionVerboseResponse(BaseModel):
     segments: List[TranscriptionSegment] = []
     usage: Optional[TranscriptionUsage] = None
 
+    @field_validator("text", mode="after")
+    @classmethod
+    def _sanitize_text(cls, v: str) -> str:
+        return strip_special_tokens(v) or ""
 
-class TranscriptionStreamChoice(BaseModel):
+
+class TranscriptionStreamChoice(OpenAIProtocolModelBase):
     """Delta content for streaming transcription."""
 
     delta: DeltaMessage
     finish_reason: Optional[str] = None
 
 
-class TranscriptionStreamResponse(BaseModel):
+class TranscriptionStreamResponse(OpenAIProtocolModelBase):
     """Streaming transcription chunk (OpenAI-compatible)."""
 
     id: str = Field(default_factory=lambda: f"trsc-{uuid.uuid4().hex}")

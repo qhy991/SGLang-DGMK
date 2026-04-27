@@ -738,7 +738,9 @@ class AnthropicServing:
                 self.openai_serving_chat.tokenizer_manager.model_config.is_multimodal
             )
             processed = self.openai_serving_chat._process_messages(
-                chat_request, is_multimodal
+                chat_request,
+                is_multimodal,
+                self.openai_serving_chat._get_reasoning_from_request(chat_request),
             )
 
             if isinstance(processed.prompt_ids, list):

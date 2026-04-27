@@ -14,7 +14,6 @@ from sglang.srt.entrypoints.openai.protocol import (
 from sglang.srt.function_call.core_types import ToolCallItem
 from sglang.srt.function_call.function_call_parser import FunctionCallParser
 from sglang.srt.function_call.json_array_parser import JsonArrayParser
-from sglang.srt.infini.fc_token_guard import strip_kimi_fc_special_substrings
 from sglang.srt.infini.kimi_fc_openai_serving import (
     format_openai_tool_call_id,
     history_tool_calls_count,
@@ -98,29 +97,14 @@ async def iter_tool_call_stream_sse_chunks(
                 short_repr(delta),
             )
     if normal_text:
-        out_text = (
-            strip_kimi_fc_special_substrings(normal_text)
-            if is_kimi
-            else normal_text
+        yield sse_tool_stream_line(
+            index,
+            content["meta_info"]["id"],
+            request.model,
+            content["meta_info"],
+            continuous_usage_stats,
+            content=normal_text,
         )
-        if logger.isEnabledFor(logging.DEBUG) and normal_text and not out_text:
-            logger.debug(
-                "%s kimi_strip_dropped_entire_normal_text rid=%s index=%s "
-                "normal_text_len=%d",
-                STREAM_TOOL_DEBUG,
-                content["meta_info"].get("id"),
-                index,
-                len(normal_text),
-            )
-        if out_text:
-            yield sse_tool_stream_line(
-                index,
-                content["meta_info"]["id"],
-                request.model,
-                content["meta_info"],
-                continuous_usage_stats,
-                content=out_text,
-            )
 
     history_tool_calls_cnt = history_tool_calls_count(request)
     mid = content["meta_info"]["id"]
@@ -135,16 +119,12 @@ async def iter_tool_call_stream_sse_chunks(
             tool_call_id = None
             function_name = None
 
-        args_for_sse: Optional[str] = call_item.parameters
-        if is_kimi and call_item.parameters:
-            args_for_sse = strip_kimi_fc_special_substrings(call_item.parameters)
-
         tool_call = ToolCall(
             id=tool_call_id,
             index=call_item.tool_index,
             function=FunctionResponse(
                 name=function_name,
-                arguments=args_for_sse,
+                arguments=call_item.parameters,
             ),
         )
         yield sse_tool_stream_line(

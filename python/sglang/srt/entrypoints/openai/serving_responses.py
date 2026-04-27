@@ -388,7 +388,11 @@ class OpenAIServingResponses(OpenAIServingChat):
 
             # Follow SGLang's _process_messages pattern
             is_multimodal = self.tokenizer_manager.model_config.is_multimodal
-            processed_messages = self._process_messages(chat_request, is_multimodal)
+            processed_messages = self._process_messages(
+                chat_request,
+                is_multimodal,
+                self._get_reasoning_from_request(chat_request),
+            )
 
             # Extract the results
             if is_multimodal:

@@ -12,8 +12,10 @@ class StreamingParseResult:
         normal_text: Optional[str] = None,
         reasoning_text: Optional[str] = None,
     ):
-        self.normal_text = normal_text or ""
-        self.reasoning_text = reasoning_text or ""
+        # sanitize the normal text and reasoning text to remove special tokens
+        from sglang.srt.infini.fc_token_guard import strip_special_tokens
+        self.normal_text = strip_special_tokens(normal_text) or ""
+        self.reasoning_text = strip_special_tokens(reasoning_text) or ""
 
 
 class BaseReasoningFormatDetector:

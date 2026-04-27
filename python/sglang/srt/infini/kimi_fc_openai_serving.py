@@ -1,18 +1,18 @@
 """Kimi K2 (``kimi_k2`` tool parser) helpers for the OpenAI chat layer.
 
-FC special substrings in assistant output are removed via
-``strip_kimi_fc_special_substrings`` in :mod:`sglang.srt.infini.fc_token_guard`.
+FC literal sanitization for streamed and completion payloads lives on
+:class:`~sglang.srt.entrypoints.openai.protocol.DeltaMessage` and
+:class:`~sglang.srt.entrypoints.openai.protocol.ChatMessage` in ``protocol.py``.
 """
 
 from __future__ import annotations
 
 import logging
 import uuid
-from typing import List, Optional, Tuple
+from typing import Optional
 
-from sglang.srt.entrypoints.openai.protocol import ChatCompletionRequest, ToolCall
+from sglang.srt.entrypoints.openai.protocol import ChatCompletionRequest
 from sglang.srt.function_call.core_types import ToolCallItem
-from sglang.srt.infini.fc_token_guard import strip_kimi_fc_special_substrings
 
 logger = logging.getLogger(__name__)
 
@@ -53,50 +53,3 @@ def format_openai_tool_call_id(
         history_tool_calls_cnt,
     )
     return tool_call_id
-
-
-def maybe_strip_kimi_fc_substrings(
-    text: Optional[str], *, is_kimi: bool
-) -> Optional[str]:
-    if not is_kimi or text is None:
-        return text
-    return strip_kimi_fc_special_substrings(text)
-
-
-def maybe_strip_remaining_tool_args(
-    remaining_call: str, tool_call_parser: Optional[str]
-) -> str:
-    if is_kimi_k2_openai_serving(tool_call_parser):
-        return strip_kimi_fc_special_substrings(remaining_call) or ""
-    return remaining_call
-
-
-def strip_kimi_openai_choice_fields(
-    is_kimi: bool,
-    text: str,
-    reasoning_text: Optional[str],
-    tool_calls: Optional[List[ToolCall]],
-) -> Tuple[str, Optional[str], Optional[List[ToolCall]]]:
-    """Strip FC literals from non-streaming assistant message fields when serving Kimi."""
-    if not is_kimi:
-        return text, reasoning_text, tool_calls
-    text = strip_kimi_fc_special_substrings(text)
-    if reasoning_text is not None:
-        reasoning_text = strip_kimi_fc_special_substrings(reasoning_text)
-    if tool_calls is not None:
-        stripped_tcs = []
-        for tc in tool_calls:
-            args = tc.function.arguments
-            if isinstance(args, str):
-                args = strip_kimi_fc_special_substrings(args)
-            stripped_tcs.append(
-                tc.model_copy(
-                    update={
-                        "function": tc.function.model_copy(
-                            update={"arguments": args}
-                        )
-                    }
-                )
-            )
-        tool_calls = stripped_tcs
-    return text, reasoning_text, tool_calls

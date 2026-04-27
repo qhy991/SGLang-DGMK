@@ -10,11 +10,38 @@ FC_SPECIAL_TOKENS = (
     "<|tool_call_begin|>",
     "<|tool_call_end|>",
     "<|tool_call_argument_begin|>",
+    # Kimi K2 alternate wire format (kimik2_detector tool_call_regex; distinct from redacted_* spellings).
     "<think>",
     "</think>",
 )
 
+SPECIAL_TOKENS = FC_SPECIAL_TOKENS + (
+    # "<|im_end|>",
+    # "<|im_user|>",
+    # "<|im_middle|>",
+    # "<|im_assistant|>",
+    # "<|media_content|>",
+    # "<|media_pad|>",
+    # "<|media_begin|>",
+    # "<|media_end|>",
+    # "<|start_header_id|>",
+    # "<|end_header_id|>",
+    # "<think>",
+    # "</think>",
+)
+
 logger = logging.getLogger(__name__)
+
+def strip_special_tokens(s: Optional[str]) -> Optional[str]:
+    """Remove all special tokens from text."""
+    if not s:
+        return s
+    out: str = s
+    for tok in SPECIAL_TOKENS:
+        if tok in out:
+            logger.debug(f"Stripping special substring: {tok}")
+            out = out.replace(tok, "")
+    return out
 
 
 def strip_kimi_fc_special_substrings(s: Optional[str]) -> Optional[str]:
