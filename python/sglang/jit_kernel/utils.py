@@ -195,6 +195,31 @@ def load_jit(
         extra_include_paths += _REGISTERED_DEPENDENCIES[dep]()
 
     module_name = "sgl_kernel_jit_" + "_".join(str(arg) for arg in args)
+
+    # Check if we should try to load existing .so directly (skip compilation)
+    # This is controlled by SGLANG_TVM_FFI_JIT_SKIP_COMPILE=true environment variable
+    if os.getenv("SGLANG_TVM_FFI_JIT_SKIP_COMPILE", "false").lower() == "true":
+        # Determine the cache directory path
+        if build_directory is not None:
+            so_dir = pathlib.Path(build_directory)
+        else:
+            cache_dir = os.getenv("TVM_FFI_CACHE_DIR")
+            if cache_dir:
+                so_dir = pathlib.Path(cache_dir)
+            else:
+                so_dir = pathlib.Path.home() / ".cache" / "tvm-ffi"
+
+        # Find the actual kernel directory (it has a hash suffix)
+        # Skip if directory doesn't exist or is empty
+        if so_dir.exists():
+            for subdir in so_dir.iterdir():
+                if subdir.is_dir() and subdir.name.startswith(module_name):
+                    so_path = subdir / f"{module_name}.so"
+                    if so_path.exists():
+                        import tvm_ffi
+                        logger.info(f"Loading existing JIT kernel from {so_path} (skip compilation)")
+                        return tvm_ffi.load_module(str(so_path))
+
     if header_only:
         cpp_wrappers = cpp_wrappers or []
         cuda_wrappers = cuda_wrappers or []
