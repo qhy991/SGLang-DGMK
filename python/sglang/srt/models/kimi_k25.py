@@ -798,36 +798,31 @@ class KimiK25ForConditionalGeneration(nn.Module):
         if mapper is not None:
             weights = mapper.apply(weights)
 
-        # Separate vision tower weights and language model weights
         vision_weights = []
-        language_weights = []
 
-        for name, loaded_weight in weights:
-            if "vision_tower" in name or "mm_projector" in name:
-                name = name.replace(r"wqkv.", r"attn.qkv_proj.")
-                name = name.replace(r"wo.", r"attn.proj.")
-                name = name.replace("mm_projector.proj.0", "mm_projector.linear_1")
-                name = name.replace("mm_projector.proj.2", "mm_projector.linear_2")
-                vision_weights.append((name, loaded_weight))
-            else:
-                name = name.replace("language_model.", "")
-                # All other weights go to language model
-                language_weights.append((name, loaded_weight))
+        def language_weights_gen():
+            for name, loaded_weight in weights:
+                if "vision_tower" in name or "mm_projector" in name:
+                    name = name.replace(r"wqkv.", r"attn.qkv_proj.")
+                    name = name.replace(r"wo.", r"attn.proj.")
+                    name = name.replace("mm_projector.proj.0", "mm_projector.linear_1")
+                    name = name.replace("mm_projector.proj.2", "mm_projector.linear_2")
+                    vision_weights.append((name, loaded_weight))
+                else:
+                    name = name.replace("language_model.", "")
+                    yield name, loaded_weight
 
-        # Load vision tower weights
-        vision_state_dict = dict(vision_weights)
+        # Load language model weights first (streaming, no materialization)
+        self.language_model.load_weights(language_weights_gen())
+
+        # Load vision tower weights from buffer (small, ~1 GB)
         params_dict = dict(self.named_parameters(remove_duplicate=False))
-        for name, loaded_weight in vision_state_dict.items():
+        for name, loaded_weight in vision_weights:
             if name not in params_dict:
                 raise ValueError(f"Weight {name} not found in params_dict")
             param = params_dict[name]
             weight_loader = getattr(param, "weight_loader", default_weight_loader)
-            # loaded_weight = self._pad_vit_attn_dummy_heads(name, loaded_weight)
             weight_loader(param, loaded_weight)
-
-        # Load language model weights
-        if language_weights:
-            self.language_model.load_weights(language_weights)
 
     @classmethod
     def get_model_config_for_expert_location(cls, config: KimiK25Config):

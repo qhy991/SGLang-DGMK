@@ -693,7 +693,7 @@ class FusedMoE(torch.nn.Module):
             )
 
         loaded_weight = (
-            loaded_weight.t().contiguous()
+            loaded_weight.t()
             if (
                 method.__class__.__name__
                 in [
