@@ -51,7 +51,7 @@ def strip_kimi_fc_special_substrings(s: Optional[str]) -> Optional[str]:
     out: str = s
     for tok in FC_SPECIAL_TOKENS:
         if tok in out:
-            logger.debug(f"Stripping special substring: {tok}")
+            # logger.debug(f"Stripping special substring: {tok}")
             out = out.replace(tok, "")
     return out
 

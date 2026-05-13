@@ -732,10 +732,13 @@ class OpenAIServingChat(OpenAIServingBase):
                         code = finish_reason.get(
                             "status_code", HTTPStatus.INTERNAL_SERVER_ERROR
                         )
+                        name = code.name if code is not None else "Unknown Error"
+                        value = code.value if code is not None else "Unknown Error"
+                        # TODO: add more error codes and messages
                         error = self.create_streaming_error_response(
                             finish_reason.get("message", "Generation aborted."),
-                            code.name,
-                            code.value,
+                            name,
+                            value,
                         )
                         yield f"data: {error}\n\n"
                         break

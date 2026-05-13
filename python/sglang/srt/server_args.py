@@ -155,7 +155,7 @@ DISAGG_TRANSFER_BACKEND_CHOICES = ["mooncake", "nixl", "ascend", "fake", "mori"]
 
 ENCODER_TRANSFER_BACKEND_CHOICES = ["zmq_to_scheduler", "zmq_to_tokenizer", "mooncake"]
 
-GRAMMAR_BACKEND_CHOICES = ["xgrammar", "outlines", "llguidance", "none"]
+GRAMMAR_BACKEND_CHOICES = ["xgrammar", "outlines", "llguidance", "loom", "none"]
 
 DETERMINISTIC_ATTENTION_BACKEND_CHOICES = ["flashinfer", "fa3", "triton"]
 
@@ -478,6 +478,9 @@ class ServerArgs:
     prefill_attention_backend: Optional[str] = None
     sampling_backend: Optional[str] = None
     grammar_backend: Optional[str] = None
+    # Native Loom (grammar-backend=loom): merged as top-level ``loom_engine`` on Kimi wire JSON.
+    loom_engine: Optional[Dict[str, Any]] = None
+    loom_engine_json: Optional[str] = None
     mm_attention_backend: Optional[str] = None
     fp8_gemm_runner_backend: str = "auto"
     fp4_gemm_runner_backend: str = "auto"
@@ -754,6 +757,9 @@ class ServerArgs:
 
         # Validate SSL arguments early (before dummy-model short-circuit).
         self._handle_ssl_validation()
+
+        # Loom native ``loom_engine`` on Kimi wire (CLI / env); runs for dummy models too.
+        self._handle_loom_engine()
 
         if self.model_path.lower() in ["none", "dummy"]:
             # Skip for dummy models
@@ -2564,6 +2570,37 @@ class ServerArgs:
     def _handle_grammar_backend(self):
         if self.grammar_backend is None:
             self.grammar_backend = "xgrammar"
+
+    def _handle_loom_engine(self):
+        """Normalize ``loom_engine`` from JSON string and/or ``SGLANG_LOOM_ENGINE_JSON``.
+
+        :class:`~loom.loom_grammar_backend.LoomGrammarBackend` reads ``loom_engine`` (dict) or
+        ``loom_engine_json`` (string). When only a string is provided, parse once into ``loom_engine``
+        so programmatic ``server_args.loom_engine`` is set for backends that only inspect the dict.
+        """
+        le_json = self.loom_engine_json
+        if not (isinstance(le_json, str) and le_json.strip()):
+            env_val = os.environ.get("SGLANG_LOOM_ENGINE_JSON", "").strip()
+            if env_val:
+                self.loom_engine_json = env_val
+        if isinstance(self.loom_engine, dict):
+            return
+        raw = self.loom_engine_json
+        if not (isinstance(raw, str) and raw.strip()):
+            return
+        try:
+            parsed = json.loads(raw.strip())
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                "Invalid JSON in --loom-engine-json or SGLANG_LOOM_ENGINE_JSON: "
+                f"{e}"
+            ) from e
+        if not isinstance(parsed, dict):
+            raise ValueError(
+                "loom_engine_json must be a JSON object (dict), "
+                f"got {type(parsed).__name__}"
+            )
+        self.loom_engine = parsed
 
     def _handle_mamba_backend(self):
         if self.mamba_backend == "flashinfer":
@@ -4690,6 +4727,30 @@ class ServerArgs:
             choices=GRAMMAR_BACKEND_CHOICES,
             default=ServerArgs.grammar_backend,
             help="Choose the backend for grammar-guided decoding.",
+        )
+        parser.add_argument(
+            "--loom-engine",
+            type=json.loads,
+            default=ServerArgs.loom_engine,
+            dest="loom_engine",
+            help=(
+                "When grammar-backend is loom: optional JSON object for native ``loom_engine`` "
+                "on the Kimi wire spec. Same object as ``--loom-engine-json`` but parsed by "
+                "argparse (quote for your shell). Typically use ``--loom-engine-json`` instead."
+            ),
+        )
+        parser.add_argument(
+            "--loom-engine-json",
+            type=str,
+            default=ServerArgs.loom_engine_json,
+            help=(
+                "When grammar-backend is loom: JSON object merged as top-level ``loom_engine`` "
+                "on the native Kimi wire spec (e.g. "
+                '\'{"keywords":{"required":"enforce","enum":"enforce"}}\'). '
+                "Alternative: set environment variable SGLANG_LOOM_ENGINE_JSON. "
+                "You can also pass ``--loom-engine`` with a JSON object, or set "
+                "``server_args.loom_engine`` as a dict from Python."
+            ),
         )
         parser.add_argument(
             "--mm-attention-backend",
