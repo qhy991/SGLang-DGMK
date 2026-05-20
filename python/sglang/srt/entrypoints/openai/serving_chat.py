@@ -379,6 +379,8 @@ class OpenAIServingChat(OpenAIServingBase):
                     parallel_tool_calls=request.parallel_tool_calls,
                 )
                 tool_call_constraint = ("json_schema", json_schema)
+        else:
+            tool_call_constraint = FunctionCallParser.get_empty_structural_tag();
 
         # Use chat template
         if self.template_manager.chat_template_name is None:
@@ -487,7 +489,8 @@ class OpenAIServingChat(OpenAIServingBase):
                                     item["function"]["arguments"]
                                 )
                             except Exception as e:
-                                item["function"]["arguments"] = item["function"]["arguments"]
+                                # error from last turn, just ignore it
+                                pass
 
                 openai_compatible_messages.append(processed_msg)
 
