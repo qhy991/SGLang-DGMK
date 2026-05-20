@@ -139,6 +139,7 @@ def prepare_mlp_sync_batch_raw(
     require_mlp_tp_gather: bool,
     disable_overlap_schedule: bool,
     offload_tags: set[str],
+    force_cpu_group: bool = False,
 ):
     # Check if other DP workers have running batches
     if local_batch is None or local_batch.forward_mode.is_prebuilt():
@@ -174,15 +175,21 @@ def prepare_mlp_sync_batch_raw(
         local_batch.is_extend_in_batch = is_extend_in_batch
 
     tbo_preparer = TboDPAttentionPreparer()
-    if len(offload_tags) == 0 and (
+    if force_cpu_group:
+        group = tp_group.cpu_group
+        device = "cpu"
+        group_source = "forced_cpu"
+    elif len(offload_tags) == 0 and (
         disable_overlap_schedule
         or envs.SGLANG_NCCL_ALL_GATHER_IN_OVERLAP_SCHEDULER_SYNC_BATCH.get()
     ):
         group = tp_group.device_group
         device = tp_group.device
+        group_source = "device"
     else:
         group = tp_group.cpu_group
         device = "cpu"
+        group_source = "cpu"
 
     local_can_run_tbo, local_forward_mode = tbo_preparer.prepare_all_gather(local_batch)
 
@@ -206,7 +213,6 @@ def prepare_mlp_sync_batch_raw(
                 mlp_sync_info.tp0_info[:, 4:6],
             )
         )
-
     need_idle_batch = skip_all_gather or max(mlp_sync_info.global_num_tokens) > 0
     if need_idle_batch:
         batch_to_gather = local_batch
@@ -227,6 +233,10 @@ def prepare_mlp_sync_batch_raw(
 
 class SchedulerDPAttnMixin:
     def prepare_mlp_sync_batch(self: Scheduler, local_batch: ScheduleBatch):
+        force_cpu_group = (
+            getattr(getattr(self, "disaggregation_mode", None), "value", None)
+            == "decode"
+        )
         return prepare_mlp_sync_batch_raw(
             local_batch,
             dp_size=self.server_args.dp_size,
@@ -238,6 +248,7 @@ class SchedulerDPAttnMixin:
             require_mlp_tp_gather=require_mlp_tp_gather(self.server_args),
             disable_overlap_schedule=self.server_args.disable_overlap_schedule,
             offload_tags=self.offload_tags,
+            force_cpu_group=force_cpu_group,
         )
 
     def maybe_prepare_mlp_sync_batch(

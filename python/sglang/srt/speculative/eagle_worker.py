@@ -1222,9 +1222,9 @@ class EAGLEWorker(TpModelWorker):
                 forward_batch
             )
             # cuda-graph replay populates logits_output.{topk_p, topk_index, hidden_states}.
-            topk_p = logits_output.topk_p
-            topk_index = logits_output.topk_index
-            hidden_states = logits_output.hidden_states
+            topk_p = logits_output.topk_p.clone()
+            topk_index = logits_output.topk_index.clone()
+            hidden_states = logits_output.hidden_states.clone()
         else:
             forward_batch.can_run_dp_cuda_graph = False
             if not forward_batch.forward_mode.is_idle():

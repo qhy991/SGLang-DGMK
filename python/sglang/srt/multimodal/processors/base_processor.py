@@ -1,9 +1,12 @@
 import concurrent
 import concurrent.futures
 import dataclasses
+import json
 import multiprocessing as mp
 import os
 import re
+import tempfile
+import time
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
@@ -585,6 +588,56 @@ class BaseMultimodalProcessor(ABC):
 
         return futures
 
+    @staticmethod
+    def _dump_request_on_mismatch(request_dump_info: Optional[Dict[str, Any]]):
+        if request_dump_info is None:
+            return
+        dump_dir = os.environ.get(
+            "SGLANG_MM_MISMATCH_DUMP_DIR", "/root/sglang_mm_mismatch_dumps"
+        )
+        os.makedirs(dump_dir, exist_ok=True)
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        dump_path = os.path.join(dump_dir, f"mismatch_{timestamp}_{os.getpid()}.json")
+        try:
+            with open(dump_path, "w") as f:
+                json.dump(request_dump_info, f, ensure_ascii=False, indent=2, default=str)
+            logger.warning(f"Request body dumped to: {dump_path}")
+        except Exception as e:
+            logger.warning(f"Failed to dump request body: {e}")
+
+    @staticmethod
+    def _build_request_dump_info(
+        prompt: str,
+        image_data: Optional[list],
+        video_data: Optional[list],
+        audio_data: Optional[list],
+    ) -> Dict[str, Any]:
+        def _summarize_data_item(item):
+            if item is None:
+                return None
+            if isinstance(item, str):
+                if item.startswith("data:"):
+                    return f"<base64 data uri, len={len(item)}>"
+                if len(item) > 500:
+                    return f"{item[:200]}...<truncated, total len={len(item)}>"
+                return item
+            if isinstance(item, dict):
+                return {
+                    k: _summarize_data_item(v) if k != "format" else v
+                    for k, v in item.items()
+                }
+            return repr(item)[:200]
+
+        return {
+            "prompt": prompt,
+            "image_data": [_summarize_data_item(d) for d in image_data] if image_data else None,
+            "image_data_count": len(image_data) if image_data else 0,
+            "video_data": [_summarize_data_item(d) for d in video_data] if video_data else None,
+            "video_data_count": len(video_data) if video_data else 0,
+            "audio_data": [_summarize_data_item(d) for d in audio_data] if audio_data else None,
+            "audio_data_count": len(audio_data) if audio_data else 0,
+        }
+
     def submit_data_loading_tasks(
         self,
         text_parts: List[str],
@@ -595,12 +648,14 @@ class BaseMultimodalProcessor(ABC):
         image_scaling_factor: float = 1.0,
         max_image_frames: int = 30,
         audio_sample_rate: Optional[int] = None,
+        request_dump_info: Optional[Dict[str, Any]] = None,
     ) -> Tuple[List, List]:
         """
         load multimodal data parallelly using iterators.
         """
         futures = []
         task_info = []
+        matched_counts: dict[Modality, int] = {}
 
         for text_part in text_parts:
             modality = multimodal_tokens.get_modality_of_token(text_part)
@@ -612,9 +667,19 @@ class BaseMultimodalProcessor(ABC):
                 try:
                     data = next(data_iterator)
                 except StopIteration:
-                    logger.warning(
-                        f"Mismatch: More '{modality.name}' tokens found than corresponding data provided."
+                    tokens_found = sum(
+                        1
+                        for t in text_parts
+                        if multimodal_tokens.get_modality_of_token(t)
+                        == modality
                     )
+                    logger.warning(
+                        f"Multimodal data mismatch: prompt contains {tokens_found} "
+                        f"{modality.name.lower()} placeholder token(s), but only "
+                        f"{matched_counts.get(modality, 0)} data item(s) were provided. "
+                        f"Extra placeholders will be ignored."
+                    )
+                    self._dump_request_on_mismatch(request_dump_info)
                     return futures, task_info
 
                 frame_count_limit = None
@@ -643,17 +708,26 @@ class BaseMultimodalProcessor(ABC):
                     )
                 )
                 task_info.append((modality, data, frame_count_limit))
+                matched_counts[modality] = matched_counts.get(modality, 0) + 1
 
         for modality, iterator in data_iterators.items():
+            extra_count = 0
             try:
-                next(iterator)
-                logger.warning(
-                    f"Warning: More {modality.name.lower()} data items provided than corresponding tokens found in the prompt."
-                )
+                while True:
+                    next(iterator)
+                    extra_count += 1
             except StopIteration:
                 pass
             except Exception:
                 pass
+            if extra_count > 0:
+                logger.warning(
+                    f"Multimodal data mismatch: {extra_count + matched_counts.get(modality, 0)} "
+                    f"{modality.name.lower()} data item(s) were provided, but prompt only "
+                    f"contains {matched_counts.get(modality, 0)} placeholder token(s). "
+                    f"{extra_count} extra data item(s) will be ignored."
+                )
+                self._dump_request_on_mismatch(request_dump_info)
 
         return futures, task_info
 
@@ -926,6 +1000,9 @@ class BaseMultimodalProcessor(ABC):
             data_iterators=data_iterators,
             discard_alpha_channel=discard_alpha_channel,
             audio_sample_rate=audio_sample_rate,
+            request_dump_info=self._build_request_dump_info(
+                prompt, image_data, video_data, audio_data
+            ),
         )
         task_info_iter = iter(task_info)
         futures_iter = iter(futures)
