@@ -29,7 +29,7 @@ _KIMI_K2_SPECIAL_TOKENS = [
 def _strip_special_tokens(text: str) -> str:
     """Remove all Kimi-K2 tool-call special tokens from text."""
     for token in _KIMI_K2_SPECIAL_TOKENS:
-        logger.debug(f"Stripping special token in detector: {token}")
+        # logger.debug(f"Stripping special token in detector: {token}")
         text = text.replace(token, "")
     return text
 
@@ -58,14 +58,26 @@ class KimiK2Detector(BaseFormatDetector):
         self.tool_call_end_token: str = "<|tool_call_end|>"
         self.tool_call_argument_begin_token: str = "<|tool_call_argument_begin|>"
 
+        # Wire tokens must match Moonshot Kimi K2 docs / model output (redacted_*), not legacy tool_call_*.
+        _beg = re.escape(self.tool_call_start_token)
+        _arg = re.escape(self.tool_call_argument_begin_token)
+        _end = re.escape(self.tool_call_end_token)
+
         # Support hyphenated function names (common in MCP tools, e.g. mcp__portal__search-documents)
         self.tool_call_regex = re.compile(
-            r"<\|tool_call_begin\|>\s*(?P<tool_call_id>[\w.\-]+:\d+)\s*<\|tool_call_argument_begin\|>\s*(?P<function_arguments>\{.*?\})\s*<\|tool_call_end\|>",
+            _beg
+            + r"\s*(?P<tool_call_id>[\w.\-]+:\d+)\s*"
+            + _arg
+            + r"\s*(?P<function_arguments>\{.*?\})\s*"
+            + _end,
             re.DOTALL,
         )
 
         self.stream_tool_call_portion_regex = re.compile(
-            r"<\|tool_call_begin\|>\s*(?P<tool_call_id>[\w.\-]+:\d+)\s*<\|tool_call_argument_begin\|>\s*(?P<function_arguments>\{.*)",
+            _beg
+            + r"\s*(?P<tool_call_id>[\w.\-]+:\d+)\s*"
+            + _arg
+            + r"\s*(?P<function_arguments>\{.*)",
             re.DOTALL,
         )
 
@@ -225,9 +237,9 @@ class KimiK2Detector(BaseFormatDetector):
                             pass
 
                         # Find the end of the current tool call and remove only that part from buffer
-                        tool_call_end_pattern = (
-                            r"<\|tool_call_begin\|>.*?<\|tool_call_end\|>"
-                        )
+                        _beg_pat = re.escape(self.tool_call_start_token)
+                        _end_pat = re.escape(self.tool_call_end_token)
+                        tool_call_end_pattern = _beg_pat + r".*?" + _end_pat
                         end_match = re.search(
                             tool_call_end_pattern, current_text, re.DOTALL
                         )
