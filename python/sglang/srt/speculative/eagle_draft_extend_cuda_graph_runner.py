@@ -23,6 +23,8 @@ from sglang.srt.model_executor.forward_batch_info import (
     CaptureHiddenMode,
     ForwardBatch,
     ForwardMode,
+    compute_local_num_token_non_padded,
+    enable_num_token_non_padded,
 )
 from sglang.srt.model_executor.input_buffers import ForwardInputBuffers
 from sglang.srt.speculative.eagle_info import EagleDraftInput
@@ -50,6 +52,7 @@ class EagleDraftExtendInputBuffers(ForwardInputBuffers):
     seq_lens_cpu: torch.Tensor
     extend_seq_lens: torch.Tensor
     accept_length: torch.Tensor
+    num_token_non_padded: torch.Tensor
     next_token_logits_buffer: torch.Tensor
     global_num_tokens_gpu: Optional[torch.Tensor]
     global_num_tokens_for_logprob_gpu: Optional[torch.Tensor]
@@ -153,6 +156,7 @@ class EAGLEDraftExtendCudaGraphRunner:
             accept_length = torch.full(
                 (self.max_bs,), self.num_tokens_per_bs, dtype=torch.int32
             )
+            num_token_non_padded = torch.zeros((1,), dtype=torch.int32)
 
             if self.require_gathered_buffer:
                 if self.require_mlp_tp_gather:
@@ -206,6 +210,7 @@ class EAGLEDraftExtendCudaGraphRunner:
             seq_lens_cpu=seq_lens_cpu,
             extend_seq_lens=extend_seq_lens,
             accept_length=accept_length,
+            num_token_non_padded=num_token_non_padded,
             next_token_logits_buffer=next_token_logits_buffer,
             global_num_tokens_gpu=global_num_tokens_gpu,
             global_num_tokens_for_logprob_gpu=global_num_tokens_for_logprob_gpu,
@@ -250,7 +255,7 @@ class EAGLEDraftExtendCudaGraphRunner:
         return torch.int64
 
     def _capture_init(self, run_once_fn):
-        for _ in range(2):
+        for i in range(2):
             torch.cuda.synchronize()
             self.model_runner.tp_group.barrier()
             run_once_fn()
@@ -265,6 +270,43 @@ class EAGLEDraftExtendCudaGraphRunner:
 
     def capture(self):
         CudaGraphRunner.capture(self)
+
+    def _update_num_token_non_padded_for_replay(
+        self, forward_batch: ForwardBatch, bs: int
+    ):
+        if (
+            self.forward_mode == ForwardMode.DRAFT_EXTEND_V2
+            or not enable_num_token_non_padded(self.model_runner.server_args)
+        ):
+            return
+
+        buffers = self.buffers
+        runtime_num_token_non_padded = len(forward_batch.input_ids)
+        forward_batch.num_token_non_padded_cpu = runtime_num_token_non_padded
+        runtime_num_token_non_padded = torch.tensor(
+            runtime_num_token_non_padded,
+            dtype=buffers.num_token_non_padded.dtype,
+            device=buffers.num_token_non_padded.device,
+        )
+
+        if self.require_gathered_buffer:
+            runtime_num_token_non_padded = compute_local_num_token_non_padded(
+                global_num_token_non_padded=runtime_num_token_non_padded,
+                num_tokens_per_dp=bs * self.num_tokens_per_bs,
+            )
+
+        buffers.num_token_non_padded.copy_(
+            runtime_num_token_non_padded.reshape_as(buffers.num_token_non_padded)
+        )
+
+    def _clear_padded_replay_state(self, num_tokens: int, bs: int):
+        padded_num_tokens = bs * self.num_tokens_per_bs
+        if num_tokens >= padded_num_tokens:
+            return
+
+        buffers = self.buffers
+        buffers.input_ids[num_tokens:padded_num_tokens].zero_()
+        buffers.hidden_states[num_tokens:padded_num_tokens].zero_()
 
     def capture_one_batch_size(self, bs: int, forward: Callable, stream_idx: int = 0):
         buffers = self.buffers
@@ -329,6 +371,9 @@ class EAGLEDraftExtendCudaGraphRunner:
         else:
             global_dp_buffer_len = None
 
+        if self.forward_mode == ForwardMode.DRAFT_EXTEND:
+            buffers.num_token_non_padded.fill_(num_tokens)
+
         spec_info = EagleDraftInput(
             hidden_states=hidden_states,
             accept_length=accept_length,
@@ -361,6 +406,14 @@ class EAGLEDraftExtendCudaGraphRunner:
             global_dp_buffer_len=global_dp_buffer_len,
             spec_algorithm=self.model_runner.spec_algorithm,
             spec_info=spec_info,
+            num_token_non_padded=(
+                buffers.num_token_non_padded
+                if self.forward_mode == ForwardMode.DRAFT_EXTEND
+                else None
+            ),
+            num_token_non_padded_cpu=(
+                num_tokens if self.forward_mode == ForwardMode.DRAFT_EXTEND else None
+            ),
             capture_hidden_mode=CaptureHiddenMode.LAST,
             attn_backend=self.eagle_worker.draft_extend_attn_backend,
             padded_static_len=self.padded_static_len,
@@ -439,6 +492,7 @@ class EAGLEDraftExtendCudaGraphRunner:
             buffers.positions.zero_()
             buffers.accept_length.fill_(self.num_tokens_per_bs)
             buffers.extend_seq_lens.fill_(self.num_tokens_per_bs)
+            self._clear_padded_replay_state(num_tokens, bs)
 
         # Common inputs
         buffers.input_ids[:num_tokens].copy_(forward_batch.input_ids)
@@ -460,7 +514,7 @@ class EAGLEDraftExtendCudaGraphRunner:
             buffers.accept_length[:raw_bs].copy_(forward_batch.spec_info.accept_length)
         buffers.req_pool_indices[:raw_bs].copy_(forward_batch.req_pool_indices)
 
-        # TODO(ch-wan): support num_token_non_padded
+        self._update_num_token_non_padded_for_replay(forward_batch, bs)
         if self.require_gathered_buffer:
             buffers.global_num_tokens_gpu.fill_(bs * self.num_tokens_per_bs)
             # V1: pruned_states = bs; V2: pruned_states = num_tokens

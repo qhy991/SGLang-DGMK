@@ -22,6 +22,8 @@ from sglang.srt.model_executor.forward_batch_info import (
     CaptureHiddenMode,
     ForwardBatch,
     ForwardMode,
+    compute_local_num_token_non_padded,
+    enable_num_token_non_padded,
 )
 from sglang.srt.model_executor.input_buffers import ForwardInputBuffers
 from sglang.srt.speculative.eagle_info import EagleDraftInput
@@ -46,6 +48,7 @@ class EagleDraftInputBuffers(ForwardInputBuffers):
     seq_lens: torch.Tensor
     seq_lens_cpu: torch.Tensor
     extend_seq_lens: torch.Tensor
+    num_token_non_padded: torch.Tensor
     topk_p: torch.Tensor
     topk_index: torch.Tensor
     hidden_states: torch.Tensor
@@ -57,6 +60,7 @@ class EAGLEDraftCudaGraphRunner:
     def __init__(self, eagle_worker: EAGLEWorker):
         # Parse args
         self.eagle_worker = eagle_worker
+        self.is_spec_v2 = not hasattr(eagle_worker, "model_runner")
         if not hasattr(eagle_worker, "model_runner"):
             # V2: EagleDraftWorker
             self.model_runner = model_runner = eagle_worker.draft_runner
@@ -116,6 +120,7 @@ class EAGLEDraftCudaGraphRunner:
                 (self.max_bs,), self.seq_len_fill_value, dtype=torch.int32
             )
             extend_seq_lens = torch.ones((self.max_bs,), dtype=torch.int32)
+            num_token_non_padded = torch.zeros((1,), dtype=torch.int32)
             topk_p = torch.zeros((self.max_bs, self.topk), dtype=torch.float32)
             topk_index = torch.zeros((self.max_bs, self.topk), dtype=torch.int64)
             hidden_states = torch.zeros(
@@ -150,6 +155,7 @@ class EAGLEDraftCudaGraphRunner:
             seq_lens=seq_lens,
             seq_lens_cpu=seq_lens_cpu,
             extend_seq_lens=extend_seq_lens,
+            num_token_non_padded=num_token_non_padded,
             topk_p=topk_p,
             topk_index=topk_index,
             hidden_states=hidden_states,
@@ -196,10 +202,13 @@ class EAGLEDraftCudaGraphRunner:
         return torch.cuda.CUDAGraph()
 
     def _capture_init(self, run_once_fn):
-        for _ in range(2):
+        for i in range(2):
             torch.cuda.synchronize()
             self.model_runner.tp_group.barrier()
             run_once_fn()
+
+    def _skip_num_token_non_padded_adjust_during_capture(self, server_args) -> None:
+        return None
 
     def _capture_graph(self, graph, pool, stream, run_once_fn):
         with torch.cuda.graph(graph, pool=pool, stream=stream):
@@ -274,6 +283,9 @@ class EAGLEDraftCudaGraphRunner:
             global_dp_buffer_len = None
             global_num_tokens_for_logprob = None
 
+        if not self.is_spec_v2:
+            buffers.num_token_non_padded.fill_(num_tokens)
+
         spec_info = EagleDraftInput(
             topk_p=topk_p,
             topk_index=topk_index,
@@ -304,6 +316,10 @@ class EAGLEDraftCudaGraphRunner:
             global_dp_buffer_len=global_dp_buffer_len,
             spec_algorithm=self.model_runner.spec_algorithm,
             spec_info=spec_info,
+            num_token_non_padded=(
+                buffers.num_token_non_padded if not self.is_spec_v2 else None
+            ),
+            num_token_non_padded_cpu=(num_tokens if not self.is_spec_v2 else None),
             capture_hidden_mode=(
                 spec_info.capture_hidden_mode if spec_info else CaptureHiddenMode.NULL
             ),
@@ -328,12 +344,24 @@ class EAGLEDraftCudaGraphRunner:
             # Backup two fields, which will be modified in-place in `draft_forward`.
             output_cache_loc_backup = forward_batch.out_cache_loc
             hidden_states_backup = forward_batch.spec_info.hidden_states
+            original_adjust_num_token_non_padded = None
+            if not self.is_spec_v2 and forward_batch.num_token_non_padded is not None:
+                original_adjust_num_token_non_padded = (
+                    forward_batch.adjust_num_token_non_padded_for_attn_tp
+                )
+                forward_batch.adjust_num_token_non_padded_for_attn_tp = (
+                    self._skip_num_token_non_padded_adjust_during_capture
+                )
 
-            ret = self.eagle_worker.draft_forward(forward_batch)
-
-            forward_batch.out_cache_loc = output_cache_loc_backup
-            forward_batch.spec_info.hidden_states = hidden_states_backup
-            return ret
+            try:
+                return self.eagle_worker.draft_forward(forward_batch)
+            finally:
+                if original_adjust_num_token_non_padded is not None:
+                    forward_batch.adjust_num_token_non_padded_for_attn_tp = (
+                        original_adjust_num_token_non_padded
+                    )
+                forward_batch.out_cache_loc = output_cache_loc_backup
+                forward_batch.spec_info.hidden_states = hidden_states_backup
 
         self.deepep_adapter.capture(is_extend_in_batch=False)
 
@@ -350,6 +378,47 @@ class EAGLEDraftCudaGraphRunner:
         # Keep the variables name for readability
         parent_list, top_scores_index, draft_tokens = (t[:raw_bs] for t in out)
         return parent_list, top_scores_index, draft_tokens
+
+    def _update_num_token_non_padded_for_replay(
+        self, forward_batch: ForwardBatch, bs: int, raw_num_token: int
+    ):
+        if self.is_spec_v2 or not enable_num_token_non_padded(
+            self.model_runner.server_args
+        ):
+            return
+
+        buffers = self.buffers
+        runtime_num_token_non_padded = forward_batch.num_token_non_padded
+        if runtime_num_token_non_padded is None:
+            runtime_num_token_non_padded = torch.tensor(
+                raw_num_token,
+                dtype=buffers.num_token_non_padded.dtype,
+                device=buffers.num_token_non_padded.device,
+            )
+        else:
+            runtime_num_token_non_padded = runtime_num_token_non_padded.to(
+                dtype=buffers.num_token_non_padded.dtype,
+                device=buffers.num_token_non_padded.device,
+            )
+
+        if self.require_gathered_buffer:
+            runtime_num_token_non_padded = compute_local_num_token_non_padded(
+                global_num_token_non_padded=runtime_num_token_non_padded,
+                num_tokens_per_dp=bs * self.num_tokens_per_bs,
+            )
+
+        buffers.num_token_non_padded.copy_(
+            runtime_num_token_non_padded.reshape_as(buffers.num_token_non_padded)
+        )
+
+    def _clear_padded_replay_state(self, raw_bs: int, bs: int):
+        if bs <= raw_bs:
+            return
+
+        buffers = self.buffers
+        buffers.topk_p[raw_bs:bs].zero_()
+        buffers.topk_index[raw_bs:bs].zero_()
+        buffers.hidden_states[raw_bs:bs].zero_()
 
     def replay(self, forward_batch: ForwardBatch):
         assert forward_batch.out_cache_loc is not None
@@ -377,6 +446,7 @@ class EAGLEDraftCudaGraphRunner:
             buffers.seq_lens.fill_(self.seq_len_fill_value)
             buffers.out_cache_loc.zero_()
             buffers.positions.zero_()
+            self._clear_padded_replay_state(raw_bs, bs)
 
         num_tokens = bs * self.num_tokens_per_bs
 
@@ -391,7 +461,9 @@ class EAGLEDraftCudaGraphRunner:
         buffers.hidden_states[:raw_bs].copy_(forward_batch.spec_info.hidden_states)
         buffers.req_pool_indices[:raw_bs].copy_(forward_batch.req_pool_indices)
 
-        # TODO(ch-wan): support num_token_non_padded
+        self._update_num_token_non_padded_for_replay(
+            forward_batch, bs, raw_num_token
+        )
         if self.require_gathered_buffer:
             buffers.global_num_tokens_gpu.fill_(bs * self.num_tokens_per_bs)
             buffers.global_num_tokens_for_logprob_gpu.fill_(bs * self.num_tokens_per_bs)

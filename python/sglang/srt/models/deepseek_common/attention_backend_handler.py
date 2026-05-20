@@ -61,6 +61,10 @@ def _get_sum_extend_prefix_lens(forward_batch):
     )
 
 
+def _disable_chunked_prefix_cache() -> bool:
+    return get_global_server_args().disable_chunked_prefix_cache
+
+
 def _support_mha_one_shot(attn, forward_batch, backend_name):
     attn_supported = backend_name in MHA_ONE_SHOT_SUPPORTED_BACKENDS
     sum_seq_lens = (
@@ -84,7 +88,7 @@ def _handle_attention_backend(attn, forward_batch, backend_name):
         and (
             (
                 sum_extend_prefix_lens >= attn.chunked_prefix_cache_threshold
-                and not attn.disable_chunked_prefix_cache
+                and not _disable_chunked_prefix_cache()
             )
             or sum_extend_prefix_lens == 0
         )
@@ -127,7 +131,7 @@ def handle_attention_trtllm_mla(attn, forward_batch):
 
     sum_extend_prefix_lens = _get_sum_extend_prefix_lens(forward_batch)
     if forward_batch.forward_mode.is_extend_without_speculative() and (
-        not attn.disable_chunked_prefix_cache or sum_extend_prefix_lens == 0
+        not _disable_chunked_prefix_cache() or sum_extend_prefix_lens == 0
     ):
         return AttnForwardMethod.MHA_CHUNKED_KV
     else:
