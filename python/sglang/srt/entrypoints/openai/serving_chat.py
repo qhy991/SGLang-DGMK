@@ -197,6 +197,18 @@ class OpenAIServingChat(OpenAIServingBase):
     def _request_id_prefix(self) -> str:
         return "chatcmpl-"
 
+    def _loom_no_tools_marker_constraint(self) -> Optional[tuple[str, Any]]:
+        """Freeform Kimi wire (``tools: []``) so native Loom blocks tool-call sentinels."""
+        grammar_backend = getattr(
+            self.tokenizer_manager.server_args, "grammar_backend", None
+        )
+        if grammar_backend != "loom" or not self.tool_call_parser:
+            return None
+        parser = FunctionCallParser([], self.tool_call_parser)
+        if not parser.detector.supports_structural_tag():
+            return None
+        return ("structural_tag", FunctionCallParser.get_empty_structural_tag())
+
     def _validate_request(self, request: ChatCompletionRequest) -> Optional[str]:
         """Validate that the input is valid."""
         if not request.messages:
@@ -379,8 +391,9 @@ class OpenAIServingChat(OpenAIServingBase):
                     parallel_tool_calls=request.parallel_tool_calls,
                 )
                 tool_call_constraint = ("json_schema", json_schema)
+            # Keep parser/json_schema behavior unchanged; no high-volume debug logging here.
         else:
-            tool_call_constraint = FunctionCallParser.get_empty_structural_tag();
+            tool_call_constraint = self._loom_no_tools_marker_constraint()
 
         # Use chat template
         if self.template_manager.chat_template_name is None:
@@ -1215,8 +1228,12 @@ class OpenAIServingChat(OpenAIServingBase):
                 self._tool_call_validator.validate_required_payload(
                     tool_call_data, tools
                 )
-            except ToolCallValidationError:
+            except ToolCallValidationError as exc:
                 validation_ok = False
+                logger.error(
+                    "Tool-call schema validation failed (required/named tool-choice path): %s",
+                    exc,
+                )
 
             tool_calls = []
             for i, tool in enumerate(tool_call_data):
@@ -1262,8 +1279,12 @@ class OpenAIServingChat(OpenAIServingBase):
             validation_ok = True
             try:
                 self._tool_call_validator.validate_parsed_items(call_info_list, tools)
-            except ToolCallValidationError:
+            except ToolCallValidationError as exc:
                 validation_ok = False
+                logger.error(
+                    "Tool-call schema validation failed (parser path): %s",
+                    exc,
+                )
 
             tool_calls = []
             for call_info in call_info_list:
