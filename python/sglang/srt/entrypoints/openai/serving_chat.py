@@ -197,12 +197,21 @@ class OpenAIServingChat(OpenAIServingBase):
     def _request_id_prefix(self) -> str:
         return "chatcmpl-"
 
-    def _loom_no_tools_marker_constraint(self) -> Optional[tuple[str, Any]]:
-        """Freeform Kimi wire (``tools: []``) so native Loom blocks tool-call sentinels."""
+    _NO_TOOLS_MARKER_GRAMMAR_BACKENDS = frozenset({"loom", "xgrammar"})
+
+    def _no_tools_marker_constraint(self) -> Optional[tuple[str, Any]]:
+        """Block Kimi FC markers when this turn must not emit tool calls.
+
+        Uses legacy empty ``structural_tag`` (``structures=[]``). Loom maps it to
+        ``wire: kimi, tools: []``; xgrammar compiles via ``dispatch_kimi_structural_tag``.
+        """
         grammar_backend = getattr(
             self.tokenizer_manager.server_args, "grammar_backend", None
         )
-        if grammar_backend != "loom" or not self.tool_call_parser:
+        if (
+            grammar_backend not in self._NO_TOOLS_MARKER_GRAMMAR_BACKENDS
+            or not self.tool_call_parser
+        ):
             return None
         parser = FunctionCallParser([], self.tool_call_parser)
         if not parser.detector.supports_structural_tag():
@@ -393,7 +402,7 @@ class OpenAIServingChat(OpenAIServingBase):
                 tool_call_constraint = ("json_schema", json_schema)
             # Keep parser/json_schema behavior unchanged; no high-volume debug logging here.
         else:
-            tool_call_constraint = self._loom_no_tools_marker_constraint()
+            tool_call_constraint = self._no_tools_marker_constraint()
 
         # Use chat template
         if self.template_manager.chat_template_name is None:
