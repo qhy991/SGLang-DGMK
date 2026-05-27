@@ -254,8 +254,7 @@ class SamplingBatchInfo:
         if self.acc_additive_penalties is not None:
             # Used in the overlap mode
             logits.add_(self.acc_additive_penalties)
-            if is_blackwell():
-                self.acc_additive_penalties = None
+            self.acc_additive_penalties = None
 
         if self.acc_scaling_penalties is not None:
             # Used in the overlap mode
