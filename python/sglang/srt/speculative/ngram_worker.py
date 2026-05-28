@@ -216,6 +216,8 @@ class NGRAMWorker:
         num_accepted_tokens = 0
         accept_lens = None
         accept_length_per_req_cpu = None
+        spec_grammar_direct_rejected_draft_tokens = 0
+        spec_grammar_pruned_rejected_draft_tokens = 0
 
         if model_worker_batch.forward_mode.is_target_verify():
             if batch.has_grammar:
@@ -238,7 +240,11 @@ class NGRAMWorker:
             if batch.has_grammar:
                 # Generate the logit mask for structured output.
                 # Overlap the CPU operations for bitmask generation with the forward pass.
-                vocab_mask = generate_token_bitmask(
+                (
+                    vocab_mask,
+                    spec_grammar_direct_rejected_draft_tokens,
+                    spec_grammar_pruned_rejected_draft_tokens,
+                ) = generate_token_bitmask(
                     batch.reqs,
                     verify_input,
                     retrieve_next_token_cpu,
@@ -280,6 +286,12 @@ class NGRAMWorker:
             next_token_ids=next_token_ids,
             num_accepted_tokens=num_accepted_tokens,
             accept_length_per_req_cpu=accept_length_per_req_cpu,
+            spec_grammar_direct_rejected_draft_tokens=(
+                spec_grammar_direct_rejected_draft_tokens
+            ),
+            spec_grammar_pruned_rejected_draft_tokens=(
+                spec_grammar_pruned_rejected_draft_tokens
+            ),
             can_run_cuda_graph=can_run_cuda_graph,
             accept_lens=accept_lens,
         )

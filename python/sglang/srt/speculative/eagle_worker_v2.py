@@ -799,9 +799,15 @@ class EAGLEWorkerV2(BaseSpecWorker):
 
         # Generate vocab mask for constrained decoding
         vocab_mask = None
+        spec_grammar_direct_rejected_draft_tokens = 0
+        spec_grammar_pruned_rejected_draft_tokens = 0
         if batch.has_grammar:
             # Generate the logit mask for structured output.
-            vocab_mask = generate_token_bitmask(
+            (
+                vocab_mask,
+                spec_grammar_direct_rejected_draft_tokens,
+                spec_grammar_pruned_rejected_draft_tokens,
+            ) = generate_token_bitmask(
                 batch.reqs,
                 verify_input,
                 retrieve_next_token_cpu,
@@ -866,6 +872,12 @@ class EAGLEWorkerV2(BaseSpecWorker):
             can_run_cuda_graph=can_run_cuda_graph,
             next_draft_input=next_draft_input,
             accept_lens=accept_length,
+            spec_grammar_direct_rejected_draft_tokens=(
+                spec_grammar_direct_rejected_draft_tokens
+            ),
+            spec_grammar_pruned_rejected_draft_tokens=(
+                spec_grammar_pruned_rejected_draft_tokens
+            ),
         )
 
     def _compute_spec_v2_logprobs(
