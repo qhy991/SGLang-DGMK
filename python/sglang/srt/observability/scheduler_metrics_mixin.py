@@ -114,6 +114,7 @@ class SchedulerMetricsMixin:
         self.spec_num_accept_tokens = 0  # per-log-interval
         self.spec_num_forward_ct = 0
         self.spec_total_num_accept_tokens = 0  # lifetime
+        self.spec_accept_histogram: List[int] = []
         self.spec_total_num_forward_ct = 0
 
         # For PD disaggregation
@@ -330,12 +331,37 @@ class SchedulerMetricsMixin:
             var_decode_kv_tokens=decode_q.variance(),
         )
 
-    def update_spec_metrics(self: Scheduler, bs: int, num_correct_drafts: int):
+    def update_spec_metrics(
+        self: Scheduler,
+        bs: int,
+        num_accepted_tokens: int,
+        accept_lengths: Optional[List[int]] = None,
+        grammar_direct_rejected_draft_tokens: int = 0,
+        grammar_pruned_rejected_draft_tokens: int = 0,
+    ):
         self.spec_num_accept_tokens += num_correct_drafts + bs
         self.spec_num_forward_ct += bs
 
         # Bonus tokens updated elsewhere
         self.num_generated_tokens += num_correct_drafts
+        if accept_lengths is not None:
+            for accept_length in accept_lengths:
+                if len(self.spec_accept_histogram) <= accept_length:
+                    self.spec_accept_histogram.extend(
+                        [0] * (accept_length - len(self.spec_accept_histogram) + 1)
+                    )
+                self.spec_accept_histogram[accept_length] += 1
+        if (
+            self.current_scheduler_metrics_enabled
+            and (
+                grammar_direct_rejected_draft_tokens > 0
+                or grammar_pruned_rejected_draft_tokens > 0
+            )
+        ):
+            self.metrics_collector.increment_spec_grammar_rejected_draft_tokens(
+                direct=grammar_direct_rejected_draft_tokens,
+                pruned=grammar_pruned_rejected_draft_tokens,
+            )
 
     def _init_estimated_perf_constants(self: Scheduler) -> None:
         model_config = self.model_config
@@ -476,6 +502,7 @@ class SchedulerMetricsMixin:
         self.spec_num_accept_tokens = 0
         self.spec_num_forward_ct = 0
         self.spec_total_num_accept_tokens = 0
+        self.spec_accept_histogram = []
         self.spec_total_num_forward_ct = 0
 
     def report_prefill_stats(
@@ -688,6 +715,7 @@ class SchedulerMetricsMixin:
         if self.spec_algorithm.is_none():
             spec_accept_length = 0
             spec_accept_rate = 0
+            spec_accept_histogram = []
         else:
             spec_accept_length = self.spec_num_accept_tokens / self.spec_num_forward_ct
             num_correct_drafts = self.spec_num_accept_tokens - self.spec_num_forward_ct
@@ -702,6 +730,8 @@ class SchedulerMetricsMixin:
             self.spec_total_num_accept_tokens += self.spec_num_accept_tokens
             self.spec_total_num_forward_ct += self.spec_num_forward_ct
             self.spec_num_accept_tokens = self.spec_num_forward_ct = 0
+            spec_accept_histogram = self.spec_accept_histogram
+            self.spec_accept_histogram = []
             msg += f"accept len: {spec_accept_length:.2f}, accept rate: {spec_accept_rate:.2f}, "
         cache_hit_rate = 0.0
 
@@ -765,6 +795,7 @@ class SchedulerMetricsMixin:
             # Speculative decoding
             self.stats.spec_accept_length = spec_accept_length
             self.stats.spec_accept_rate = spec_accept_rate
+            self.stats.spec_accept_histogram = spec_accept_histogram
 
             # Retract
             self.stats.num_retracted_reqs = self.num_retracted_reqs

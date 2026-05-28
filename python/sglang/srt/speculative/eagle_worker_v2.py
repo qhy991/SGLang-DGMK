@@ -1047,9 +1047,15 @@ class EAGLEWorkerV2(BaseSpecWorker):
 
         # Generate vocab mask for constrained decoding
         vocab_mask = None
+        spec_grammar_direct_rejected_draft_tokens = 0
+        spec_grammar_pruned_rejected_draft_tokens = 0
         if batch.has_grammar:
             # Generate the logit mask for structured output.
-            vocab_mask = generate_token_bitmask(
+            (
+                vocab_mask,
+                spec_grammar_direct_rejected_draft_tokens,
+                spec_grammar_pruned_rejected_draft_tokens,
+            ) = generate_token_bitmask(
                 batch.reqs,
                 verify_input,
                 retrieve_next_token_cpu,
@@ -1119,6 +1125,12 @@ class EAGLEWorkerV2(BaseSpecWorker):
             accept_lens=accept_lens,
             routed_experts_output=forward_batch_output.routed_experts_output,
             indexer_topk_output=forward_batch_output.indexer_topk_output,
+            spec_grammar_direct_rejected_draft_tokens=(
+                spec_grammar_direct_rejected_draft_tokens
+            ),
+            spec_grammar_pruned_rejected_draft_tokens=(
+                spec_grammar_pruned_rejected_draft_tokens
+            ),
         )
 
     def _mamba_verify_update(

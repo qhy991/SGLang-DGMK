@@ -523,7 +523,13 @@ class SchedulerOutputProcessorMixin:
 
         self.num_generated_tokens += len(batch.reqs)
         if not batch.spec_algorithm.is_none():
-            self.update_spec_metrics(batch.batch_size(), result.num_correct_drafts)
+            self.update_spec_metrics(
+                batch.batch_size(),
+                result.num_correct_drafts,
+                result.num_correct_drafts_per_req_cpu,
+                result.spec_grammar_direct_rejected_draft_tokens,
+                result.spec_grammar_pruned_rejected_draft_tokens,
+            )
         if self.enable_metrics:
             self.metrics_collector.increment_decode_cuda_graph_pass(
                 value=can_run_cuda_graph
