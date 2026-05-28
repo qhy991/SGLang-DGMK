@@ -28,6 +28,8 @@ class GenerationBatchResult:
     next_token_ids: Optional[Union[torch.Tensor, List[torch.Tensor]]] = None
     num_accepted_tokens: int = 0
     accept_length_per_req_cpu: Optional[List[int]] = None
+    spec_grammar_direct_rejected_draft_tokens: int = 0
+    spec_grammar_pruned_rejected_draft_tokens: int = 0
     can_run_cuda_graph: bool = False
 
     # For output processing

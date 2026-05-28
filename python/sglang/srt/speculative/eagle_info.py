@@ -821,3 +821,5 @@ class EagleVerifyOutput:
     accept_length_per_req_cpu: List[int]
     # Accepted indices from logits_output.next_token_logits
     accepted_indices: torch.Tensor
+    spec_grammar_direct_rejected_draft_tokens: int = 0
+    spec_grammar_pruned_rejected_draft_tokens: int = 0
