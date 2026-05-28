@@ -104,6 +104,7 @@ class SchedulerMetricsMixin:
         # The number of accepted tokens and forward ct for the recent `decode_log_interval` batches (for logging)
         self.spec_num_accepted_tokens = 0
         self.spec_num_forward_ct = 0
+        self.spec_accept_histogram: List[int] = []
         # The total number of accepted tokens and forward ct for the whole server lifetime
         self.spec_total_num_accepted_tokens = 0
         self.spec_total_num_forward_ct = 0
@@ -178,10 +179,35 @@ class SchedulerMetricsMixin:
                 kv_events_config, self.attn_dp_rank
             )
 
-    def update_spec_metrics(self: Scheduler, bs: int, num_accepted_tokens: int):
+    def update_spec_metrics(
+        self: Scheduler,
+        bs: int,
+        num_accepted_tokens: int,
+        accept_lengths: Optional[List[int]] = None,
+        grammar_direct_rejected_draft_tokens: int = 0,
+        grammar_pruned_rejected_draft_tokens: int = 0,
+    ):
         self.spec_num_accepted_tokens += num_accepted_tokens + bs
         self.spec_num_forward_ct += bs
         self.num_generated_tokens += num_accepted_tokens
+        if accept_lengths is not None:
+            for accept_length in accept_lengths:
+                if len(self.spec_accept_histogram) <= accept_length:
+                    self.spec_accept_histogram.extend(
+                        [0] * (accept_length - len(self.spec_accept_histogram) + 1)
+                    )
+                self.spec_accept_histogram[accept_length] += 1
+        if (
+            self.current_scheduler_metrics_enabled
+            and (
+                grammar_direct_rejected_draft_tokens > 0
+                or grammar_pruned_rejected_draft_tokens > 0
+            )
+        ):
+            self.metrics_collector.increment_spec_grammar_rejected_draft_tokens(
+                direct=grammar_direct_rejected_draft_tokens,
+                pruned=grammar_pruned_rejected_draft_tokens,
+            )
 
     def _init_estimated_perf_constants(self: Scheduler) -> None:
         model_config = self.model_config
@@ -321,6 +347,7 @@ class SchedulerMetricsMixin:
         self.num_generated_tokens = 0
         self.spec_num_accepted_tokens = 0
         self.spec_num_forward_ct = 0
+        self.spec_accept_histogram = []
         self.spec_total_num_accepted_tokens = 0
         self.spec_total_num_forward_ct = 0
 
@@ -621,6 +648,7 @@ class SchedulerMetricsMixin:
         if self.spec_algorithm.is_none():
             spec_accept_length = 0
             spec_accept_rate = 0
+            spec_accept_histogram = []
         else:
             spec_accept_length = (
                 self.spec_num_accepted_tokens / self.spec_num_forward_ct
@@ -639,7 +667,9 @@ class SchedulerMetricsMixin:
             )
             self.spec_total_num_accepted_tokens += self.spec_num_accepted_tokens
             self.spec_total_num_forward_ct += self.spec_num_forward_ct
+            spec_accept_histogram = self.spec_accept_histogram
             self.spec_num_accepted_tokens = self.spec_num_forward_ct = 0
+            self.spec_accept_histogram = []
             msg += f"accept len: {spec_accept_length:.2f}, accept rate: {spec_accept_rate:.2f}, "
         cache_hit_rate = 0.0
 
@@ -715,6 +745,7 @@ class SchedulerMetricsMixin:
             # Speculative decoding
             self.stats.spec_accept_rate = spec_accept_rate
             self.stats.spec_accept_length = spec_accept_length
+            self.stats.spec_accept_histogram = spec_accept_histogram
 
             # Retract
             self.stats.num_retracted_reqs = self.num_retracted_reqs

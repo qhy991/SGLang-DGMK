@@ -96,6 +96,7 @@ class SchedulerStats:
     # Speculative decoding
     spec_accept_length: float = 0.0
     spec_accept_rate: float = 0.0
+    spec_accept_histogram: List[int] = field(default_factory=list)
 
     # Retract
     num_retracted_reqs: int = 0
@@ -284,6 +285,23 @@ class SchedulerMetricsCollector:
             documentation="The average acceptance rate of speculative decoding (`accepted tokens / total draft tokens` in batch).",
             labelnames=labels.keys(),
             multiprocess_mode="mostrecent",
+        )
+        self.spec_accept_histogram = Gauge(
+            name="sglang:spec_accept_histogram",
+            documentation="The speculative decoding acceptance histogram. The accept_length label is the number of accepted draft tokens in a verification step.",
+            labelnames=list(labels.keys()) + ["accept_length"],
+            multiprocess_mode="mostrecent",
+        )
+        self._known_spec_accept_lengths: Set[int] = set()
+        self.spec_grammar_direct_rejected_draft_tokens_total = Counter(
+            name="sglang:spec_grammar_direct_rejected_draft_tokens_total",
+            documentation="Total number of single-chain speculative draft tokens rejected directly by grammar.",
+            labelnames=labels.keys(),
+        )
+        self.spec_grammar_pruned_rejected_draft_tokens_total = Counter(
+            name="sglang:spec_grammar_pruned_rejected_draft_tokens_total",
+            documentation="Total number of single-chain speculative draft tokens pruned after a direct grammar rejection.",
+            labelnames=labels.keys(),
         )
 
         # Retract
@@ -846,6 +864,14 @@ class SchedulerMetricsCollector:
                 labels["priority"] = str(priority)
                 gauge.labels(**labels).set(value)
 
+    def _log_spec_accept_histogram(self, histogram: List[int]) -> None:
+        self._known_spec_accept_lengths.update(range(len(histogram)))
+        for accept_length in self._known_spec_accept_lengths:
+            value = histogram[accept_length] if accept_length < len(histogram) else 0
+            self.spec_accept_histogram.labels(
+                **self.labels, accept_length=str(accept_length)
+            ).set(value)
+
     def _log_histogram(self, histogram, data: Union[int, float]) -> None:
         histogram.labels(**self.labels).observe(data)
 
@@ -958,6 +984,20 @@ class SchedulerMetricsCollector:
                     **dp_cooperation_info.to_labels(),
                 ).inc(delta)
 
+    def increment_spec_grammar_rejected_draft_tokens(
+        self,
+        direct: int,
+        pruned: int,
+    ) -> None:
+        if direct > 0:
+            self.spec_grammar_direct_rejected_draft_tokens_total.labels(
+                **self.labels
+            ).inc(direct)
+        if pruned > 0:
+            self.spec_grammar_pruned_rejected_draft_tokens_total.labels(
+                **self.labels
+            ).inc(pruned)
+
     def increment_gpu_overlap_wait_seconds(
         self,
         category: str,
@@ -1026,6 +1066,7 @@ class SchedulerMetricsCollector:
         # Speculative decoding
         self._log_gauge(self.spec_accept_length, stats.spec_accept_length)
         self._log_gauge(self.spec_accept_rate, stats.spec_accept_rate)
+        self._log_spec_accept_histogram(stats.spec_accept_histogram)
 
         # PD disaggregation
         self._log_gauge_queue_count(

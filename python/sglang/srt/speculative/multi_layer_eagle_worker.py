@@ -292,6 +292,13 @@ class MultiLayerEagleWorker(TpModelWorker):
                 logits_output=logits_output,
                 next_token_ids=verify_output.verified_id,
                 num_accepted_tokens=sum(verify_output.accept_length_per_req_cpu),
+                accept_length_per_req_cpu=verify_output.accept_length_per_req_cpu,
+                spec_grammar_direct_rejected_draft_tokens=(
+                    verify_output.spec_grammar_direct_rejected_draft_tokens
+                ),
+                spec_grammar_pruned_rejected_draft_tokens=(
+                    verify_output.spec_grammar_pruned_rejected_draft_tokens
+                ),
                 can_run_cuda_graph=can_run_cuda_graph,
             )
 
@@ -504,10 +511,16 @@ class MultiLayerEagleWorker(TpModelWorker):
         )
 
         vocab_mask = None
+        spec_grammar_direct_rejected_draft_tokens = 0
+        spec_grammar_pruned_rejected_draft_tokens = 0
         if batch.has_grammar:
             # Generate the logit mask for structured output.
             # Overlap the CPU operations for bitmask generation with the forward pass.
-            vocab_mask = generate_token_bitmask(
+            (
+                vocab_mask,
+                spec_grammar_direct_rejected_draft_tokens,
+                spec_grammar_pruned_rejected_draft_tokens,
+            ) = generate_token_bitmask(
                 batch.reqs,
                 spec_info,
                 retrieve_next_token_cpu,
@@ -532,6 +545,12 @@ class MultiLayerEagleWorker(TpModelWorker):
             self.token_to_kv_pool_allocator,
             self.page_size,
             vocab_mask,
+        )
+        res.spec_grammar_direct_rejected_draft_tokens = (
+            spec_grammar_direct_rejected_draft_tokens
+        )
+        res.spec_grammar_pruned_rejected_draft_tokens = (
+            spec_grammar_pruned_rejected_draft_tokens
         )
 
         # Post process based on verified outputs.
