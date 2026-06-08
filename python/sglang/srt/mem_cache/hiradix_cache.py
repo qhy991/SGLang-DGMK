@@ -778,6 +778,7 @@ class HiRadixCache(RadixCache):
 
     def evict(self, params: EvictParams) -> EvictResult:
         start_time = time.perf_counter()
+        current_time = time.monotonic()
         num_tokens = params.num_tokens
         leaves = list(self.evictable_leaves)
         eviction_heap = [
@@ -787,11 +788,19 @@ class HiRadixCache(RadixCache):
 
         num_evicted = 0
         write_back_nodes = []
+        min_idle_duration = float("inf")
+        evicted_nodes_count = 0
         while num_evicted < num_tokens and len(eviction_heap):
             _priority, x = heapq.heappop(eviction_heap)
 
             if x.lock_ref > 0:
                 continue
+ 
+            # Calculate idle time from last access to eviction (L1 - device)
+            idle_duration = current_time - x.last_access_time
+            if idle_duration < min_idle_duration:
+                min_idle_duration = idle_duration
+            evicted_nodes_count += 1
 
             if not x.backuped:
                 if self.cache_controller.write_policy == "write_back":
@@ -818,6 +827,10 @@ class HiRadixCache(RadixCache):
             for node in write_back_nodes:
                 assert node.backuped
                 self._evict_backuped(node)
+ 
+        # Report minimum idle duration for L1
+        if evicted_nodes_count > 0 and self.metrics_collector is not None:
+            self.metrics_collector.observe_eviction_idle_duration_l1(min_idle_duration)
 
         self.update_eviction_metrics(num_evicted, start_time)
         return EvictResult(num_tokens_evicted=num_evicted)
@@ -843,6 +856,7 @@ class HiRadixCache(RadixCache):
         return num_evicted
 
     def evict_host(self, num_tokens: int):
+        current_time = time.monotonic()
         leaves = list(self.evictable_host_leaves)
         eviction_heap = [
             (self.eviction_strategy.get_priority(node), node) for node in leaves
@@ -850,6 +864,8 @@ class HiRadixCache(RadixCache):
         heapq.heapify(eviction_heap)
 
         num_evicted = 0
+        min_idle_duration = float("inf")
+        evicted_nodes_count = 0
         while num_evicted < num_tokens and len(eviction_heap):
             _priority, x = heapq.heappop(eviction_heap)
             if x == self.root_node:
@@ -860,6 +876,12 @@ class HiRadixCache(RadixCache):
 
             if x.host_ref_counter > 0:
                 continue
+ 
+            # Calculate idle time from last access to eviction (L2 - host)
+            idle_duration = current_time - x.last_access_time
+            if idle_duration < min_idle_duration:
+                min_idle_duration = idle_duration
+            evicted_nodes_count += 1
 
             # Block deleted entirely (GPU already evicted, now CPU freed) --
             # emit BlockRemoved so the router removes this block from its index.
@@ -889,6 +911,10 @@ class HiRadixCache(RadixCache):
             if len(x.parent.children) == 0 and x.parent.evicted:
                 new_priority = self.eviction_strategy.get_priority(x.parent)
                 heapq.heappush(eviction_heap, (new_priority, x.parent))
+ 
+        # Report minimum idle duration for L2
+        if evicted_nodes_count > 0 and self.metrics_collector is not None:
+            self.metrics_collector.observe_eviction_idle_duration_l2(min_idle_duration)
 
     def load_back(
         self, node: TreeNode, mem_quota: Optional[int] = None
