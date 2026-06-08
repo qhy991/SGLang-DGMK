@@ -1742,7 +1742,7 @@ class RadixCacheMetricsCollector:
         labels: Dict[str, str],
     ) -> None:
         # We need to import prometheus_client after setting the env variable `PROMETHEUS_MULTIPROC_DIR`
-        from prometheus_client import Counter, Histogram
+        from prometheus_client import Counter, Gauge, Histogram
 
         self.labels = labels
 
@@ -1827,6 +1827,18 @@ class RadixCacheMetricsCollector:
             documentation="The number of tokens loaded from CPU to GPU.",
             labelnames=labels.keys(),
         )
+ 
+        self.eviction_idle_duration_seconds_l1 = Gauge(
+            name="sglang:eviction_idle_duration_seconds_l1",
+            documentation="Minimum time from last access to eviction for L1 (device) cache in seconds.",
+            labelnames=labels.keys(),
+        )
+
+        self.eviction_idle_duration_seconds_l2 = Gauge(
+            name="sglang:eviction_idle_duration_seconds_l2",
+            documentation="Minimum time from last access to eviction for L2 (host) cache in seconds.",
+            labelnames=labels.keys(),
+        )
 
     def increment_eviction_num_tokens(self, num_tokens: int) -> None:
         self.eviction_num_tokens.labels(**self.labels).inc(num_tokens)
@@ -1839,6 +1851,16 @@ class RadixCacheMetricsCollector:
 
     def observe_load_back_duration(self, duration_seconds: float) -> None:
         self.load_back_duration_seconds.labels(**self.labels).observe(duration_seconds)
+
+    def observe_eviction_idle_duration_l1(self, idle_duration_seconds: float) -> None:
+        self.eviction_idle_duration_seconds_l1.labels(**self.labels).set(
+            idle_duration_seconds
+        )
+
+    def observe_eviction_idle_duration_l2(self, idle_duration_seconds: float) -> None:
+        self.eviction_idle_duration_seconds_l2.labels(**self.labels).set(
+            idle_duration_seconds
+        )
 
 
 def get_histogram_conf_from_env(env_var_name: str) -> Optional[List[float]]:
