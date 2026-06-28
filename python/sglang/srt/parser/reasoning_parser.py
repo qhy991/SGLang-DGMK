@@ -12,8 +12,13 @@ class StreamingParseResult:
         normal_text: Optional[str] = None,
         reasoning_text: Optional[str] = None,
     ):
+        # ``normal_text`` is fed to the tool-call parser (e.g. Kimi ``kimi_k2``) when
+        # ``separate_reasoning`` is enabled; it must keep wire-format markers intact.
+        # Client-visible strings are still sanitized in ``protocol.DeltaMessage``.
+        from sglang.srt.infini.fc_token_guard import strip_special_tokens
+
         self.normal_text = normal_text or ""
-        self.reasoning_text = reasoning_text or ""
+        self.reasoning_text = strip_special_tokens(reasoning_text) or ""
 
 
 class BaseReasoningFormatDetector:

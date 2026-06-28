@@ -30,6 +30,38 @@ from .base_grammar_backend import (
 
 logger = logging.getLogger(__name__)
 
+_MODEL_REASONING_BLOCKED_TOKEN_IDS = {
+    "kimi_k2": (
+        163595, # <|tool_calls_section_begin|>
+        163596, # <|tool_calls_section_end|>
+        163597, # <|tool_call_begin|>
+        163598, # <|tool_call_argument_begin|>
+        163599, # <|tool_call_end|>
+        163606, # <think>
+        163585, # EOS
+        163586, # <im_end>
+    ),
+}
+
+REASONING_BLOCKED_TOKEN_IDS = _MODEL_REASONING_BLOCKED_TOKEN_IDS.get("kimi_k2", ())
+
+class Int32Mask:
+    def __init__(self, block: int, or_mask: int):
+        self.block = block
+        self.or_mask = or_mask
+
+
+def _build_block_or_masks(token_ids: Tuple[int, ...]) -> Tuple[Int32Mask]:
+    """Pack token ids into per-int32 block OR masks."""
+    block_or_masks: List[Int32Mask] = []
+    for token_id in token_ids:
+        block, bit = divmod(token_id, 32)
+        block_or_masks.append(Int32Mask(block, 1 << bit))
+    return tuple(block_or_masks)
+
+
+REASONING_BLOCKED_BLOCK_OR_MASKS = _build_block_or_masks(REASONING_BLOCKED_TOKEN_IDS)
+print(f"REASONING_BLOCKED_BLOCK_OR_MASKS={REASONING_BLOCKED_BLOCK_OR_MASKS}")
 
 class ReasonerGrammarObject(BaseGrammarObject):
     """Wraps a grammar object to handle reasoning (think/generation) phases.
@@ -132,6 +164,14 @@ class ReasonerGrammarObject(BaseGrammarObject):
         if self.token_filter_fn is not None:
             self.token_filter_fn(vocab_mask, token_ids, idx, is_allowed)
 
+    def block_reasoning_tokens(self, vocab_mask: torch.Tensor, idx: int) -> None:
+        row = vocab_mask[idx]
+        row_blocks = row.numel()
+        for mask in REASONING_BLOCKED_BLOCK_OR_MASKS:
+            block = mask.block
+            or_mask = mask.or_mask
+            row[block] &= ~or_mask
+
     def fill_vocab_mask(self, vocab_mask: torch.Tensor, idx: int) -> None:
         if self._is_thinking():
             if not self.enable_token_filter:
@@ -147,6 +187,8 @@ class ReasonerGrammarObject(BaseGrammarObject):
             return
         if self._is_generation() and self.grammar is not None:
             self.grammar.fill_vocab_mask(vocab_mask, idx)
+        elif self.tokens_after_think_end < 0:
+            self.block_reasoning_tokens(vocab_mask, idx)
 
     def allocate_vocab_mask(self, vocab_size, batch_size, device):
         if self.grammar is not None:

@@ -21,12 +21,15 @@ _KIMI_K2_SPECIAL_TOKENS = [
     "<|tool_call_begin|>",
     "<|tool_call_end|>",
     "<|tool_call_argument_begin|>",
+    "<think>",
+    "</think>",
 ]
 
 
 def _strip_special_tokens(text: str) -> str:
     """Remove all Kimi-K2 tool-call special tokens from text."""
     for token in _KIMI_K2_SPECIAL_TOKENS:
+        # logger.debug(f"Stripping special token in detector: {token}")
         text = text.replace(token, "")
     return text
 
@@ -60,15 +63,26 @@ class KimiK2Detector(BaseFormatDetector):
         self.tool_call_end_token: str = "<|tool_call_end|>"
         self.tool_call_argument_begin_token: str = "<|tool_call_argument_begin|>"
 
-        # Capture tool_call_id broadly: the model may emit standard IDs
-        # like "functions.ReadFile:0" or bare call counters like "3".
+        # Wire tokens must match Moonshot Kimi K2 docs / model output (redacted_*), not legacy tool_call_*.
+        _beg = re.escape(self.tool_call_start_token)
+        _arg = re.escape(self.tool_call_argument_begin_token)
+        _end = re.escape(self.tool_call_end_token)
+
+        # Support hyphenated function names (common in MCP tools, e.g. mcp__portal__search-documents)
         self.tool_call_regex = re.compile(
-            r"<\|tool_call_begin\|>\s*(?P<tool_call_id>[^\s<|]+)\s*<\|tool_call_argument_begin\|>\s*(?P<function_arguments>\{.*?\})\s*<\|tool_call_end\|>",
+            _beg
+            + r"\s*(?P<tool_call_id>[\w.\-]+:\d+)\s*"
+            + _arg
+            + r"\s*(?P<function_arguments>\{.*?\})\s*"
+            + _end,
             re.DOTALL,
         )
 
         self.stream_tool_call_portion_regex = re.compile(
-            r"<\|tool_call_begin\|>\s*(?P<tool_call_id>[^\s<|]+)\s*<\|tool_call_argument_begin\|>\s*(?P<function_arguments>\{.*)",
+            _beg
+            + r"\s*(?P<tool_call_id>[\w.\-]+:\d+)\s*"
+            + _arg
+            + r"\s*(?P<function_arguments>\{.*)",
             re.DOTALL,
         )
 
@@ -151,6 +165,9 @@ class KimiK2Detector(BaseFormatDetector):
 
         return best_name
 
+    def sanitize_normal_text(self, text: str) -> str:
+        return _strip_special_tokens(text)
+
     def has_tool_call(self, text: str) -> bool:
         """Check if the text contains a KimiK2 format tool call."""
         return self.bot_token in text
@@ -164,7 +181,7 @@ class KimiK2Detector(BaseFormatDetector):
         :return: StreamingParseResult with normal_text (content before tool calls) and calls (parsed items).
         """
         if self.bot_token not in text:
-            return StreamingParseResult(normal_text=text, calls=[])
+            return StreamingParseResult(normal_text=self.sanitize_normal_text(text), calls=[])
         try:
             function_call_tuples = self.tool_call_regex.findall(text)
 
@@ -189,12 +206,13 @@ class KimiK2Detector(BaseFormatDetector):
                     )
                 )
 
-            content = text[: text.find(self.bot_token)]
+            content = self.sanitize_normal_text(text[: text.find(self.bot_token)])
             return StreamingParseResult(normal_text=content, calls=tool_calls)
 
         except Exception as e:
-            logger.error("Error in detect_and_parse: %s", e, exc_info=True)
-            return StreamingParseResult(normal_text=text)
+            logger.error(f"Error in detect_and_parse: {e}")
+            # return the normal text if parsing fails
+            return StreamingParseResult(normal_text=self.sanitize_normal_text(text))
 
     def parse_streaming_increment(
         self, new_text: str, tools: List[Tool]
@@ -212,7 +230,7 @@ class KimiK2Detector(BaseFormatDetector):
 
         if not has_tool_call:
             self._buffer = ""
-            normal_text = _strip_special_tokens(new_text)
+            normal_text = self.sanitize_normal_text(new_text)
             return StreamingParseResult(normal_text=normal_text)
 
         if not hasattr(self, "_tool_indices"):
@@ -297,9 +315,9 @@ class KimiK2Detector(BaseFormatDetector):
                             pass
 
                         # Find the end of the current tool call and remove only that part from buffer
-                        tool_call_end_pattern = (
-                            r"<\|tool_call_begin\|>.*?<\|tool_call_end\|>"
-                        )
+                        _beg_pat = re.escape(self.tool_call_start_token)
+                        _end_pat = re.escape(self.tool_call_end_token)
+                        tool_call_end_pattern = _beg_pat + r".*?" + _end_pat
                         end_match = re.search(
                             tool_call_end_pattern, current_text, re.DOTALL
                         )
@@ -318,8 +336,8 @@ class KimiK2Detector(BaseFormatDetector):
             return StreamingParseResult(normal_text="", calls=calls)
 
         except Exception as e:
-            logger.error("Error in parse_streaming_increment: %s", e, exc_info=True)
-            return StreamingParseResult(normal_text=_strip_special_tokens(current_text))
+            logger.error(f"Error in parse_streaming_increment: {e}")
+            return StreamingParseResult(normal_text=self.sanitize_normal_text(current_text))
 
     def structure_info(self) -> _GetInfoFunc:
         """Return function that creates StructureInfo for guided generation."""
