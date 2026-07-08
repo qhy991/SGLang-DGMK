@@ -180,6 +180,15 @@ def _topk_unfused(
     if batch_size == 0 or topk == 0 or max_score_len == 0:
         return topk_indices
 
+    if topk_op is torch.topk and (topk_op_kwargs or {}) == {"dim": -1}:
+        from sglang.srt.layers.attention.dsa.fused_topk_hip import (
+            maybe_dispatch_fused_topk,
+        )
+
+        fused = maybe_dispatch_fused_topk(score, lengths, topk, row_starts)
+        if fused is not None:
+            return fused
+
     if row_starts is None:
         row_starts = torch.zeros_like(lengths, dtype=torch.int32, device=score.device)
     else:
