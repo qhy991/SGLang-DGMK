@@ -1,0 +1,23 @@
+{
+  "fork_root": "/home/qinhaiyan/DeepGEMM-GLM52",
+  "remote": "https://github.com/sgl-project/DeepGEMM",
+  "tag": "v0.1.4",
+  "upstream_commit": "731e7c7a97d269e4b9f482ea18d0e709a948f293",
+  "branch": "glm52-experiments",
+  "commit": "731e7c7a97d269e4b9f482ea18d0e709a948f293",
+  "submodules": {
+    "third-party/cutlass": "f3fde58372d33e9a5650ba7b80fc48b3b49d40c8",
+    "third-party/fmt": "553ec11ec06fbe0beebfbb45f9dc3c9eabd83d28"
+  },
+  "python": "3.12.13",
+  "python_exe": "/home/qinhaiyan/Kernel-Harness/.venv/bin/python",
+  "torch": "2.11.0+cu130",
+  "torch_cuda": "13.0",
+  "cxx11_abi": true,
+  "platform": "Linux-6.8.0-100-generic-x86_64-with-glibc2.39",
+  "sgl_deep_gemm_version_file": "0.1.4",
+  "stock_site_packages": "/home/qinhaiyan/Kernel-Harness/.venv/lib/python3.12/site-packages/deep_gemm",
+  "stock_package": "sgl-deep-gemm==0.1.4",
+  "overlay_root": "/home/qinhaiyan/DeepGEMM-GLM52/overlays",
+  "import_alias": "deep_gemm_experimental"
+}

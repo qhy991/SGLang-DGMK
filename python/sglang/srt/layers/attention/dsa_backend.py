@@ -2138,7 +2138,21 @@ class DeepseekSparseAttnBackend(
                 page_size=1,
             )
 
-        if self.dsa_decode_impl == "flashmla_sparse":
+        # GLM-5.2 opt: upgrade flashmla_sparse (and non-trtllm backends) to the
+        # hechenxi trtllm-gen archive candidate. Leave native trtllm alone — it
+        # already uses the same kernel family.
+        from sglang.srt.layers.glm52_opt import config as glm52_config
+        from sglang.srt.layers.glm52_opt.context import get_forward_mode
+        from sglang.srt.layers.glm52_opt.phase import infer_glm52_phase
+        from sglang.srt.layers.glm52_opt.registry import lookup as glm52_lookup
+
+        _use_glm52_dsa = False
+        if glm52_config.is_enabled() and self.dsa_decode_impl != "trtllm":
+            _phase = infer_glm52_phase(get_forward_mode(), q_nope.shape[0])
+            _spec = glm52_lookup("dsa_decode_attn", _phase)
+            _use_glm52_dsa = _spec is not None and _spec.kind == "dsa"
+
+        if self.dsa_decode_impl == "flashmla_sparse" or _use_glm52_dsa:
             if q_rope is not None:
                 q_all = concat_mla_absorb_q_general(q_nope, q_rope)
             return self._forward_flashmla_sparse(
@@ -2251,6 +2265,27 @@ class DeepseekSparseAttnBackend(
         page_table_1: torch.Tensor,
         sm_scale: float,
     ) -> torch.Tensor:
+        from sglang.srt.layers.glm52_opt import config as glm52_config
+        from sglang.srt.layers.glm52_opt.context import get_forward_mode
+        from sglang.srt.layers.glm52_opt.phase import infer_glm52_phase
+        from sglang.srt.layers.glm52_opt.registry import lookup
+
+        phase = infer_glm52_phase(get_forward_mode(), q_all.shape[0])
+        spec = lookup("dsa_decode_attn", phase) if glm52_config.is_enabled() else None
+        if spec is not None and spec.kind == "dsa":
+            from sglang.srt.layers.glm52_opt.dsa_attn import run_dsa_decode
+
+            indices_input = page_table_1.unsqueeze(1)
+            return run_dsa_decode(
+                spec.archive_ref,
+                {
+                    "q": q_all,
+                    "kv": kv_cache,
+                    "indices": indices_input,
+                    "sm_scale": sm_scale,
+                },
+            )
+
         from sgl_kernel.flash_mla import flash_mla_sparse_fwd
 
         # FlashMLA sparse kernel requires num_heads to be a multiple of 64 (Hopper) or 128 (Blackwell)

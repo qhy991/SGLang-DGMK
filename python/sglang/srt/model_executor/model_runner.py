@@ -3150,6 +3150,9 @@ class ModelRunner(ModelRunnerKVCacheMixin):
         else:
             ctx_mgr = forward_context(ForwardContext(attn_backend=self.attn_backend))
         with ctx_mgr:
+            from sglang.srt.layers.glm52_opt.context import set_forward_mode
+
+            set_forward_mode(forward_batch.forward_mode)
             mode_check = (
                 forward_batch.forward_mode.is_cpu_graph
                 if self.device == "cpu"

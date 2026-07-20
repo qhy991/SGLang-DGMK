@@ -433,15 +433,24 @@ class DeepGemmRunnerCore(MoeRunnerCore):
         gateup_output = torch.empty(
             (num_groups, m, n), device=hidden_states_device, dtype=torch.bfloat16
         )
-        deep_gemm_wrapper.grouped_gemm_nt_f8f8bf16_masked(
-            (hidden_states, hidden_states_scale),
-            (w13_weight, w13_scale),
-            gateup_output,
-            masked_m,
-            expected_m,
-            recipe_a=recipe_a,
-            recipe_b=recipe_b,
-        )
+        # w13 = fused gate+up. Decode: tag moe_gate_proj (pack+PDL).
+        # Prefill: moe_gate is intentionally stock (Graph regress); tag moe_up_proj
+        # so the registered prefill pack path can still apply to w13.
+        from sglang.srt.layers.glm52_opt.context import get_forward_mode, op_context
+        from sglang.srt.layers.glm52_opt.phase import infer_glm52_phase
+
+        _phase = infer_glm52_phase(get_forward_mode(), int(m))
+        _moe_tag = "moe_up_proj" if _phase == "prefill" else "moe_gate_proj"
+        with op_context(_moe_tag):
+            deep_gemm_wrapper.grouped_gemm_nt_f8f8bf16_masked(
+                (hidden_states, hidden_states_scale),
+                (w13_weight, w13_scale),
+                gateup_output,
+                masked_m,
+                expected_m,
+                recipe_a=recipe_a,
+                recipe_b=recipe_b,
+            )
         dispose_tensor(hidden_states)
         dispose_tensor(hidden_states_scale)
 
@@ -539,16 +548,19 @@ class DeepGemmRunnerCore(MoeRunnerCore):
                 "max_block_n": max_block_n,
             }
 
-        deep_gemm_return_value = deep_gemm_wrapper.grouped_gemm_nt_f8f8bf16_masked(
-            (down_input, down_input_scale),
-            (w2_weight, w2_scale),
-            down_output,
-            masked_m,
-            expected_m,
-            recipe_a=recipe_a_down,
-            recipe_b=recipe_b,
-            **gemm_overlap_args_dict,
-        )
+        from sglang.srt.layers.glm52_opt.context import op_context
+
+        with op_context("moe_down_proj"):
+            deep_gemm_return_value = deep_gemm_wrapper.grouped_gemm_nt_f8f8bf16_masked(
+                (down_input, down_input_scale),
+                (w2_weight, w2_scale),
+                down_output,
+                masked_m,
+                expected_m,
+                recipe_a=recipe_a_down,
+                recipe_b=recipe_b,
+                **gemm_overlap_args_dict,
+            )
         meta_overlap_args = running_state.get("meta_overlap_args", None)
         # Returns (block_m, threshold) only with down-gemm overlap, else None;
         # meta_overlap_args may be set without overlap, so guard the unpack.

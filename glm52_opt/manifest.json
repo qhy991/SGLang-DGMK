@@ -1,0 +1,9 @@
+{
+  "archive_tag": "0720-Best-GLM-52",
+  "kernel_harness_commit": "vendored-in-repo",
+  "kernel_harness_archive": "third_party/kernel-archive/0720-Best-GLM-52",
+  "deepgemm_variant": "glm52-qb-sm100-fused-ue8m0-pack",
+  "deepgemm_commit": "41c62355360c6ce07af1ca54eef612087a48f803",
+  "deepgemm_overlay_path": "third_party/deepgemm_glm52",
+  "deepgemm_fork_root": "third_party/DeepGEMM-GLM52"
+}

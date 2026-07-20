@@ -827,6 +827,20 @@ def deepgemm_w8a8_block_fp8_linear_with_fallback(
             block_size[1],
         )
 
+    from sglang.srt.layers.glm52_opt.dispatch import try_dispatch_fp8_gemm
+
+    glm52_out = try_dispatch_fp8_gemm(
+        q_input,
+        weight,
+        x_scale,
+        weight_scale,
+        block_size,
+        output_dtype,
+        bias=bias,
+    )
+    if glm52_out is not None:
+        return glm52_out.to(dtype=output_dtype).view(*output_shape)
+
     output = w8a8_block_fp8_matmul_deepgemm(
         q_input, weight, x_scale, weight_scale, block_size, output_dtype=output_dtype
     )

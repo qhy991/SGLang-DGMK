@@ -51,6 +51,10 @@ def grouped_gemm_nt_f8f8bf16_masked(
         with configure_deep_gemm_num_sms(
             overlap_args.num_sms if overlap_args is not None else None
         ):
+            from sglang.srt.layers.glm52_opt.dispatch import try_dispatch_moe_masked
+
+            if try_dispatch_moe_masked(lhs, rhs, out, masked_m, expected_m):
+                return out
 
             fp4_kwargs = {}
             if recipe_a is not None:
@@ -230,6 +234,23 @@ def update_deep_gemm_config(gpu_id: int, server_args: ServerArgs):
         deep_gemm.set_pdl(True)
 
     compile_utils.update_deep_gemm_config(gpu_id, server_args)
+
+    # Opt-in GLM-5.2 experimental DeepGEMM overlay (does not replace stock import).
+    try:
+        from sglang.srt.layers.glm52_opt.config import deepgemm_variant, is_enabled
+
+        if is_enabled() and deepgemm_variant():
+            from sglang.srt.layers.glm52_opt.experimental_deepgemm import (
+                get_experimental_deep_gemm,
+            )
+
+            get_experimental_deep_gemm()
+            logger.info(
+                "GLM-5.2 experimental DeepGEMM overlay loaded (variant=%s)",
+                deepgemm_variant(),
+            )
+    except Exception as exc:
+        logger.warning("GLM-5.2 DeepGEMM overlay load skipped: %s", exc)
 
 
 @contextmanager

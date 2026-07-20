@@ -500,6 +500,11 @@ class Indexer(MultiPlatformOp):
         if _use_aiter and _is_gfx95_supported and isinstance(x, tuple) and len(x) == 3:
             x = x[2]
         if _is_cuda:
+            from sglang.srt.layers.glm52_opt.bf16_mm import try_index_weights_proj
+
+            opt = try_index_weights_proj(x, self.weights_proj.weight)
+            if opt is not None:
+                return opt
             return torch.mm(x, self.weights_proj.weight.t(), out_dtype=torch.float32)
 
         weights, _ = self.weights_proj(x)
