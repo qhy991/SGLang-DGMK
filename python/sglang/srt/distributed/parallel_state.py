@@ -44,6 +44,12 @@ from torch.distributed import Backend, ProcessGroup
 
 from sglang.srt import platforms
 from sglang.srt.compilation.compilation_config import register_split_op
+from sglang.srt.distributed.all_reduce_trace import (
+    ALL_REDUCE_TRACE_ENABLED,
+    begin_all_reduce_trace,
+    finish_all_reduce_trace,
+    note_all_reduce_trace_failure,
+)
 from sglang.srt.distributed.utils import set_global_tcp_store
 from sglang.srt.environ import envs
 from sglang.srt.model_executor.runner_backend_utils.tc_piecewise_cuda_graph import (
@@ -591,19 +597,51 @@ class GroupCoordinator:
         a new tensor in the same op. So we need to figure out if the op is
         in-place or out-of-place ahead of time.
         """
+        trace_token = None
+        if ALL_REDUCE_TRACE_ENABLED:
+            try:
+                cpu_shm_eligible = None
+                if input_.is_cpu:
+                    cpu_shm_eligible = is_shm_available(
+                        input_.dtype, self.world_size, self.local_size
+                    )
+                trace_token = begin_all_reduce_trace(
+                    self,
+                    input_,
+                    piecewise_cuda_graph=is_in_tc_piecewise_cuda_graph(),
+                    cpu_shm_eligible=cpu_shm_eligible,
+                )
+            except Exception:
+                # Reachability tracing is diagnostic and must always fail open.
+                note_all_reduce_trace_failure("parallel_state_begin")
+                trace_token = None
+
         # Bypass the function if we are using only 1 GPU.
         if self.world_size == 1:
+            if trace_token is not None:
+                finish_all_reduce_trace(
+                    trace_token, input_, selected_backend="identity"
+                )
             return input_
 
         if input_.is_cpu:
             if is_shm_available(input_.dtype, self.world_size, self.local_size):
                 torch.ops.sgl_kernel.shm_allreduce(input_, REDUCE_OP_SUM)
+                selected_backend = "cpu_shm"
             else:
                 torch.distributed.all_reduce(input_, group=self.device_group)
+                selected_backend = "cpu_c10d"
+            if trace_token is not None:
+                finish_all_reduce_trace(
+                    trace_token, input_, selected_backend=selected_backend
+                )
             return input_
 
         if self.hpu_communicator is not None and not self.hpu_communicator.disabled:
-            return self.hpu_communicator.all_reduce(input_)
+            output = self.hpu_communicator.all_reduce(input_)
+            if trace_token is not None:
+                finish_all_reduce_trace(trace_token, output, selected_backend="hpu")
+            return output
 
         if self.xpu_communicator is not None and not self.xpu_communicator.disabled:
             # Route through inplace_all_reduce custom op so Dynamo treats this as
@@ -614,10 +652,19 @@ class GroupCoordinator:
             # torch.distributed.all_reduce on self.device_group (the same group
             # used by xpu_communicator).
             inplace_all_reduce(input_, group_name=self.unique_name)
+            if trace_token is not None:
+                finish_all_reduce_trace(
+                    trace_token,
+                    input_,
+                    selected_backend="xpu_torch_distributed_inplace",
+                )
             return input_
 
         if self.npu_communicator is not None and not self.npu_communicator.disabled:
-            return self.npu_communicator.all_reduce(input_)
+            output = self.npu_communicator.all_reduce(input_)
+            if trace_token is not None:
+                finish_all_reduce_trace(trace_token, output, selected_backend="npu")
+            return output
 
         should_use_pymscclpp_allreduce = (
             self.pymscclpp_comm is not None
@@ -631,6 +678,12 @@ class GroupCoordinator:
             self.debug_check_symmetric_mempool(self, {"input": input_}, "all_reduce")
             with self.pynccl_comm.change_state(enable=True):
                 self.pynccl_comm.all_reduce(input_)
+                if trace_token is not None:
+                    finish_all_reduce_trace(
+                        trace_token,
+                        input_,
+                        selected_backend="pynccl_symmetric_inplace",
+                    )
                 return input_
 
         outplace_all_reduce_method = None
@@ -659,13 +712,42 @@ class GroupCoordinator:
             # For piecewise cuda graph, we use pynccl outplace allreduce
             outplace_all_reduce_method = "pynccl"
         if outplace_all_reduce_method is not None:
-            return outplace_all_reduce(
+            output = outplace_all_reduce(
                 input_,
                 group_name=self.unique_name,
                 outplace_all_reduce_method=outplace_all_reduce_method,
             )
+            if trace_token is not None:
+                selected_backend = {
+                    "ca": "custom_all_reduce_outplace",
+                    "qr": "quick_all_reduce_outplace",
+                    "pymscclpp": "pymscclpp_outplace",
+                    "torch_symm_mem": "torch_symm_mem_outplace",
+                    "pynccl": "pynccl_piecewise_outplace",
+                }[outplace_all_reduce_method]
+                finish_all_reduce_trace(
+                    trace_token, output, selected_backend=selected_backend
+                )
+            return output
         else:
+            selected_backend = None
+            if trace_token is not None:
+                try:
+                    selected_backend = self._trace_inplace_all_reduce_backend(input_)
+                except Exception:
+                    note_all_reduce_trace_failure("fallback_selector")
             inplace_all_reduce(input_, group_name=self.unique_name)
+            if trace_token is not None:
+                finish_all_reduce_trace(
+                    trace_token,
+                    input_,
+                    selected_backend=selected_backend,
+                    selected_backend_source=(
+                        "pre_dispatch_mirror_of_inplace_selector"
+                        if selected_backend is not None
+                        else "fallback_not_observed_prediction_only"
+                    ),
+                )
             return input_
 
     def quant_all_reduce(self, input_: torch.Tensor) -> torch.Tensor:
@@ -769,6 +851,24 @@ class GroupCoordinator:
                 out = pynccl_comm.outplace_all_reduce(input_)
         assert out is not None
         return out
+
+    def _trace_inplace_all_reduce_backend(self, input_: torch.Tensor) -> str:
+        """Mirror the in-place selector only while reachability tracing is active.
+
+        Keep this in lockstep with ``_all_reduce_in_place``. The normal disabled
+        path never calls this helper, so tracing adds no extra predicate work.
+        """
+        pynccl_comm = self.pynccl_comm
+        torch_symm_mem_comm = self.torch_symm_mem_comm
+        if pynccl_comm is not None and not pynccl_comm.disabled:
+            return "pynccl_inplace"
+        if (
+            torch_symm_mem_comm is not None
+            and not torch_symm_mem_comm.disabled
+            and torch_symm_mem_comm.should_torch_symm_mem_allreduce(input_)
+        ):
+            return "torch_symm_mem_inplace"
+        return "torch_distributed_inplace"
 
     def _all_reduce_in_place(self, input_: torch.Tensor) -> None:
         pynccl_comm = self.pynccl_comm

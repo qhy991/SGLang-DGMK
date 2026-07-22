@@ -1,0 +1,593 @@
+{
+  "schema_version": 1,
+  "artifact": "glm52_tp_allreduce_static_dispatch_table",
+  "status": "cpu_source_map_runtime_unproven",
+  "analysis_date": "2026-07-22",
+  "source_identities": {
+    "sglang_worktree": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/sglang",
+    "sglang_commit": "f93f8867b4bc124c9809c9110ec7361ed11b6b4a",
+    "kernel_harness_worktree": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness",
+    "kernel_harness_commit": "bcd005409e65786af82c86f621507ebef12b2766",
+    "commit_scope": "base commits at analysis start; tracing and exact graph-workload task changes were uncommitted during artifact generation and final evidence must record their landed commits",
+    "target": "NVIDIA B200/SM100"
+  },
+  "public_architecture_facts": {
+    "source": "https://huggingface.co/nvidia/GLM-5.2-NVFP4/blob/main/config.json",
+    "source_model": "nvidia/GLM-5.2-NVFP4",
+    "retrieved_date": "2026-07-22",
+    "scope": "public config architecture prior only; not runtime checkpoint, launch, caller, graph, topology, or backend proof",
+    "facts": {
+      "architecture": "GlmMoeDsaForCausalLM",
+      "hidden_size": 6144,
+      "intermediate_size": 12288,
+      "moe_intermediate_size": 2048,
+      "first_k_dense_replace": 3,
+      "moe_layer_freq": 1,
+      "n_routed_experts": 256,
+      "n_shared_experts": 1,
+      "num_experts_per_tok": 8,
+      "num_hidden_layers": 78
+    },
+    "source_predicate": "python/sglang/srt/models/deepseek_v2.py:2197-2202",
+    "derived_public_layer_split": {
+      "dense_layers": "0-2",
+      "sparse_layers": "3-77"
+    },
+    "runtime_verification_required": true
+  },
+  "entry_points": [
+    {
+      "name": "generic_tp",
+      "symbol": "sglang.srt.distributed.communication_op.tensor_model_parallel_all_reduce",
+      "group": "get_tp_group()",
+      "source": "python/sglang/srt/distributed/communication_op.py:18-20"
+    },
+    {
+      "name": "attention_tp",
+      "symbol": "sglang.srt.distributed.communication_op.attention_tensor_model_parallel_all_reduce",
+      "group": "get_attn_tp_group()",
+      "source": "python/sglang/srt/distributed/communication_op.py:65-67"
+    },
+    {
+      "name": "moe_tp",
+      "symbol": "sglang.srt.distributed.communication_op.moe_tensor_model_parallel_all_reduce",
+      "group": "get_moe_tp_group()",
+      "source": "python/sglang/srt/distributed/communication_op.py:77-79"
+    },
+    {
+      "name": "moe_ep",
+      "symbol": "sglang.srt.distributed.communication_op.moe_expert_parallel_all_reduce",
+      "group": "get_moe_ep_group()",
+      "source": "python/sglang/srt/distributed/communication_op.py:82-84"
+    }
+  ],
+  "deployment_lanes": [
+    {
+      "name": "b200_fp8_low_latency",
+      "label": "production_tp8_external_acceptance_required",
+      "resolved_from_repository": {
+        "tp": 8,
+        "dp": 1,
+        "ep": 1,
+        "attention_tp": 8,
+        "moe_a2a_backend": "none"
+      },
+      "sources": [
+        "docs_new/src/snippets/configs/zai-org/glm-5.2.jsx:283-296",
+        "python/sglang/srt/server_args.py:898-932",
+        "python/sglang/srt/server_args.py:1886-1910"
+      ],
+      "reachability": "local-shape Group AllReduce is code-reachable, but FlashInfer fused AllReduce+RMSNorm can bypass it"
+    },
+    {
+      "name": "b200_fp8_balanced",
+      "label": "production_tp8_dp8_ep8_external_acceptance_required",
+      "resolved_from_repository": {
+        "tp": 8,
+        "dp": 8,
+        "ep": 8,
+        "attention_tp": 1,
+        "moe_tp": 1,
+        "moe_a2a_backend": "deepep"
+      },
+      "sources": [
+        "docs_new/src/snippets/configs/zai-org/glm-5.2.jsx:299-319",
+        "python/sglang/srt/arg_groups/overrides.py:2047-2051",
+        "python/sglang/srt/distributed/parallel_state.py:2141-2143",
+        "python/sglang/srt/distributed/parallel_state.py:2213-2215",
+        "python/sglang/srt/distributed/parallel_state.py:2244-2249"
+      ],
+      "reachability": "SUM_LEN dense transitions can reach global-buffer Group AllReduce; MAX_LEN uses AllGather/reduce-scatter; DeepEP sparse regions are A2A"
+    },
+    {
+      "name": "b200_fp8_high_throughput",
+      "label": "production_tp8_dp8_ep8_external_acceptance_required",
+      "resolved_from_repository": {
+        "tp": 8,
+        "dp": 8,
+        "ep": 8,
+        "attention_tp": 1,
+        "moe_tp": 1,
+        "moe_a2a_backend": "deepep"
+      },
+      "source": "docs_new/src/snippets/configs/zai-org/glm-5.2.jsx:322-335",
+      "reachability": "same collective topology split as balanced; exact padding/graph/caller frequency is runtime-unproven"
+    },
+    {
+      "name": "four_card_diagnostic",
+      "label": "tp4_dp4_ep4_diagnostic_not_tp8",
+      "resolved_from_repository": {
+        "tp": 4,
+        "dp": 4,
+        "ep": 4,
+        "attention_tp": 1
+      },
+      "sources": [
+        "../kernel-harness/serving_native/workloads.py:238-339",
+        "../kernel-harness/serving_native/tp_allreduce_runner.py"
+      ],
+      "reachability": "standalone direct GroupCoordinator diagnostic with eager default/nondefault and CUDA-Graph nondefault support; not production caller or TP8 acceptance"
+    }
+  ],
+  "callers": [
+    {
+      "id": "vocab_parallel_input_embedding",
+      "material": true,
+      "caller": "sglang.srt.layers.vocab_parallel_embedding.VocabParallelEmbedding.forward",
+      "call_source": "python/sglang/srt/layers/vocab_parallel_embedding.py:501-535",
+      "model_sources": [
+        "python/sglang/srt/models/deepseek_v2.py:2385-2392",
+        "python/sglang/srt/models/deepseek_v2.py:2518-2525"
+      ],
+      "group": "full tp for plain TP; attention_tp when DP attention is enabled",
+      "input_abi": "masked local vocab-shard lookup output, normally BF16 [token_rows, hidden_size]",
+      "output_abi": "summed embedding returned as first decoder-layer hidden states",
+      "graph_state": "model forward eager/graph state; runtime trace required",
+      "stream": "embedding lookup's active current/capture stream",
+      "following_consumer": "first decoder layer input RMSNorm/attention",
+      "plain_tp8_reachability": "code-mandatory for DSA unless embedding replication is explicitly enabled; DSA cannot use attention-input-scattered skip",
+      "balanced_tp8_dp8_reachability": "bypassed because use_attn_tp_group=True and derived attention_tp_size=1",
+      "exclusions": [
+        "SGLANG_ENABLE_EMBED_REPLICATION",
+        "tp_size=1 for the selected embedding group",
+        "input_scattered for non-DSA eligible models"
+      ],
+      "sources": [
+        "python/sglang/srt/layers/vocab_parallel_embedding.py:163-182",
+        "python/sglang/srt/layers/vocab_parallel_embedding.py:224-253",
+        "python/sglang/srt/layers/communicator.py:260-278",
+        "python/sglang/srt/environ.py:1002"
+      ]
+    },
+    {
+      "id": "dp_sum_len_gather",
+      "material": true,
+      "caller": "sglang.srt.layers.dp_attention._dp_gather_via_all_reduce",
+      "call_source": "python/sglang/srt/layers/dp_attention.py:379-413",
+      "group": "tp",
+      "input_abi": "zero-filled contiguous global token buffer with one local slice populated; floating dtype",
+      "output_abi": "global_tokens[:] receives returned reduction; output object exposed to caller remains global_tokens",
+      "alias_implication": "different returned storage adds a full-buffer copy into global_tokens; aliased returned storage makes the slice operation a storage-level self-assignment; registered outplace classification alone does not determine storage alias",
+      "graph_state": "depends on forward mode and DP padding; runtime trace required",
+      "stream": "active current/capture stream inherited by selected backend",
+      "following_consumer": "post-attention RMSNorm when norm-after-gather, otherwise dense MLP gate/up projection",
+      "selection": "SUM_LEN/default after optional gatherv declines",
+      "exclusions": [
+        "MAX_LEN selects AllGather",
+        "SGLANG_DP_USE_GATHERV supported SUM_LEN selects AllGatherv",
+        "non-floating local all-node case calls registered inplace_all_reduce directly"
+      ],
+      "sources": [
+        "python/sglang/srt/layers/communicator.py:958-969",
+        "python/sglang/srt/layers/communicator.py:1068-1103",
+        "python/sglang/srt/layers/dp_attention.py:416-543"
+      ]
+    },
+    {
+      "id": "dense_mlp_down_proj",
+      "material": true,
+      "caller": "sglang.srt.layers.linear.RowParallelLinear.forward",
+      "model_site": "DeepseekV2MLP.down_proj",
+      "call_source": "python/sglang/srt/layers/linear.py:1555-1603",
+      "model_sources": [
+        "python/sglang/srt/models/deepseek_v2.py:239-274",
+        "python/sglang/srt/models/deepseek_v2.py:428"
+      ],
+      "group": "tp unless use_dp_attention_reduce requests attention_tp",
+      "input_abi": "row-parallel projection output, normally BF16 [token_rows, hidden_size]",
+      "output_abi": "returned tensor may alias projection output or be distinct according to backend",
+      "graph_state": "eager or graph; fusion and reduce-scatter flags can suppress call",
+      "stream": "projection's active current/capture stream",
+      "following_consumer": "LayerCommunicator postprocess/residual path and next layer",
+      "exclusions": [
+        "fuse_mlp_allreduce",
+        "mlp_reduce_scatter",
+        "explicit skip_all_reduce",
+        "tp_size=1"
+      ],
+      "exclusion_sources": [
+        "python/sglang/srt/layers/moe/utils.py:419-427",
+        "python/sglang/srt/layers/communicator.py:755-818"
+      ]
+    },
+    {
+      "id": "attention_output_before_rmsnorm",
+      "material": true,
+      "caller": "LayerCommunicator attention reduction fallback",
+      "call_sources": [
+        "python/sglang/srt/layers/communicator.py:1032-1048",
+        "python/sglang/srt/layers/communicator.py:1104-1131",
+        "python/sglang/srt/layers/communicator.py:1155-1168"
+      ],
+      "model_sources": [
+        "python/sglang/srt/models/deepseek_v2.py:1695-1705",
+        "python/sglang/srt/models/deepseek_v2.py:2083-2105"
+      ],
+      "group": "attention_tp or full tp depending transition",
+      "input_abi": "partial attention O projection output; O projection itself has reduce_results=False",
+      "output_abi": "selected Group backend result feeds residual RMSNorm",
+      "graph_state": "plain-TP decode is eligible for fused FlashInfer path; generic fallback must be proven",
+      "stream": "active current/capture stream",
+      "following_consumer": "post-attention residual RMSNorm, then dense MLP or MoE",
+      "exclusions": [
+        "attention_tp_size=1 simple path",
+        "successful FlashInfer fused AllReduce+RMSNorm",
+        "reduce-scatter layout transition"
+      ],
+      "exclusion_sources": [
+        "python/sglang/srt/arg_groups/overrides.py:1461-1507",
+        "python/sglang/srt/layers/layernorm.py:159-213"
+      ]
+    },
+    {
+      "id": "standard_non_a2a_moe_output",
+      "material": true,
+      "caller": "DeepseekV2MoE.forward_normal or forward_normal_dual_stream",
+      "call_sources": [
+        "python/sglang/srt/models/deepseek_v2.py:1011-1018",
+        "python/sglang/srt/models/deepseek_v2.py:1133-1140"
+      ],
+      "group": "tp",
+      "input_abi": "combined routed/shared expert output, normally BF16 [token_rows, hidden_size]",
+      "output_abi": "selected Group backend result; TP1 shared expert may be added after reduction",
+      "graph_state": "eager/graph; deferred allreduce fusion can suppress call",
+      "stream": "main stream after any alternate shared-expert stream dependency",
+      "following_consumer": "LayerCommunicator postprocess/residual path and next layer",
+      "exclusions": [
+        "DeepEP or other A2A route",
+        "fuse_mlp_allreduce",
+        "mlp_reduce_scatter",
+        "DP reduce-scatterv",
+        "absorbing FlashInfer paths"
+      ],
+      "exclusion_source": "python/sglang/srt/layers/moe/utils.py:430-464"
+    },
+    {
+      "id": "deferred_mlp_fusion_fallback",
+      "material": true,
+      "caller": "LayerCommunicator.prepare_attn fallback for _sglang_needs_allreduce_fusion",
+      "call_source": "python/sglang/srt/layers/communicator.py:547-581",
+      "group": "moe_tp",
+      "input_abi": "deferred dense-MLP or standard-MoE output, normally BF16 [token_rows, hidden_size]",
+      "output_abi": "MoE-TP Group result immediately consumed by next-layer input RMSNorm",
+      "graph_state": "reached only when a tensor was marked for deferred fusion and the fused implementation is unavailable at the next layer",
+      "stream": "next layer prepare_attn active current/capture stream",
+      "following_consumer": "next-layer input RMSNorm and attention",
+      "exclusions": [
+        "successful FlashInfer/AITER fused AllReduce+RMSNorm",
+        "tensor was never marked for deferred fusion",
+        "moe_tp_size=1"
+      ]
+    }
+  ],
+  "excluded_sites": [
+    {
+      "id": "dsa_indexer_scattered_to_tp_attn_full",
+      "collective": "AllGather",
+      "source": "python/sglang/srt/layers/attention/dsa/dsa_indexer.py:2514-2528"
+    },
+    {
+      "id": "dsa_prefill_cp_key_movement",
+      "collective": "CP AllGather and rerange",
+      "sources": [
+        "python/sglang/srt/layers/attention/dsa/dsa_indexer.py:639-653",
+        "python/sglang/srt/layers/attention/dsa/dsa_indexer.py:2230"
+      ]
+    },
+    {
+      "id": "dsa_cp_layer_transition",
+      "collective": "AllGather/reduce-scatter",
+      "source": "python/sglang/srt/layers/communicator_dsa_cp.py:68-92"
+    },
+    {
+      "id": "dp_max_len_gather",
+      "collective": "AllGather with optional attention-TP reduce-scatter",
+      "source": "python/sglang/srt/layers/dp_attention.py:416-433"
+    },
+    {
+      "id": "dp_sum_len_gatherv",
+      "collective": "AllGatherv",
+      "source": "python/sglang/srt/layers/dp_attention.py:436-504"
+    },
+    {
+      "id": "deepep_sparse_moe",
+      "collective": "A2A dispatch/combine",
+      "sources": [
+        "python/sglang/srt/models/deepseek_v2.py:860-918",
+        "python/sglang/srt/models/deepseek_v2.py:1396-1424"
+      ]
+    },
+    {
+      "id": "successful_flashinfer_allreduce_rmsnorm",
+      "collective": "fused communication+RMSNorm outside GroupCoordinator.all_reduce",
+      "sources": [
+        "python/sglang/srt/arg_groups/overrides.py:1461-1507",
+        "python/sglang/srt/layers/layernorm.py:159-213"
+      ]
+    }
+  ],
+  "messages": {
+    "formula": "BF16 bytes = rows * 6144 * 2",
+    "direct_tp4_diagnostics": [
+      {
+        "workload": "tp4_allreduce_decode_m16",
+        "world_size": 4,
+        "rows": 16,
+        "bytes": 196608,
+        "binary_size": "192 KiB",
+        "label": "TP4 diagnostic only"
+      },
+      {
+        "workload": "tp4_allreduce_decode_m32",
+        "world_size": 4,
+        "rows": 32,
+        "bytes": 393216,
+        "binary_size": "384 KiB",
+        "label": "TP4 diagnostic only"
+      },
+      {
+        "workload": "tp4_allreduce_prefill",
+        "world_size": 4,
+        "rows": 8192,
+        "bytes": 100663296,
+        "binary_size": "96 MiB",
+        "label": "TP4 diagnostic only"
+      }
+    ],
+    "derived_dp_global_buffers": [
+      {
+        "lane": "TP4/DP4 decode",
+        "local_rows": 16,
+        "dp": 4,
+        "global_rows": 64,
+        "bytes": 786432,
+        "binary_size": "768 KiB",
+        "status": "runtime_unproven"
+      },
+      {
+        "lane": "TP4/DP4 decode",
+        "local_rows": 32,
+        "dp": 4,
+        "global_rows": 128,
+        "bytes": 1572864,
+        "binary_size": "1.5 MiB",
+        "status": "runtime_unproven"
+      },
+      {
+        "lane": "TP4/DP4 prefill",
+        "local_rows": 8192,
+        "dp": 4,
+        "global_rows": 32768,
+        "bytes": 402653184,
+        "binary_size": "384 MiB",
+        "status": "runtime_unproven"
+      },
+      {
+        "lane": "TP8/DP8 decode",
+        "local_rows": 16,
+        "dp": 8,
+        "global_rows": 128,
+        "bytes": 1572864,
+        "binary_size": "1.5 MiB",
+        "status": "external_tp8_runtime_unproven"
+      },
+      {
+        "lane": "TP8/DP8 decode",
+        "local_rows": 32,
+        "dp": 8,
+        "global_rows": 256,
+        "bytes": 3145728,
+        "binary_size": "3 MiB",
+        "status": "external_tp8_runtime_unproven"
+      },
+      {
+        "lane": "TP8/DP8 prefill",
+        "local_rows": 4096,
+        "dp": 8,
+        "global_rows": 32768,
+        "bytes": 402653184,
+        "binary_size": "384 MiB",
+        "status": "external_tp8_runtime_unproven"
+      }
+    ]
+  },
+  "dispatcher": {
+    "symbol": "sglang.srt.distributed.parallel_state.GroupCoordinator.all_reduce",
+    "source": "python/sglang/srt/distributed/parallel_state.py:579-669",
+    "defaults_source": "python/sglang/srt/distributed/parallel_state.py:1814-1831",
+    "default_flags": {
+      "custom_all_reduce": true,
+      "mscclpp_all_reduce": false,
+      "torch_symmetric_memory_all_reduce": false
+    },
+    "priority": [
+      {
+        "order": 1,
+        "id": "early_symmetric_memory_pynccl",
+        "implementation": "pynccl_comm.all_reduce",
+        "predicates": [
+          "pynccl_comm exists",
+          "GroupCoordinator.is_symmetric_memory_enabled()",
+          "PyMSCCL++ did not claim input"
+        ],
+        "output_alias": "input",
+        "stream": "current device stream",
+        "source": "python/sglang/srt/distributed/parallel_state.py:622-634"
+      },
+      {
+        "order": 2,
+        "id": "custom_ca",
+        "implementation": "ca_comm.custom_all_reduce",
+        "predicates": [
+          "communicator exists and enabled",
+          "PyMSCCL++ did not claim input",
+          "should_custom_ar(input)"
+        ],
+        "output_alias": "runtime-dependent: Custom AR V2 eager push/pull and two-shot alias input storage; graph-captured one-shot pull uses distinct empty_like output; Python object identity may still differ",
+        "stream": "current/capture stream",
+        "sources": [
+          "python/sglang/srt/distributed/parallel_state.py:637-643",
+          "python/sglang/jit_kernel/csrc/distributed/custom_all_reduce_push.cuh:205-223",
+          "python/sglang/jit_kernel/csrc/distributed/custom_all_reduce_pull.cuh:140-155"
+        ]
+      },
+      {
+        "order": 3,
+        "id": "quick_qr",
+        "implementation": "qr_comm.quick_all_reduce",
+        "predicates": [
+          "communicator exists and enabled",
+          "should_quick_allreduce(input)"
+        ],
+        "output_alias": "distinct",
+        "stream": "current/capture stream",
+        "b200_eligibility": "unreachable because quick AR construction is HIP-only",
+        "source": "python/sglang/srt/distributed/parallel_state.py:644-649"
+      },
+      {
+        "order": 4,
+        "id": "pymscclpp",
+        "implementation": "pymscclpp_comm.all_reduce",
+        "predicates": [
+          "communicator exists and enabled",
+          "world size in 8,16,32",
+          "dtype FP32/FP16/BF16",
+          "weak contiguous",
+          "SUM",
+          "tuned config exists",
+          "not piecewise graph/compile/capture-stream phase"
+        ],
+        "output_alias": "input",
+        "stream": "active stream consumed by executor",
+        "source": "python/sglang/srt/distributed/device_communicators/pymscclpp.py:328-377"
+      },
+      {
+        "order": 5,
+        "id": "torch_symmetric_memory",
+        "implementation": "torch_symm_mem_comm.all_reduce",
+        "predicates": [
+          "communicator exists and explicitly enabled",
+          "same device",
+          "BF16",
+          "byte size multiple of 4",
+          "byte size below topology maximum"
+        ],
+        "output_alias": "distinct in normal outplace route; input in in-place fallback",
+        "stream": "active current/capture stream",
+        "sm100_limits": {
+          "tp4_bytes_exclusive": 67108864,
+          "tp8_bytes_exclusive": 134217728
+        },
+        "source": "python/sglang/srt/distributed/device_communicators/torch_symm_mem.py:112-170"
+      },
+      {
+        "order": 6,
+        "id": "piecewise_pynccl",
+        "implementation": "pynccl_comm.outplace_all_reduce",
+        "predicates": [
+          "is_in_tc_piecewise_cuda_graph()",
+          "pynccl_comm exists",
+          "all earlier routes declined"
+        ],
+        "output_alias": "distinct",
+        "stream": "current device stream",
+        "source": "python/sglang/srt/distributed/parallel_state.py:658-660"
+      },
+      {
+        "order": 7,
+        "id": "inplace_fallback",
+        "implementation_priority": [
+          "enabled pynccl_comm.all_reduce",
+          "eligible torch_symm_mem_comm.all_reduce(out=input)",
+          "torch.distributed.all_reduce"
+        ],
+        "output_alias": "input",
+        "stream": "current device stream",
+        "source": "python/sglang/srt/distributed/parallel_state.py:773-785"
+      }
+    ],
+    "custom_v2": {
+      "cuda_default_source": "python/sglang/srt/distributed/device_communicators/custom_all_reduce.py:344-369",
+      "topology_predicates_source": "python/sglang/srt/distributed/device_communicators/custom_all_reduce_utils.py:415-485",
+      "message_predicates_source": "python/sglang/srt/distributed/device_communicators/custom_all_reduce_v2.py:134-144",
+      "message_predicates": [
+        "byte size multiple of 16",
+        "weak contiguous",
+        "byte size <= 16777216 by default"
+      ],
+      "b200_thresholds": {
+        "tp4": {
+          "one_shot_push_max_bytes": 2097152,
+          "one_shot_pull_max_bytes": 2097152,
+          "then": "two_shot_pull through 16777216 bytes"
+        },
+        "tp8": {
+          "one_shot_push_max_bytes": 737280,
+          "one_shot_pull_max_bytes": 737280,
+          "then": "two_shot_pull through 16777216 bytes"
+        }
+      },
+      "threshold_source": "python/sglang/srt/distributed/device_communicators/custom_all_reduce_v2.py:194-210",
+      "alias_contract": {
+        "eager_one_shot_push": "input storage",
+        "eager_one_shot_pull": "input storage",
+        "two_shot_pull": "input storage",
+        "graph_captured_one_shot_pull": "distinct empty_like storage",
+        "python_object_identity": "may differ because Python wraps the returned DLPack object",
+        "runtime_measurement_required": true,
+        "sources": [
+          "python/sglang/jit_kernel/csrc/distributed/custom_all_reduce_push.cuh:205-223",
+          "python/sglang/jit_kernel/csrc/distributed/custom_all_reduce_pull.cuh:140-155"
+        ]
+      }
+    },
+    "graph_capture": {
+      "source": "python/sglang/srt/distributed/parallel_state.py:516-577",
+      "contracts": [
+        "capture stream waits for prior current stream",
+        "custom communicator capture context is entered",
+        "PyNCCL and PyMSCCL++ are temporarily enabled",
+        "Python capture hit is not a replay count"
+      ]
+    }
+  },
+  "runtime_blockers": [
+    "loaded checkpoint/config identity and values for hidden size, layer count, first_k_dense_replace, moe_layer_freq, and routed experts",
+    "fully resolved launch arguments and environment",
+    "per-caller phase/bucket frequency",
+    "SUM_LEN versus MAX_LEN versus gatherv selection",
+    "eager versus full/piecewise CUDA Graph capture and replay",
+    "branch-observed selected communicator and selector-inferred custom algorithm/source",
+    "physical B200 topology, full-NVLink, and P2P result",
+    "current stream and cross-stream dependencies",
+    "input/output data pointers and alias result",
+    "following consumer observed in trace",
+    "isolated SGLang import path on every rank",
+    "external TP8/DP8/EP8 production validation because local host exposes only four GPUs"
+  ],
+  "promotion_policy": {
+    "tp4": "diagnostic evidence only; never relabel as TP8/DP8/EP8",
+    "tp8": "stock fallback remains active until external eight-rank correctness, graph, paired latency, containing-region, and end-to-end acceptance",
+    "minimum_runtime_evidence": "hit counter plus kernel trace and code mapping; Python NVTX capture event alone is insufficient"
+  }
+}
