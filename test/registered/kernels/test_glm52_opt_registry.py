@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 import os
+from contextlib import nullcontext
+from types import SimpleNamespace
+from unittest.mock import patch
 
 os.environ.setdefault("SGLANG_GLM52_OPT", "1")
 os.environ.setdefault("SGLANG_GLM52_OPT_PROFILE", "full")
 
+from sglang.srt.layers.deep_gemm_wrapper import entrypoint as deep_gemm_entrypoint
+from sglang.srt.layers.deep_gemm_wrapper.entrypoint import (
+    _glm52_moe_dispatch_compatible,
+)
 from sglang.srt.layers.glm52_opt.context import (
     get_forward_m,
     prefix_to_op_name,
@@ -14,9 +21,6 @@ from sglang.srt.layers.glm52_opt.context import (
 )
 from sglang.srt.layers.glm52_opt.phase import infer_glm52_phase
 from sglang.srt.layers.glm52_opt.registry import lookup
-from sglang.srt.layers.deep_gemm_wrapper.entrypoint import (
-    _glm52_moe_dispatch_compatible,
-)
 
 
 def test_prefix_mapping():
@@ -115,6 +119,56 @@ def test_moe_swap_preserves_production_overlap_contract():
     assert not _glm52_moe_dispatch_compatible(object(), None, None)
     assert not _glm52_moe_dispatch_compatible(None, (1, 128), None)
     assert not _glm52_moe_dispatch_compatible(None, None, (1, 128))
+
+
+def test_contiguous_grouped_gemm_forwards_opt_in_controls_only_when_requested():
+    class FakeTensor:
+        def __init__(self, shape):
+            self.shape = shape
+
+    lhs = (FakeTensor((35200, 2048)), FakeTensor((35200, 4)))
+    rhs = (FakeTensor((32, 6144, 2048)), FakeTensor((32, 6144, 4)))
+    out = FakeTensor((35200, 6144))
+    row_layout = FakeTensor((35200,))
+    psum_layout = FakeTensor((32,))
+    calls = []
+
+    def fake_grouped(lhs_arg, rhs_arg, out_arg, layout_arg, **kwargs):
+        calls.append((lhs_arg, rhs_arg, out_arg, layout_arg, kwargs))
+
+    with patch.object(
+        deep_gemm_entrypoint,
+        "deep_gemm",
+        SimpleNamespace(m_grouped_fp8_gemm_nt_contiguous=fake_grouped),
+        create=True,
+    ), patch.object(
+        deep_gemm_entrypoint.compile_utils,
+        "deep_gemm_execution_hook",
+        lambda *args: nullcontext(),
+    ):
+        deep_gemm_entrypoint.grouped_gemm_nt_f8f8bf16_contig(
+            lhs, rhs, out, row_layout
+        )
+        assert calls[-1][3] is row_layout
+        assert calls[-1][4] == {}
+
+        deep_gemm_entrypoint.grouped_gemm_nt_f8f8bf16_contig(
+            lhs,
+            rhs,
+            out,
+            psum_layout,
+            compiled_dims="mnk",
+            use_psum_layout=True,
+            ensure_zero_padding=False,
+            expected_m_for_psum_layout=1024,
+        )
+        assert calls[-1][3] is psum_layout
+        assert calls[-1][4] == {
+            "compiled_dims": "mnk",
+            "use_psum_layout": True,
+            "ensure_zero_padding": False,
+            "expected_m_for_psum_layout": 1024,
+        }
 
 
 def test_phase_defaults():
