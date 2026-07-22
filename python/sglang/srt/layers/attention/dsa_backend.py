@@ -52,6 +52,10 @@ from sglang.srt.layers.attention.utils import (
     mla_quantize_and_rope_for_fp8,
     seqlens_expand_triton,
 )
+from sglang.srt.layers.glm52_opt.config import explicit_shape_trial_buckets
+from sglang.srt.layers.glm52_opt.dsa_prefill import (
+    select_trtllm_prefill_enable_pdl,
+)
 from sglang.srt.layers.utils.cp_utils import (
     cp_all_gather_rerange_output,
     cp_split_and_rebuild_position,
@@ -448,6 +452,35 @@ class DeepseekSparseAttnBackend(
         self.device_capability = torch.cuda.get_device_capability()
         self.device_sm_major = self.device_capability[0]
         self.kv_cache_dtype = model_runner.kv_cache_dtype
+
+        hf_architectures = tuple(
+            getattr(model_runner.model_config.hf_config, "architectures", ()) or ()
+        )
+        parallel = get_parallel()
+        prefill_graph_backend = model_runner.server_args.cuda_graph_config.prefill.backend
+        glm52_dsa_prefill_static_abi = (
+            hf_architectures == ("GlmMoeDsaForCausalLM",)
+            and self.dsa_prefill_impl == "trtllm"
+            and self.device_capability == (10, 0)
+            and self.kv_cache_dtype == torch.float8_e4m3fn
+            and self.dsa_kv_cache_store_fp8
+            and self.real_page_size == 64
+            and self.num_q_heads == 64
+            and self.qk_nope_head_dim == 192
+            and self.kv_lora_rank == 512
+            and self.qk_rope_head_dim == 64
+            and self.v_head_dim == 512
+            and self.dsa_index_topk == 2048
+            and parallel.attn_tp_size == 1
+            and parallel.attn_cp_size == 1
+            and parallel.attn_dp_size == 8
+            and prefill_graph_backend == "disabled"
+        )
+        self._glm52_dsa_prefill_pdl_off_ms = (
+            explicit_shape_trial_buckets("dsa_prefill_attn")
+            if glm52_dsa_prefill_static_abi
+            else frozenset()
+        )
 
         # Allocate global workspace buffer for TRT-LLM kernels (ragged attention on SM100/B200, or trtllm decode)
         if self.device_sm_major >= 10 or self.dsa_decode_impl == "trtllm":
@@ -2782,6 +2815,21 @@ class DeepseekSparseAttnBackend(
             seq_chunks = list(torch.split(seq_lens, cp_meta.split_list, dim=0))
             seq_lens = torch.cat([seq_chunks[i] for i in cp_meta.zigzag_index], dim=0)
 
+        enable_pdl = None
+        if self._glm52_dsa_prefill_pdl_off_ms:
+            enable_pdl = select_trtllm_prefill_enable_pdl(
+                allowed_m=self._glm52_dsa_prefill_pdl_off_ms,
+                is_plain_extend=forward_batch.forward_mode == ForwardMode.EXTEND,
+                is_prefill=is_prefill,
+                q_shape=q.shape,
+                kv_shape=kv.shape,
+                block_tables_shape=block_tables.shape,
+                seq_lens_shape=seq_lens.shape,
+                max_seq_len=metadata.max_seq_len_k,
+                q_is_fp8_e4m3=q.dtype == torch.float8_e4m3fn,
+                kv_is_fp8_e4m3=kv.dtype == torch.float8_e4m3fn,
+            )
+
         out = flashinfer.decode.trtllm_batch_decode_with_kv_cache_mla(
             query=q,
             kv_cache=kv,
@@ -2795,6 +2843,7 @@ class DeepseekSparseAttnBackend(
             sparse_mla_top_k=self.dsa_index_topk,
             bmm1_scale=bmm1_scale,
             backend="trtllm-gen",
+            enable_pdl=enable_pdl,
             skip_softmax_threshold_scale_factor=envs.SGLANG_SKIP_SOFTMAX_DECODE_THRESHOLD_SCALE_FACTOR.get(),
         )
 
