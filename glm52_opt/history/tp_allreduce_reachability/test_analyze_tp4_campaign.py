@@ -28,6 +28,13 @@ def _sample(index: int, position: int) -> dict:
         "sample_index": index,
         "position": position,
         "variant": index % 2,
+        "launch_timestamp_ns_by_rank": [
+            1_000_000_000,
+            1_000_000_100,
+            1_000_000_200,
+            1_000_000_300,
+        ],
+        "launch_timestamp_span_ns": 300,
         "readiness_probe_exact": True,
         "collective_only": {
             "local_ms": 1.0,
@@ -116,6 +123,21 @@ class TestCampaignAnalyzer(unittest.TestCase):
             [1.4],
         )
 
+        misaligned = copy.deepcopy(result)
+        misaligned["raw_samples"]["reference"][0]["launch_timestamp_ns_by_rank"] = [
+            1_000_000_000,
+            1_000_000_100,
+            1_000_000_200,
+            1_000_600_001,
+        ]
+        misaligned["raw_samples"]["reference"][0][
+            "launch_timestamp_span_ns"
+        ] = 600_001
+        with self.assertRaisesRegex(ValueError, "exceeds 500000"):
+            ANALYZER.Analyzer._sample_values(
+                misaligned, "reference", "ready_region"
+            )
+
     def test_reference_alias_contract_must_match_all_ranks(self):
         case = ANALYZER.CASES[0]
         contracts = []
@@ -160,6 +182,7 @@ class TestCampaignAnalyzer(unittest.TestCase):
 
     def test_lock_process_and_p2p_receipts_are_fail_closed(self):
         matrix = """\
+ GPU0 GPU1 GPU2 GPU3
  GPU0 X OK OK OK
  GPU1 OK X OK OK
  GPU2 OK OK X OK
@@ -186,9 +209,11 @@ Legend:\n  OK = Status Ok
                 (environment / f"compute_processes_{phase}.log").write_text(
                     process_header, encoding="utf-8"
                 )
+            p2p_text = "".join(
+                f"capability={capability}\n{matrix}" for capability in "rwn"
+            )
             (environment / "p2p_capability.log").write_text(
-                "".join(f"capability={capability}\n{matrix}" for capability in "rwn"),
-                encoding="utf-8",
+                p2p_text, encoding="utf-8"
             )
             analyzer = ANALYZER.Analyzer(root)
             summary = analyzer.validate_environment_evidence()
@@ -210,6 +235,43 @@ Legend:\n  OK = Status Ok
                 "unexpected_compute_process",
                 {error["code"] for error in corrupted.errors},
             )
+
+            (environment / "compute_processes_after.log").write_text(
+                process_header, encoding="utf-8"
+            )
+            (environment / "p2p_capability.log").write_text(
+                p2p_text.replace("GPU0 X OK OK OK", "GPU0 X NS OK OK", 1),
+                encoding="utf-8",
+            )
+            disabled_edge = ANALYZER.Analyzer(root)
+            disabled_edge.validate_environment_evidence()
+            self.assertIn(
+                "p2p_capability_not_full_mesh",
+                {error["code"] for error in disabled_edge.errors},
+            )
+
+            (environment / "p2p_capability.log").write_text(
+                p2p_text + "GPU0 X OK OK OK\n", encoding="utf-8"
+            )
+            duplicate_rank = ANALYZER.Analyzer(root)
+            duplicate_rank.validate_environment_evidence()
+            self.assertIn(
+                "p2p_capability_duplicate_rank",
+                {error["code"] for error in duplicate_rank.errors},
+            )
+
+    def test_campaign_freezes_production_local_size_and_checks_idle_first(self):
+        source = (HERE / "run_locked_tp4_campaign.sh").read_text(encoding="utf-8")
+        self.assertIn("export LOCAL_SIZE=4", source)
+        self.assertIn("physical GPUs are busy despite a valid scheduler lock receipt", source)
+        self.assertLess(
+            source.index("compute_snapshot="),
+            source.index("mkdir -p"),
+        )
+        self.assertLess(
+            source.index("environment/compute_processes_before"),
+            source.index("environment/check_env"),
+        )
 
     def test_help_is_successful(self):
         stdout = io.StringIO()

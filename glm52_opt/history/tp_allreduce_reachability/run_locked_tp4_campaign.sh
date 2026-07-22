@@ -48,6 +48,29 @@ for repo in "$HARNESS" "$SGLANG"; do
   fi
 done
 
+# The scheduler locks serialize participating campaigns, but unrelated users
+# can still hold a physical GPU without taking those locks.  Refuse before
+# creating an evidence root or running check_env (which initializes CUDA).
+COMPUTE_QUERY=(
+  nvidia-smi
+  --query-compute-apps=timestamp,gpu_uuid,pid,process_name,used_gpu_memory
+  --format=csv
+)
+if ! compute_snapshot="$("${COMPUTE_QUERY[@]}")"; then
+  echo "failed to query physical GPU compute processes" >&2
+  exit 3
+fi
+compute_rows="$(
+  printf '%s\n' "$compute_snapshot" |
+    tail -n +2 |
+    sed '/^[[:space:]]*$/d'
+)"
+if [[ -n "$compute_rows" ]]; then
+  printf '%s\n' "$compute_snapshot" >&2
+  echo "physical GPUs are busy despite a valid scheduler lock receipt" >&2
+  exit 75
+fi
+
 mkdir -p \
   "$OUT_ROOT/environment" \
   "$OUT_ROOT/reachability" \
@@ -107,6 +130,10 @@ export SGLANG_ROOT="$SGLANG"
 export KERNEL_HARNESS_PYTHON="$HARNESS/.venv/bin/python"
 export PYTHONPATH="$SGLANG/python:$HARNESS:${PYTHONPATH:-}"
 export SGLANG_GLM52_OPT=0
+# Production model_runner sets LOCAL_SIZE explicitly.  torchrun only supplies
+# LOCAL_WORLD_SIZE, so freeze the production selector metadata for this direct
+# coordinator diagnostic instead of accepting GroupCoordinator's zero default.
+export LOCAL_SIZE=4
 unset \
   SGLANG_ALL_REDUCE_TRACE \
   SGLANG_OPT_USE_CUSTOM_ALL_REDUCE_V2 \
@@ -130,14 +157,23 @@ run_step required environment/lock_receipt \
 run_step required environment/source_identity \
   bash -c 'git -C "$1" status --short; git -C "$1" rev-parse HEAD; git -C "$2" status --short; git -C "$2" rev-parse HEAD' \
   _ "$HARNESS" "$SGLANG"
+run_step required environment/compute_processes_before \
+  bash -c '
+    set -euo pipefail
+    snapshot="$(nvidia-smi \
+      --query-compute-apps=timestamp,gpu_uuid,pid,process_name,used_gpu_memory \
+      --format=csv)"
+    printf "%s\n" "$snapshot"
+    [[ -z "$(printf "%s\n" "$snapshot" | tail -n +2 | sed "/^[[:space:]]*$/d")" ]]
+  '
+if [[ "$REQUIRED_FAILED" -ne 0 ]]; then
+  echo "physical GPUs became busy during the locked preflight" >&2
+  exit 75
+fi
 run_step required environment/check_env \
   "$HARNESS/.venv/bin/python" "$HARNESS/testbench/bin/check_env.py"
 run_step required environment/nvidia_smi \
   nvidia-smi --query-gpu=index,uuid,name,pci.bus_id,clocks.current.sm,clocks.current.memory,power.draw,temperature.gpu \
-  --format=csv
-run_step required environment/compute_processes_before \
-  nvidia-smi \
-  --query-compute-apps=timestamp,gpu_uuid,pid,process_name,used_gpu_memory \
   --format=csv
 run_step required environment/topology nvidia-smi topo -m
 run_step required environment/p2p_capability \

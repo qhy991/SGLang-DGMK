@@ -477,20 +477,46 @@ class Analyzer:
                     repr(sorted(observed_sections)),
                 )
             for capability, section in observed_sections.items():
-                matrix_rows = re.findall(
-                    r"^\s*GPU[0-3]\s+(.+)$", section, flags=re.MULTILINE
-                )
+                matrix_rows: dict[int, list[str]] = {}
+                for match in re.finditer(
+                    r"^\s*GPU([0-3])\s+(.+)$", section, flags=re.MULTILINE
+                ):
+                    rank = int(match.group(1))
+                    fields = match.group(2).split()
+                    # The column header also starts with GPU0 but has only
+                    # three trailing GPU labels.  Accept only exact matrix
+                    # rows and retain rank identity for diagonal validation.
+                    if len(fields) == 4:
+                        if rank in matrix_rows:
+                            self.error(
+                                "p2p_capability_duplicate_rank",
+                                "environment/p2p_capability.log",
+                                f"capability={capability}, rank={rank}",
+                            )
+                        matrix_rows[rank] = fields
                 ok_count = sum(
-                    len(re.findall(r"\bOK\b", row)) for row in matrix_rows
+                    field == "OK"
+                    for fields in matrix_rows.values()
+                    for field in fields
                 )
                 p2p_counts[capability] = ok_count
-                if len(matrix_rows) != 4 or ok_count != 12 or any(
-                    f"GPU{rank}" not in section for rank in range(4)
-                ):
+                exact_matrix = set(matrix_rows) == set(range(4)) and all(
+                    fields[rank] == "X"
+                    and all(
+                        field == "OK"
+                        for peer, field in enumerate(fields)
+                        if peer != rank
+                    )
+                    for rank, fields in matrix_rows.items()
+                )
+                if not exact_matrix or ok_count != 12:
                     self.error(
                         "p2p_capability_not_full_mesh",
                         "environment/p2p_capability.log",
-                        f"capability={capability}, directed_ok_edges={ok_count}",
+                        (
+                            f"capability={capability}, rows={matrix_rows!r}, "
+                            f"directed_ok_edges={ok_count}"
+                        ),
                     )
         except OSError as exc:
             self.error(
@@ -848,6 +874,11 @@ class Analyzer:
             ),
             "restoration": (
                 "variant source-to-local copy and consumer/probe poison occur "
+                "before every start event"
+            ),
+            "rank_start_alignment": (
+                "selected stream synchronized after restoration; blocking TP "
+                "CPU-group barrier; host launch timestamp recorded immediately "
                 "before every start event"
             ),
         }
@@ -1590,6 +1621,35 @@ class Analyzer:
             if sample.get("readiness_probe_exact") is not True:
                 raise ValueError(
                     f"raw_samples.{side}[{index}].readiness_probe_exact is not true"
+                )
+            launch_timestamps = sample.get("launch_timestamp_ns_by_rank")
+            launch_span = sample.get("launch_timestamp_span_ns")
+            if (
+                not isinstance(launch_timestamps, list)
+                or len(launch_timestamps) != 4
+                or any(
+                    not isinstance(value, int)
+                    or isinstance(value, bool)
+                    or value <= 0
+                    for value in launch_timestamps
+                )
+                or not isinstance(launch_span, int)
+                or isinstance(launch_span, bool)
+                or launch_span < 0
+            ):
+                raise ValueError(
+                    f"raw_samples.{side}[{index}] has invalid host launch timestamps"
+                )
+            derived_launch_span = max(launch_timestamps) - min(launch_timestamps)
+            if launch_span != derived_launch_span:
+                raise ValueError(
+                    f"raw_samples.{side}[{index}].launch_timestamp_span_ns "
+                    f"{launch_span} != {derived_launch_span}"
+                )
+            if launch_span > 500_000:
+                raise ValueError(
+                    f"raw_samples.{side}[{index}].launch_timestamp_span_ns "
+                    f"{launch_span} exceeds 500000"
                 )
             parsed_metrics: dict[str, tuple[float, list[float]]] = {}
             for metric_name in ("collective_only", "ready_region"):
