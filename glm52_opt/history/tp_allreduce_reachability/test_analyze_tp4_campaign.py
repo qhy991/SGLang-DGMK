@@ -33,6 +33,13 @@ def _sample(index: int, position: int) -> dict:
         "sample_index": index,
         "position": position,
         "variant": index % 2,
+        "scheduled_start_arrival_ns_by_rank": [
+            994_998_700,
+            994_998_800,
+            994_998_900,
+            994_999_000,
+        ],
+        "scheduled_start_target_ns_by_rank": [999_999_000] * 4,
         "start_record_bracket_ns_by_rank": [
             [1_000_000_000, 1_000_000_010],
             [1_000_000_100, 1_000_000_110],
@@ -159,9 +166,10 @@ def _paired_resolution_result(
                 "before every start event"
             ),
             "rank_start_alignment": (
-                "selected stream synchronized after restoration; blocking TP "
-                "CPU-group barrier; host timestamps bracket every start-event "
-                "record call"
+                "selected stream synchronized after restoration; TP CPU-group "
+                "all-gather selects a common same-host monotonic deadline 5 ms "
+                "after latest arrival; ranks busy-wait; host timestamps bracket "
+                "every start-event record call"
             ),
         },
         "readiness_probe": {
@@ -457,6 +465,24 @@ class TestCampaignAnalyzer(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "rank_max_ms"):
             ANALYZER.Analyzer._sample_values(
                 corrupted, "candidate", "ready_region"
+            )
+
+        mismatched_target = copy.deepcopy(result)
+        mismatched_target["raw_samples"]["candidate"][0][
+            "scheduled_start_target_ns_by_rank"
+        ][3] += 1
+        with self.assertRaisesRegex(ValueError, "scheduled-start targets"):
+            ANALYZER.Analyzer._sample_values(
+                mismatched_target, "candidate", "ready_region"
+            )
+
+        mismatched_arrival = copy.deepcopy(result)
+        mismatched_arrival["raw_samples"]["candidate"][0][
+            "scheduled_start_arrival_ns_by_rank"
+        ][3] -= 1
+        with self.assertRaisesRegex(ValueError, "max arrival"):
+            ANALYZER.Analyzer._sample_values(
+                mismatched_arrival, "candidate", "ready_region"
             )
 
     def test_single_sided_reference_order_is_accepted(self):

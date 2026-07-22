@@ -43,6 +43,17 @@ The campaign fixes `SGLANG_GLM52_OPT=0` and explicitly unsets `LOCAL_SIZE`,
 production GPU default is zero. The analyzer rejects a result that inherited
 any of those dispatch/protocol overrides.
 
+Every timed direct-collective sample restores its input and synchronizes the
+selected stream before alignment. The four same-host ranks then CPU-all-gather
+their monotonic arrival timestamps, select one common deadline 5 ms after the
+latest arrival, busy-wait, and bracket the CUDA start-event record on the host.
+The result persists all four arrivals, the common target, and all four brackets;
+the analyzer rederives `target = max(arrivals) + 5,000,000 ns` and still fails
+closed when the actual rank envelope exceeds 500 microseconds. These deliberate
+host waits are outside CUDA-event latency but inside the outer profiler NVTX
+range, so profile analysis must label them rather than count them as backend
+launch gaps.
+
 `SGLANG_ALL_REDUCE_TRACE` is import-time gated and appears only in the short
 reachability runs. The benchmark marks those timings ineligible. Python can see
 eager dispatch or CUDA Graph capture, but not replay; the Nsight reports use the

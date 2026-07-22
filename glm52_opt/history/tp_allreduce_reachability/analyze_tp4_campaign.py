@@ -78,6 +78,7 @@ BACKEND_SCOUT_MESSAGE_SIZES = (
     32 * 1024 * 1024,
 )
 BACKEND_SCOUT_PROVIDERS = ("nccl", "aot", "jit", "fi")
+SCHEDULED_START_LEAD_NS = 5_000_000
 BACKEND_SCOUT_HEADER = (
     "message_bytes",
     *(f"{provider}(us)" for provider in BACKEND_SCOUT_PROVIDERS),
@@ -1672,9 +1673,10 @@ class Analyzer:
                 "before every start event"
             ),
             "rank_start_alignment": (
-                "selected stream synchronized after restoration; blocking TP "
-                "CPU-group barrier; host timestamps bracket every start-event "
-                "record call"
+                "selected stream synchronized after restoration; TP CPU-group "
+                "all-gather selects a common same-host monotonic deadline 5 ms "
+                "after latest arrival; ranks busy-wait; host timestamps bracket "
+                "every start-event record call"
             ),
         }
         if not isinstance(timing, dict):
@@ -2419,8 +2421,29 @@ class Analyzer:
                 )
             start_brackets = sample.get("start_record_bracket_ns_by_rank")
             start_envelope_span = sample.get("start_record_envelope_span_ns")
+            scheduled_arrivals = sample.get(
+                "scheduled_start_arrival_ns_by_rank"
+            )
+            scheduled_targets = sample.get("scheduled_start_target_ns_by_rank")
             if (
-                not isinstance(start_brackets, list)
+                not isinstance(scheduled_arrivals, list)
+                or len(scheduled_arrivals) != 4
+                or any(
+                    not isinstance(value, int)
+                    or isinstance(value, bool)
+                    or value <= 0
+                    for value in scheduled_arrivals
+                )
+                or not isinstance(scheduled_targets, list)
+                or len(scheduled_targets) != 4
+                or any(
+                    not isinstance(value, int)
+                    or isinstance(value, bool)
+                    or value <= 0
+                    for value in scheduled_targets
+                )
+                or len(set(scheduled_targets)) != 1
+                or not isinstance(start_brackets, list)
                 or len(start_brackets) != 4
                 or any(
                     not isinstance(bracket, list)
@@ -2439,7 +2462,22 @@ class Analyzer:
                 or start_envelope_span < 0
             ):
                 raise ValueError(
-                    f"raw_samples.{side}[{index}] has invalid start-record brackets"
+                    f"raw_samples.{side}[{index}] has invalid scheduled-start "
+                    "targets or start-record brackets"
+                )
+            derived_target = max(scheduled_arrivals) + SCHEDULED_START_LEAD_NS
+            if scheduled_targets[0] != derived_target:
+                raise ValueError(
+                    f"raw_samples.{side}[{index}] scheduled target "
+                    f"{scheduled_targets[0]} != max arrival + "
+                    f"{SCHEDULED_START_LEAD_NS} ({derived_target})"
+                )
+            if any(
+                bracket[0] < target
+                for bracket, target in zip(start_brackets, scheduled_targets)
+            ):
+                raise ValueError(
+                    f"raw_samples.{side}[{index}] records before its scheduled target"
                 )
             derived_start_envelope_span = max(
                 bracket[1] for bracket in start_brackets
