@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Literal, Optional
 
-from sglang.srt.layers.glm52_opt.config import profile_name
+from sglang.srt.layers.glm52_opt.config import opt_ops_allowlist, profile_name
 
 KernelKind = Literal[
     "fp8_gemm",
@@ -75,11 +75,16 @@ _DECODE: dict[str, KernelSpec] = {
 }
 
 # Prefill winners from PREFILL_SWAPS (including decode kernels that also win on prefill).
+# Intentionally omit:
+#   - moe_gate: CUDA Graph regresses at large M
+#   - moe_up/down decode_hbm40 drop-ins: llm_flops_style B300 M=4096 showed ~0.87–1.0×
+#   - dsa / index_score / absorbed_W: no safe flashmla_kv hook or ceiling-bound
 _PREFILL_FULL: dict[str, KernelSpec] = {
     "fused_qkv_a_proj": KernelSpec(
         "fused_qkv_a_proj", "prefill", "fused_qkv_a_prefill.py", "fp8_gemm"
     ),
     "q_b_proj": KernelSpec("q_b_proj", "prefill", "q_b_prefill.py", "fp8_gemm"),
+    # Native packed UE8M0 path in fp8_gemm.py (archive_ref unused for o_proj).
     "o_proj": KernelSpec(
         "o_proj", "prefill", "best/o_proj_decode_hbm35", "fp8_gemm"
     ),
@@ -92,14 +97,29 @@ _PREFILL_FULL: dict[str, KernelSpec] = {
     "index_weights_proj": KernelSpec(
         "index_weights_proj", "prefill", "index_weights_proj.py", "bf16_gemm"
     ),
-    # moe_gate prefill: CUPTI win but CUDA Graph M=4096 regresses — keep stock.
-    "moe_up_proj": KernelSpec(
-        "moe_up_proj", "prefill", "best/moe_up_proj_decode_hbm40", "moe_masked"
-    ),
-    "moe_down_proj": KernelSpec(
-        "moe_down_proj", "prefill", "best/moe_down_proj_decode_hbm40", "moe_masked"
-    ),
 }
+
+
+def _decode_table() -> dict[str, KernelSpec]:
+    """Profile / allowlist gated decode registry.
+
+    - decode_max / full: all decode swaps (optionally filtered by OPT_OPS)
+    - q_b_only: only q_b_proj
+    - SGLANG_GLM52_OPT_OPS=a,b: intersect with active table (ablation)
+    """
+    name = profile_name()
+    if name == "q_b_only":
+        table = {}
+        spec = _DECODE.get("q_b_proj")
+        if spec is not None:
+            table["q_b_proj"] = spec
+    else:
+        table = dict(_DECODE)
+
+    allow = opt_ops_allowlist()
+    if allow is not None:
+        table = {k: v for k, v in table.items() if k in allow}
+    return table
 
 
 def _active_prefill() -> dict[str, KernelSpec]:
@@ -110,7 +130,7 @@ def lookup(op_name: Optional[str], phase: str) -> Optional[KernelSpec]:
     if not op_name:
         return None
     if phase == "decode":
-        spec = _DECODE.get(op_name)
+        spec = _decode_table().get(op_name)
     elif profile_name() == "full":
         spec = _active_prefill().get(op_name)
     else:
@@ -122,7 +142,7 @@ def lookup(op_name: Optional[str], phase: str) -> Optional[KernelSpec]:
 
 def list_enabled(phase: str) -> list[KernelSpec]:
     if phase == "decode":
-        return [s for s in _DECODE.values() if s.enabled]
+        return [s for s in _decode_table().values() if s.enabled]
     if profile_name() == "full":
         return [s for s in _active_prefill().values() if s.enabled]
     return []

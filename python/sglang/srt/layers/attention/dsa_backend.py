@@ -366,6 +366,7 @@ class DeepseekSparseAttnBackend(
         self.qk_nope_head_dim = model_runner.model_config.qk_nope_head_dim
         self.kv_lora_rank = model_runner.model_config.kv_lora_rank
         self.qk_rope_head_dim = model_runner.model_config.qk_rope_head_dim
+        self.v_head_dim = model_runner.model_config.v_head_dim
 
         assert model_runner.req_to_token_pool is not None
         self.req_to_token_pool = model_runner.req_to_token_pool
@@ -2138,16 +2139,18 @@ class DeepseekSparseAttnBackend(
                 page_size=1,
             )
 
-        # GLM-5.2 opt: upgrade flashmla_sparse (and non-trtllm backends) to the
-        # hechenxi trtllm-gen archive candidate. Leave native trtllm alone — it
-        # already uses the same kernel family.
+        # GLM-5.2 opt: upgrade flashmla_sparse to the hechenxi trtllm-gen archive
+        # candidate. Leave native trtllm alone (same kernel family). Do not hijack
+        # flashmla_kv — its KV last-dim layout differs from the archive's expected
+        # flashmla_sparse layout (576), which previously caused CUDA-graph capture
+        # failures (e.g. view as HD=656 vs q numel implying 576).
         from sglang.srt.layers.glm52_opt import config as glm52_config
         from sglang.srt.layers.glm52_opt.context import get_forward_mode
         from sglang.srt.layers.glm52_opt.phase import infer_glm52_phase
         from sglang.srt.layers.glm52_opt.registry import lookup as glm52_lookup
 
         _use_glm52_dsa = False
-        if glm52_config.is_enabled() and self.dsa_decode_impl != "trtllm":
+        if glm52_config.is_enabled() and self.dsa_decode_impl == "flashmla_sparse":
             _phase = infer_glm52_phase(get_forward_mode(), q_nope.shape[0])
             _spec = glm52_lookup("dsa_decode_attn", _phase)
             _use_glm52_dsa = _spec is not None and _spec.kind == "dsa"
@@ -2414,33 +2417,38 @@ class DeepseekSparseAttnBackend(
             f"cu_seqlens_k has {len(cu_seqlens_k)-1} requests"
         )
 
-        # Use TRTLLm ragged attention for SM100 (Blackwell/B200) to avoid FA4 accuracy issues
+        # Use TRT-LLM ragged attention for SM100 when dims match DeepSeek-R1 /
+        # 128-head kernels. GLM-5.2 (v_head_dim=256) is unsupported by
+        # flashinfer.prefill.trtllm_ragged_attention_deepseek — fall back to FA.
         if self.device_sm_major >= 10:
-            import flashinfer
+            q_hd, k_hd, v_hd = q.shape[-1], k.shape[-1], v.shape[-1]
+            trtllm_ok = (q_hd, k_hd, v_hd) in ((192, 192, 128), (128, 128, 128))
+            if trtllm_ok:
+                import flashinfer
 
-            seq_lens = metadata.cache_seqlens_int32
-            return flashinfer.prefill.trtllm_ragged_attention_deepseek(
-                query=q,
-                key=k,
-                value=v,
-                workspace_buffer=self.workspace_buffer,
-                seq_lens=seq_lens,
-                max_q_len=metadata.max_seq_len_q,
-                max_kv_len=max_seqlen_k,
-                bmm1_scale=layer.scaling,
-                bmm2_scale=1.0,
-                o_sf_scale=1.0,
-                batch_size=forward_batch.batch_size,
-                window_left=-1,
-                cum_seq_lens_q=cu_seqlens_q,
-                cum_seq_lens_kv=cu_seqlens_k,
-                enable_pdl=False,
-                is_causal=causal,
-                return_lse=False,
-                skip_softmax_threshold_scale_factor=envs.SGLANG_SKIP_SOFTMAX_PREFILL_THRESHOLD_SCALE_FACTOR.get(),
-            )
+                seq_lens = metadata.cache_seqlens_int32
+                return flashinfer.prefill.trtllm_ragged_attention_deepseek(
+                    query=q,
+                    key=k,
+                    value=v,
+                    workspace_buffer=self.workspace_buffer,
+                    seq_lens=seq_lens,
+                    max_q_len=metadata.max_seq_len_q,
+                    max_kv_len=max_seqlen_k,
+                    bmm1_scale=layer.scaling,
+                    bmm2_scale=1.0,
+                    o_sf_scale=1.0,
+                    batch_size=forward_batch.batch_size,
+                    window_left=-1,
+                    cum_seq_lens_q=cu_seqlens_q,
+                    cum_seq_lens_kv=cu_seqlens_k,
+                    enable_pdl=False,
+                    is_causal=causal,
+                    return_lse=False,
+                    skip_softmax_threshold_scale_factor=envs.SGLANG_SKIP_SOFTMAX_PREFILL_THRESHOLD_SCALE_FACTOR.get(),
+                )
 
-        # Use FA3 for SM90 (Hopper/H200)
+        # FA3/FA4 varlen (SM90, or SM100 when TRT-LLM dims are unsupported)
         return flash_attn_varlen_func(
             q=q,
             k=k,
@@ -2837,11 +2845,17 @@ class DeepseekSparseAttnBackend(
             sum_seq_lens = sum(forward_batch.seq_lens_cpu)
             device_sm = get_device_sm()
 
-            # Requirements: H200/B200, short sequences, supported dtype, fits in chunk
+            # Requirements: H200/B200, short sequences, supported dtype, fits in chunk.
+            # On SM100, dense MHA uses trtllm_ragged_attention_deepseek which only
+            # supports (q/k/v)=(192/192/128) or (128/128/128). Skip for GLM-5.2 etc.
+            sm100_trtllm_mha_ok = (
+                self.qk_nope_head_dim == 192 and self.v_head_dim == 128
+            ) or (self.qk_nope_head_dim == 128 and self.v_head_dim == 128)
+            sm_ok = device_sm == 90 or (
+                device_sm >= 100 and device_sm < 110 and sm100_trtllm_mha_ok
+            )
             self.use_mha = (
-                (
-                    device_sm == 90 or (device_sm >= 100 and device_sm < 110)
-                )  # SM90/SM100 only
+                sm_ok
                 and max_kv_len
                 <= envs.SGLANG_DSA_PREFILL_DENSE_ATTN_KV_LEN_THRESHOLD.get()  # Short enough for MHA
                 and self.token_to_kv_pool.dtype in [torch.bfloat16, torch.float8_e4m3fn]

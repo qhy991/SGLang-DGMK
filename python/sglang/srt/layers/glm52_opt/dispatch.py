@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import os
+import threading
+from pathlib import Path
 from typing import List, Optional, Tuple
 
 import torch
@@ -16,9 +20,79 @@ from sglang.srt.layers.glm52_opt.registry import lookup
 
 logger = logging.getLogger(__name__)
 
+_HIT_LOCK = threading.Lock()
+_HIT_COUNTS: dict[str, int] = {}
+_MISS_COUNTS: dict[str, int] = {}
+_HIT_FILE = Path(
+    os.environ.get("SGLANG_GLM52_OPT_HIT_FILE", "/home/ubuntu/wwxq/cache/sglang/glm52_opt_hits.json")
+)
+
+
+def _flush_stats() -> None:
+    try:
+        _HIT_FILE.parent.mkdir(parents=True, exist_ok=True)
+        payload = {"hits": dict(_HIT_COUNTS), "misses": dict(_MISS_COUNTS)}
+        _HIT_FILE.write_text(json.dumps(payload, indent=2, sort_keys=True))
+    except Exception as exc:
+        print(f"[glm52_opt] hit-file write failed: {exc}", flush=True)
+
+
+def _record_hit(kind: str, op: Optional[str], phase: str) -> None:
+    """Count successful glm52_opt dispatches; log first hit per key."""
+    key = f"{kind}:{op or 'untagged'}:{phase}"
+    with _HIT_LOCK:
+        n = _HIT_COUNTS.get(key, 0) + 1
+        _HIT_COUNTS[key] = n
+        should_flush = n in (1, 10, 100) or n % 500 == 0
+        if should_flush:
+            _flush_stats()
+    if n == 1:
+        msg = f"glm52_opt HIT {key} (first)"
+        logger.warning(msg)
+        print(msg, flush=True)
+
+
+def _record_miss(reason: str, op: Optional[str], phase: str) -> None:
+    key = f"{reason}:{op or 'untagged'}:{phase}"
+    with _HIT_LOCK:
+        n = _MISS_COUNTS.get(key, 0) + 1
+        _MISS_COUNTS[key] = n
+        should_log = n == 1
+        should_flush = n in (1, 10, 100) or n % 500 == 0
+        if should_flush:
+            _flush_stats()
+    if should_log:
+        msg = f"glm52_opt MISS {key} (first)"
+        logger.warning(msg)
+        print(msg, flush=True)
+
 
 def _current_phase(token_num: int) -> str:
     return infer_glm52_phase(get_forward_mode(), token_num)
+
+
+def _nvtx_range(name: str):
+    """Context manager for Nsight NVTX ranges (no-op if unavailable)."""
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _cm():
+        pushed = False
+        try:
+            torch.cuda.nvtx.range_push(name)
+            pushed = True
+        except Exception:
+            pass
+        try:
+            yield
+        finally:
+            if pushed:
+                try:
+                    torch.cuda.nvtx.range_pop()
+                except Exception:
+                    pass
+
+    return _cm()
 
 
 def try_dispatch_fp8_gemm(
@@ -31,26 +105,31 @@ def try_dispatch_fp8_gemm(
     bias: Optional[torch.Tensor] = None,
 ) -> Optional[torch.Tensor]:
     if not config.is_enabled():
+        _record_miss("disabled", get_op_name(), "na")
         return None
     op = get_op_name()
     phase = _current_phase(input_2d.shape[0])
     spec = lookup(op, phase)
     if spec is None or spec.kind != "fp8_gemm":
+        _record_miss("no_spec", op, phase)
         return None
     out = input_2d.new_empty(input_2d.shape[0], weight.shape[0], dtype=output_dtype)
-    ok = run_fp8_gemm(
-        op,
-        input_2d,
-        weight,
-        x_scale,
-        weight_scale,
-        out,
-        block_size,
-        spec.archive_ref,
-        phase=phase,
-    )
+    with _nvtx_range(f"glm52_opt/fp8_gemm/{op}/{phase}"):
+        ok, path = run_fp8_gemm(
+            op,
+            input_2d,
+            weight,
+            x_scale,
+            weight_scale,
+            out,
+            block_size,
+            spec.archive_ref,
+            phase=phase,
+        )
     if not ok:
+        _record_miss("run_failed", op, phase)
         return None
+    _record_hit(f"fp8_gemm/{path}", op, phase)
     if bias is not None:
         out = out + bias
     return out.view(*input_2d.shape[:-1], weight.shape[0])
@@ -64,6 +143,7 @@ def try_dispatch_moe_masked(
     expected_m: int,
 ) -> bool:
     if not config.is_enabled():
+        _record_miss("moe_disabled", get_op_name(), "na")
         return False
     op = get_op_name()
     # w13 is fused gate+up in SGLang; either tag should enable decode pack path.
@@ -73,11 +153,20 @@ def try_dispatch_moe_masked(
         # Prefer gate's registered decode pack if only one is present.
         spec = lookup("moe_gate_proj", phase) or lookup("moe_up_proj", phase)
     if spec is None or spec.kind != "moe_masked":
+        _record_miss("moe_no_spec", op, phase)
         return False
     # Prefill moe_gate: Graph regresses at large M — never swap.
     if phase == "prefill" and op == "moe_gate_proj":
+        _record_miss("moe_prefill_skip", op, phase)
         return False
     x_fp8, x_scale = lhs
     w_fp8, w_scale = rhs
-    run_moe_masked(x_fp8, w_fp8, x_scale, w_scale, out, masked_m, expected_m)
+    try:
+        with _nvtx_range(f"glm52_opt/moe_masked/{op or spec.op}/{phase}"):
+            run_moe_masked(x_fp8, w_fp8, x_scale, w_scale, out, masked_m, expected_m)
+    except Exception as exc:
+        _record_miss(f"moe_run_fail:{type(exc).__name__}", op or (spec.op if spec else None), phase)
+        logger.warning("glm52_opt moe_masked failed: %s", exc)
+        return False
+    _record_hit("moe_masked", op or spec.op, phase)
     return True

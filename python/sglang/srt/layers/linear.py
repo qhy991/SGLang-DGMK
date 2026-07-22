@@ -169,6 +169,9 @@ class LinearBase(torch.nn.Module):
         self.input_size = input_size
         self.output_size = output_size
         self.skip_bias_add = skip_bias_add
+        # Required by glm52_opt dispatch (prefix_to_op_name); must live on LinearBase
+        # so Column/Row/Replicated paths are tagged, not only MergedColumn.
+        self.prefix = prefix
         if params_dtype is None:
             params_dtype = torch.get_default_dtype()
         self.params_dtype = params_dtype

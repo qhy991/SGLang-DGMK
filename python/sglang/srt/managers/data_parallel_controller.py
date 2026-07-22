@@ -673,6 +673,13 @@ def run_data_parallel_controller_process(
     kill_itself_when_parent_died()
     parent_process = psutil.Process().parent()
 
+    try:
+        from sglang.srt.layers.glm52_opt.config import ensure_glm52_env
+
+        ensure_glm52_env()
+    except Exception:
+        pass
+
     configure_logger(server_args)
     if server_args.enable_trace:
         process_tracing_init(

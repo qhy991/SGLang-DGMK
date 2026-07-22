@@ -1032,6 +1032,13 @@ class Envs:
     SGLANG_FLASHINFER_AUTOTUNE_CACHE = EnvBool(True)
     SGLANG_ENABLE_MOE_DEFERRED_FINALIZE = EnvBool(False)
 
+    # GLM-5.2 optimized kernel dispatch (SGLang-DGMK / glm52_opt)
+    SGLANG_GLM52_OPT = EnvBool(False)
+    SGLANG_GLM52_OPT_PROFILE = EnvStr("decode_max")
+    SGLANG_GLM52_MANIFEST = EnvStr("")
+    SGLANG_GLM52_DEEPGEMM_VARIANT = EnvStr("")
+    SGLANG_GLM52_ENV_FILE = EnvStr("")
+
     # Plugin system
     SGLANG_PLATFORM = EnvStr("")
     SGLANG_PLUGINS = EnvStr("")

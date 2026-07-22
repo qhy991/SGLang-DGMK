@@ -64,7 +64,15 @@ def try_index_weights_proj(x: torch.Tensor, weight: torch.Tensor) -> Optional[to
     if spec is None or spec.kind != "bf16_gemm":
         return None
     try:
-        return bf16_mm_f32_out(x, weight)
+        from sglang.srt.layers.glm52_opt.dispatch import _record_hit
+
+        out = bf16_mm_f32_out(x, weight)
+        _record_hit("bf16_gemm", "index_weights_proj", phase)
+        return out
     except Exception:
         # Fall back to eager mm if graph capture fails (e.g. already capturing).
-        return torch.mm(x, weight.t(), out_dtype=torch.float32)
+        from sglang.srt.layers.glm52_opt.dispatch import _record_hit
+
+        out = torch.mm(x, weight.t(), out_dtype=torch.float32)
+        _record_hit("bf16_gemm", "index_weights_proj", phase)
+        return out

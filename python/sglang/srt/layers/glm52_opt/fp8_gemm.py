@@ -180,7 +180,10 @@ def run_fp8_gemm(
     block_size: List[int],
     archive_ref: str,
     phase: str = "decode",
-) -> bool:
+) -> Tuple[bool, str]:
+    """Run optimized FP8 GEMM. Returns (ok, path) where path is
+    native_fork | native_packed | archive | packed_fallback | packed_default.
+    """
     # 1) q_b decode only: DeepGEMM fork fused (ours wins PR5 bake-off)
     if (
         op_name in _NATIVE_FORK_OPS
@@ -188,12 +191,12 @@ def run_fp8_gemm(
         and has_fused_fp8_gemm_nt()
     ):
         _run_q_b_fused(x_fp8, w_fp8, x_scale, w_scale, out)
-        return True
+        return True, "native_fork"
 
     # 2) o_proj: packed UE8M0 (decode + prefill; matches o_proj_decode_hbm35)
     if op_name in _NATIVE_PACKED_OPS:
         _run_packed_fp8_gemm(x_fp8, w_fp8, x_scale, w_scale, out)
-        return True
+        return True, "native_packed"
 
     # 3) Everything else with an archive_ref: real candidate (PR5 Triton, pack, etc.)
     if archive_ref:
@@ -201,7 +204,7 @@ def run_fp8_gemm(
             _run_archive_candidate(
                 archive_ref, x_fp8, w_fp8, x_scale, w_scale, out, block_size
             )
-            return True
+            return True, "archive"
         except Exception as exc:
             logger.warning(
                 "glm52_opt archive candidate failed for %s/%s (%s): %s; "
@@ -212,7 +215,7 @@ def run_fp8_gemm(
                 exc,
             )
             _run_packed_fp8_gemm(x_fp8, w_fp8, x_scale, w_scale, out)
-            return True
+            return True, "packed_fallback"
 
     _run_packed_fp8_gemm(x_fp8, w_fp8, x_scale, w_scale, out)
-    return True
+    return True, "packed_default"

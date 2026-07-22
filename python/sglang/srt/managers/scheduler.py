@@ -4446,6 +4446,14 @@ def run_scheduler_process(
     dp_rank: Optional[int],
     pipe_writer,
 ):
+    # Re-apply GLM52 opt env before any model/kernel import (spawn/DP may drop exports).
+    try:
+        from sglang.srt.layers.glm52_opt.config import ensure_glm52_env
+
+        ensure_glm52_env()
+    except Exception:
+        pass
+
     # Load plugins so hooks can override Scheduler and its dependencies.
     load_plugins()
     dp_rank = configure_scheduler_process(
@@ -4458,6 +4466,24 @@ def run_scheduler_process(
         pp_rank,
         dp_rank,
     )
+    try:
+        from sglang.srt.layers.glm52_opt.config import (
+            deepgemm_variant,
+            is_enabled,
+            opt_ops_allowlist,
+            profile_name,
+        )
+
+        logger.info(
+            "glm52_opt worker: enabled=%s profile=%s variant=%s ops=%s",
+            is_enabled(),
+            profile_name(),
+            deepgemm_variant(),
+            sorted(opt_ops_allowlist()) if opt_ops_allowlist() else "all",
+        )
+    except Exception as exc:
+        logger.warning("glm52_opt status log skipped: %s", exc)
+
     parent_process = psutil.Process().parent()
 
     # Set up tracing
