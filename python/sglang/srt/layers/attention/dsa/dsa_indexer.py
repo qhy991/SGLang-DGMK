@@ -740,6 +740,7 @@ class Indexer(MultiPlatformOp):
         *,
         num_tokens: Optional[int] = None,
         enable_dual_stream: bool = True,
+        schedule_k_before_q: bool = False,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         # num_tokens (graph split-op contract) slices q/k/positions/out_cache_loc
         # to the unpadded count; the returned q_fp8/weights are sliced to match.
@@ -790,6 +791,29 @@ class Indexer(MultiPlatformOp):
         if num_tokens is not None:
             key = key[:num_tokens]
             weights_raw = weights_raw[:num_tokens]
+
+        # Experimental eager schedule: K depends only on wk_weights_proj, so it
+        # can run on the current stream while wq_b is still running on the
+        # alternate stream. This also removes the second cross-stream wait and
+        # the stream-context switch used by the stock Q||K stage. The default
+        # remains the graph-tested stock ordering; callers must opt in.
+        if schedule_k_before_q:
+            self._fused_k_prepare_and_store(
+                key,
+                positions,
+                forward_batch,
+                layer_id,
+                act_quant,
+                out_cache_loc=out_cache_loc,
+            )
+            current_stream.wait_stream(self.alt_stream)
+            return fused_q_indexer_rope_first_quant(
+                q.contiguous(),
+                weights_raw,
+                q_scale_gate,
+                self._indexer_cos_sin_cache,
+                positions,
+            )
 
         current_stream.wait_stream(self.alt_stream)
         self.alt_stream.wait_stream(current_stream)
