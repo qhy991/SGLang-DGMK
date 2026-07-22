@@ -187,21 +187,6 @@ def opt_m_buckets() -> dict[str, frozenset[int]]:
     return {op: frozenset(values) for op, values in parsed.items()}
 
 
-def explicit_shape_trial_buckets(op: str) -> frozenset[int]:
-    """Return buckets only for an explicit serving-safe operator trial.
-
-    Call-option experiments are not archive replacements and therefore do not
-    belong in the kernel registry.  They still fail closed unless every master,
-    profile, operator, and shape switch is explicit.
-    """
-    if not is_enabled() or profile_name() != "serving_safe":
-        return frozenset()
-    allow = opt_ops_allowlist()
-    if allow is None or op not in allow:
-        return frozenset()
-    return opt_m_buckets().get(op, frozenset())
-
-
 def allow_abi_adapter() -> bool:
     """Allow packed-UE8M0 -> f32 adapters for legacy harness candidates.
 
