@@ -2,6 +2,7 @@
 
 from sglang.srt.layers.glm52_opt.config import is_enabled, profile_name
 from sglang.srt.layers.glm52_opt.context import (
+    get_forward_m,
     get_forward_mode,
     get_op_name,
     op_context,
@@ -12,6 +13,7 @@ from sglang.srt.layers.glm52_opt.dispatch import try_dispatch_fp8_gemm, try_disp
 __all__ = [
     "is_enabled",
     "profile_name",
+    "get_forward_m",
     "get_forward_mode",
     "get_op_name",
     "op_context",

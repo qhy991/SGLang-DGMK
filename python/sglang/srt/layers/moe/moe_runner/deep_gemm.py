@@ -433,9 +433,9 @@ class DeepGemmRunnerCore(MoeRunnerCore):
         gateup_output = torch.empty(
             (num_groups, m, n), device=hidden_states_device, dtype=torch.bfloat16
         )
-        # w13 = fused gate+up. Decode: tag moe_gate_proj (pack+PDL).
-        # Prefill: moe_gate is intentionally stock (Graph regress); tag moe_up_proj
-        # so the registered prefill pack path can still apply to w13.
+        # w13 is one fused gate+up grouped GEMM.  The tags are retained for
+        # explicit ablation only; serving_safe does not swap it implicitly, and
+        # the wrapper rejects swaps whenever DeepEP/TBO overlap is active.
         from sglang.srt.layers.glm52_opt.context import get_forward_mode, op_context
         from sglang.srt.layers.glm52_opt.phase import infer_glm52_phase
 

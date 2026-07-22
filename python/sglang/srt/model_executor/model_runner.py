@@ -3152,7 +3152,12 @@ class ModelRunner(ModelRunnerKVCacheMixin):
         with ctx_mgr:
             from sglang.srt.layers.glm52_opt.context import set_forward_mode
 
-            set_forward_mode(forward_batch.forward_mode)
+            # Preserve the local CUDA-graph token bucket for shape-selective
+            # kernel dispatch.  In the DP8 GLM-5.2 lane this remains M16/M32;
+            # it must not be divided by the DP degree.
+            set_forward_mode(
+                forward_batch.forward_mode, int(forward_batch.input_ids.shape[0])
+            )
             mode_check = (
                 forward_batch.forward_mode.is_cpu_graph
                 if self.device == "cpu"

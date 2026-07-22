@@ -4470,16 +4470,18 @@ def run_scheduler_process(
         from sglang.srt.layers.glm52_opt.config import (
             deepgemm_variant,
             is_enabled,
+            opt_m_buckets,
             opt_ops_allowlist,
             profile_name,
         )
 
         logger.info(
-            "glm52_opt worker: enabled=%s profile=%s variant=%s ops=%s",
+            "glm52_opt worker: enabled=%s profile=%s variant=%s ops=%s m_buckets=%s",
             is_enabled(),
             profile_name(),
             deepgemm_variant(),
             sorted(opt_ops_allowlist()) if opt_ops_allowlist() else "all",
+            {op: sorted(values) for op, values in opt_m_buckets().items()} or "all",
         )
     except Exception as exc:
         logger.warning("glm52_opt status log skipped: %s", exc)

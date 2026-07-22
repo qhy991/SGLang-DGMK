@@ -8,7 +8,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Literal, Optional
 
-from sglang.srt.layers.glm52_opt.config import opt_ops_allowlist, profile_name
+from sglang.srt.layers.glm52_opt.config import (
+    opt_m_buckets,
+    opt_ops_allowlist,
+    profile_name,
+)
 
 KernelKind = Literal[
     "fp8_gemm",
@@ -103,21 +107,30 @@ _PREFILL_FULL: dict[str, KernelSpec] = {
 def _decode_table() -> dict[str, KernelSpec]:
     """Profile / allowlist gated decode registry.
 
-    - decode_max / full: all decode swaps (optionally filtered by OPT_OPS)
+    - serving_safe (default): no implicit swap; OPT_OPS selects explicit trials
+    - decode_max / full: all legacy decode swaps (optionally filtered by OPT_OPS)
     - q_b_only: only q_b_proj
     - SGLANG_GLM52_OPT_OPS=a,b: intersect with active table (ablation)
     """
     name = profile_name()
+    allow = opt_ops_allowlist()
     if name == "q_b_only":
         table = {}
         spec = _DECODE.get("q_b_proj")
         if spec is not None:
             table["q_b_proj"] = spec
-    else:
+    elif name == "serving_safe":
+        table = (
+            {op: _DECODE[op] for op in sorted(allow) if op in _DECODE}
+            if allow is not None
+            else {}
+        )
+    elif name in ("decode_max", "full"):
         table = dict(_DECODE)
+    else:
+        table = {}
 
-    allow = opt_ops_allowlist()
-    if allow is not None:
+    if allow is not None and name != "serving_safe":
         table = {k: v for k, v in table.items() if k in allow}
     return table
 
@@ -126,7 +139,14 @@ def _active_prefill() -> dict[str, KernelSpec]:
     return dict(_PREFILL_FULL)
 
 
-def lookup(op_name: Optional[str], phase: str) -> Optional[KernelSpec]:
+def lookup(
+    op_name: Optional[str], phase: str, m: Optional[int] = None
+) -> Optional[KernelSpec]:
+    """Look up a replacement, optionally gated by the current local M.
+
+    M gating is deliberately evaluated after the profile/op allowlist.  It is
+    a selective fallback policy, not another way to enable an op.
+    """
     if not op_name:
         return None
     if phase == "decode":
@@ -136,6 +156,9 @@ def lookup(op_name: Optional[str], phase: str) -> Optional[KernelSpec]:
     else:
         return None
     if spec is None or not spec.enabled:
+        return None
+    allowed_m = opt_m_buckets().get(op_name)
+    if allowed_m is not None and (m is None or int(m) not in allowed_m):
         return None
     return spec
 

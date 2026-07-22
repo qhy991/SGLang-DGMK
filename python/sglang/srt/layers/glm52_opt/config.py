@@ -18,6 +18,8 @@ _GLM52_ENV_KEYS = frozenset(
         "SGLANG_GLM52_OPT",
         "SGLANG_GLM52_OPT_PROFILE",
         "SGLANG_GLM52_OPT_OPS",
+        "SGLANG_GLM52_OPT_M_BUCKETS",
+        "SGLANG_GLM52_ALLOW_ABI_ADAPTER",
         "SGLANG_GLM52_MANIFEST",
         "SGLANG_GLM52_DEEPGEMM_VARIANT",
         "SGLANG_GLM52_ARCHIVE",
@@ -124,7 +126,10 @@ def is_enabled() -> bool:
 
 def profile_name() -> str:
     ensure_glm52_env()
-    return os.environ.get("SGLANG_GLM52_OPT_PROFILE", "decode_max").strip().lower()
+    # Fail closed: historical harness winners are not serving-safe merely
+    # because GLM52_OPT is enabled.  They must be selected explicitly until a
+    # production-ABI + end-to-end validation promotes them.
+    return os.environ.get("SGLANG_GLM52_OPT_PROFILE", "serving_safe").strip().lower()
 
 
 def opt_ops_allowlist() -> frozenset[str] | None:
@@ -138,6 +143,59 @@ def opt_ops_allowlist() -> frozenset[str] | None:
     if not raw:
         return None
     return frozenset(x.strip() for x in raw.split(",") if x.strip())
+
+
+def opt_m_buckets() -> dict[str, frozenset[int]]:
+    """Optional per-op M allowlist for shape-selective dispatch.
+
+    ``SGLANG_GLM52_OPT_M_BUCKETS=q_b_proj:16|32,moe_down_proj:32``
+    restricts only the named ops.  An op absent from this map keeps its normal
+    profile/OPT_OPS behavior.  If an op is present, dispatch fails closed when
+    the current forward M is unknown or not listed, so the caller naturally
+    falls back to the production SGLang implementation.
+    """
+    ensure_glm52_env()
+    raw = os.environ.get("SGLANG_GLM52_OPT_M_BUCKETS", "").strip()
+    if not raw:
+        return {}
+
+    parsed: dict[str, set[int]] = {}
+    for entry in raw.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        op, sep, values = entry.partition(":")
+        op = op.strip()
+        if not sep or not op or not values.strip():
+            raise ValueError(
+                "Invalid SGLANG_GLM52_OPT_M_BUCKETS entry "
+                f"{entry!r}; expected op:16|32"
+            )
+        try:
+            buckets = {int(value.strip()) for value in values.split("|")}
+        except ValueError as exc:
+            raise ValueError(
+                "Invalid SGLANG_GLM52_OPT_M_BUCKETS entry "
+                f"{entry!r}; M values must be integers"
+            ) from exc
+        if not buckets or any(m <= 0 for m in buckets):
+            raise ValueError(
+                "Invalid SGLANG_GLM52_OPT_M_BUCKETS entry "
+                f"{entry!r}; M values must be positive"
+            )
+        parsed.setdefault(op, set()).update(buckets)
+    return {op: frozenset(values) for op, values in parsed.items()}
+
+
+def allow_abi_adapter() -> bool:
+    """Allow packed-UE8M0 -> f32 adapters for legacy harness candidates.
+
+    This is intentionally opt-in: the conversion launches and temporary
+    tensors are part of serving latency and caused several microbench winners
+    to regress after integration.
+    """
+    ensure_glm52_env()
+    return _truthy("SGLANG_GLM52_ALLOW_ABI_ADAPTER")
 
 
 def deepgemm_variant() -> str | None:

@@ -2152,7 +2152,9 @@ class DeepseekSparseAttnBackend(
         _use_glm52_dsa = False
         if glm52_config.is_enabled() and self.dsa_decode_impl == "flashmla_sparse":
             _phase = infer_glm52_phase(get_forward_mode(), q_nope.shape[0])
-            _spec = glm52_lookup("dsa_decode_attn", _phase)
+            _spec = glm52_lookup(
+                "dsa_decode_attn", _phase, m=int(q_nope.shape[0])
+            )
             _use_glm52_dsa = _spec is not None and _spec.kind == "dsa"
 
         if self.dsa_decode_impl == "flashmla_sparse" or _use_glm52_dsa:
@@ -2274,7 +2276,11 @@ class DeepseekSparseAttnBackend(
         from sglang.srt.layers.glm52_opt.registry import lookup
 
         phase = infer_glm52_phase(get_forward_mode(), q_all.shape[0])
-        spec = lookup("dsa_decode_attn", phase) if glm52_config.is_enabled() else None
+        spec = (
+            lookup("dsa_decode_attn", phase, m=int(q_all.shape[0]))
+            if glm52_config.is_enabled()
+            else None
+        )
         if spec is not None and spec.kind == "dsa":
             from sglang.srt.layers.glm52_opt.dsa_attn import run_dsa_decode
 

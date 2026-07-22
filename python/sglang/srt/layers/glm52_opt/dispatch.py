@@ -12,7 +12,11 @@ from typing import List, Optional, Tuple
 import torch
 
 from sglang.srt.layers.glm52_opt import config
-from sglang.srt.layers.glm52_opt.context import get_forward_mode, get_op_name
+from sglang.srt.layers.glm52_opt.context import (
+    get_forward_m,
+    get_forward_mode,
+    get_op_name,
+)
 from sglang.srt.layers.glm52_opt.fp8_gemm import run_fp8_gemm
 from sglang.srt.layers.glm52_opt.moe_masked import run_moe_masked
 from sglang.srt.layers.glm52_opt.phase import infer_glm52_phase
@@ -37,9 +41,13 @@ def _flush_stats() -> None:
         print(f"[glm52_opt] hit-file write failed: {exc}", flush=True)
 
 
-def _record_hit(kind: str, op: Optional[str], phase: str) -> None:
+def _record_hit(
+    kind: str, op: Optional[str], phase: str, m: Optional[int] = None
+) -> None:
     """Count successful glm52_opt dispatches; log first hit per key."""
     key = f"{kind}:{op or 'untagged'}:{phase}"
+    if m is not None:
+        key += f":m{m}"
     with _HIT_LOCK:
         n = _HIT_COUNTS.get(key, 0) + 1
         _HIT_COUNTS[key] = n
@@ -52,8 +60,12 @@ def _record_hit(kind: str, op: Optional[str], phase: str) -> None:
         print(msg, flush=True)
 
 
-def _record_miss(reason: str, op: Optional[str], phase: str) -> None:
+def _record_miss(
+    reason: str, op: Optional[str], phase: str, m: Optional[int] = None
+) -> None:
     key = f"{reason}:{op or 'untagged'}:{phase}"
+    if m is not None:
+        key += f":m{m}"
     with _HIT_LOCK:
         n = _MISS_COUNTS.get(key, 0) + 1
         _MISS_COUNTS[key] = n
@@ -105,16 +117,16 @@ def try_dispatch_fp8_gemm(
     bias: Optional[torch.Tensor] = None,
 ) -> Optional[torch.Tensor]:
     if not config.is_enabled():
-        _record_miss("disabled", get_op_name(), "na")
         return None
     op = get_op_name()
-    phase = _current_phase(input_2d.shape[0])
-    spec = lookup(op, phase)
+    m = int(input_2d.shape[0])
+    phase = _current_phase(m)
+    spec = lookup(op, phase, m=m)
     if spec is None or spec.kind != "fp8_gemm":
-        _record_miss("no_spec", op, phase)
+        _record_miss("no_spec", op, phase, m=m)
         return None
     out = input_2d.new_empty(input_2d.shape[0], weight.shape[0], dtype=output_dtype)
-    with _nvtx_range(f"glm52_opt/fp8_gemm/{op}/{phase}"):
+    with _nvtx_range(f"glm52_opt/fp8_gemm/{op}/{phase}/m{m}"):
         ok, path = run_fp8_gemm(
             op,
             input_2d,
@@ -127,9 +139,9 @@ def try_dispatch_fp8_gemm(
             phase=phase,
         )
     if not ok:
-        _record_miss("run_failed", op, phase)
+        _record_miss(f"run_skipped:{path}", op, phase, m=m)
         return None
-    _record_hit(f"fp8_gemm/{path}", op, phase)
+    _record_hit(f"fp8_gemm/{path}", op, phase, m=m)
     if bias is not None:
         out = out + bias
     return out.view(*input_2d.shape[:-1], weight.shape[0])
@@ -143,30 +155,41 @@ def try_dispatch_moe_masked(
     expected_m: int,
 ) -> bool:
     if not config.is_enabled():
-        _record_miss("moe_disabled", get_op_name(), "na")
         return False
     op = get_op_name()
     # w13 is fused gate+up in SGLang; either tag should enable decode pack path.
     phase = _current_phase(lhs[0].shape[1] if lhs[0].ndim >= 2 else 1)
-    spec = lookup(op, phase)
+    # The grouped input's second dimension is the fixed expert slab (1024),
+    # not the model-forward token bucket.  Use launch-time ForwardBatch M so
+    # M16 and M32 can independently select a replacement.
+    forward_m = get_forward_m()
+    spec = lookup(op, phase, m=forward_m)
     if spec is None and op in ("moe_gate_proj", "moe_up_proj"):
         # Prefer gate's registered decode pack if only one is present.
-        spec = lookup("moe_gate_proj", phase) or lookup("moe_up_proj", phase)
+        spec = lookup("moe_gate_proj", phase, m=forward_m) or lookup(
+            "moe_up_proj", phase, m=forward_m
+        )
     if spec is None or spec.kind != "moe_masked":
-        _record_miss("moe_no_spec", op, phase)
+        _record_miss("moe_no_spec", op, phase, m=forward_m)
         return False
     # Prefill moe_gate: Graph regresses at large M — never swap.
     if phase == "prefill" and op == "moe_gate_proj":
-        _record_miss("moe_prefill_skip", op, phase)
+        _record_miss("moe_prefill_skip", op, phase, m=forward_m)
         return False
     x_fp8, x_scale = lhs
     w_fp8, w_scale = rhs
     try:
-        with _nvtx_range(f"glm52_opt/moe_masked/{op or spec.op}/{phase}"):
+        suffix = f"/m{forward_m}" if forward_m is not None else "/m_unknown"
+        with _nvtx_range(f"glm52_opt/moe_masked/{op or spec.op}/{phase}{suffix}"):
             run_moe_masked(x_fp8, w_fp8, x_scale, w_scale, out, masked_m, expected_m)
     except Exception as exc:
-        _record_miss(f"moe_run_fail:{type(exc).__name__}", op or (spec.op if spec else None), phase)
+        _record_miss(
+            f"moe_run_fail:{type(exc).__name__}",
+            op or (spec.op if spec else None),
+            phase,
+            m=forward_m,
+        )
         logger.warning("glm52_opt moe_masked failed: %s", exc)
         return False
-    _record_hit("moe_masked", op or spec.op, phase)
+    _record_hit("moe_masked", op or spec.op, phase, m=forward_m)
     return True

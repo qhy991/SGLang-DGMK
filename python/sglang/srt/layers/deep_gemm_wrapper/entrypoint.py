@@ -23,6 +23,14 @@ if ENABLE_JIT_DEEPGEMM:
 _SANITY_CHECK = envs.SGLANG_DEEPGEMM_SANITY_CHECK.get()
 
 
+def _glm52_moe_dispatch_compatible(
+    overlap_args: Optional[Any],
+    recipe_a: Optional[Tuple[int, int]],
+    recipe_b: Optional[Tuple[int, int]],
+) -> bool:
+    return overlap_args is None and recipe_a is None and recipe_b is None
+
+
 # TODO maybe rename these functions
 def grouped_gemm_nt_f8f8bf16_masked(
     lhs: Tuple[torch.Tensor, torch.Tensor],
@@ -53,7 +61,17 @@ def grouped_gemm_nt_f8f8bf16_masked(
         ):
             from sglang.srt.layers.glm52_opt.dispatch import try_dispatch_moe_masked
 
-            if try_dispatch_moe_masked(lhs, rhs, out, masked_m, expected_m):
+            # The glm52 replacement does not implement DeepEP/TBO overlap or
+            # recipe-aware FP4/MXFP8 calls.  Taking it here would drop
+            # enable_overlap/signal and change the overlap return contract,
+            # which can regress or break the full MoE pipeline even if the
+            # isolated GEMM is faster.
+            glm52_compatible = _glm52_moe_dispatch_compatible(
+                overlap_args, recipe_a, recipe_b
+            )
+            if glm52_compatible and try_dispatch_moe_masked(
+                lhs, rhs, out, masked_m, expected_m
+            ):
                 return out
 
             fp4_kwargs = {}

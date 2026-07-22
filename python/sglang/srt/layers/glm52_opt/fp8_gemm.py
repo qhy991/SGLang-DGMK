@@ -22,6 +22,7 @@ from sglang.srt.layers.glm52_opt.experimental_deepgemm import (
     get_experimental_deep_gemm,
     has_fused_fp8_gemm_nt,
 )
+from sglang.srt.layers.glm52_opt.config import allow_abi_adapter
 from sglang.srt.layers.glm52_opt.kernels.scale_pack import pack_scales
 
 logger = logging.getLogger(__name__)
@@ -184,12 +185,19 @@ def run_fp8_gemm(
     """Run optimized FP8 GEMM. Returns (ok, path) where path is
     native_fork | native_packed | archive | packed_fallback | packed_default.
     """
-    # 1) q_b decode only: DeepGEMM fork fused (ours wins PR5 bake-off)
+    packed_scales = x_scale.dtype == torch.int32 or w_scale.dtype == torch.int32
+
+    # 1) q_b decode only: the historical fork consumes raw f32 scales.  Do not
+    # silently unpack production UE8M0 scales unless this legacy adapter is
+    # explicitly enabled: its conversion kernels were absent from the harness
+    # score but are paid on every serving invocation.
     if (
         op_name in _NATIVE_FORK_OPS
         and phase == "decode"
         and has_fused_fp8_gemm_nt()
     ):
+        if packed_scales and not allow_abi_adapter():
+            return False, "packed_abi_requires_adapter"
         _run_q_b_fused(x_fp8, w_fp8, x_scale, w_scale, out)
         return True, "native_fork"
 
@@ -200,6 +208,8 @@ def run_fp8_gemm(
 
     # 3) Everything else with an archive_ref: real candidate (PR5 Triton, pack, etc.)
     if archive_ref:
+        if packed_scales and not allow_abi_adapter():
+            return False, "packed_abi_requires_adapter"
         try:
             _run_archive_candidate(
                 archive_ref, x_fp8, w_fp8, x_scale, w_scale, out, block_size
