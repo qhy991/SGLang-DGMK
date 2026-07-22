@@ -1,0 +1,5 @@
+started_utc=2026-07-22T18:19:25.856126283Z
+command= bash -c git\ -C\ \"\$1\"\ status\ --short\;\ git\ -C\ \"\$1\"\ rev-parse\ HEAD\;\ git\ -C\ \"\$2\"\ status\ --short\;\ git\ -C\ \"\$2\"\ rev-parse\ HEAD _ /home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness /home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/sglang
+timeout_seconds=1800
+46ba02607b54f62cdef5a43c99e558b12b545aa6
+49c03b20e861782002eec6f5be7126e7e19c2d28

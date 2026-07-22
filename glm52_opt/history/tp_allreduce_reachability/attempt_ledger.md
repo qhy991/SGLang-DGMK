@@ -1,8 +1,10 @@
 # TP AllReduce attempt ledger
 
-Status: **PRE-RUNTIME TEMPLATE.** No attempt below has a measured outcome yet.
-Never fill a numeric field from recollection, an unlocked run, provider-only
-output, or another topology. Link the immutable result/profile artifact.
+Status: **RUNTIME EVIDENCE IN PROGRESS.** Infrastructure failures and probes
+below are measured outcomes, but no backend performance result is accepted
+until the clean campaign and analyzer complete. Never fill a numeric field from
+recollection, an unlocked run, provider-only output, or another topology. Link
+the immutable result/profile artifact.
 
 ## Required entry contract
 
@@ -103,6 +105,130 @@ them as absent or successful.
   so every full-campaign sample remains fail-closed on its actual envelope. The
   mechanism is accepted only as measurement infrastructure for the next clean
   campaign; it does not alter SGLang backend dispatch or stock fallback.
+
+## Infrastructure attempt P1: shutdown hang and long-tail alignment
+
+- Status: **REJECTED PARTIAL CAMPAIGN; FIXES IMPLEMENTED, VALIDATION PENDING**
+  on 2026-07-22.
+- Identity: Harness `46ba02607b54f62cdef5a43c99e558b12b545aa6`, SGLang
+  `49c03b20e861782002eec6f5be7126e7e19c2d28`, TP4 BF16 on four B200s;
+  immutable raw files, incident note, and manifest:
+  [runtime/tp_allreduce_reachability_20260722T181038Z_aborted_shutdown_alignment](runtime/tp_allreduce_reachability_20260722T181038Z_aborted_shutdown_alignment/).
+- Hypothesis: the scheduled-start mechanism would remain within 500 us over a
+  full campaign, and raw c10d CUDA-graph execution would exit through the
+  generic NCCL shutdown barrier after serializing its result.
+- Correctness/reachability: all reachability and semantic steps completed with
+  exact values, alias/poststate, source immutability, and stream readiness. The
+  M16 c10d payload also completed 100 alternating exact A/B pairs and the final
+  CPU-group persistence acknowledgement.
+- Failure evidence: `paired/m16_c10d_inplace.json` was written at
+  18:24:46 UTC, after which all four workers remained live and futex-waiting
+  for more than six minutes after the last logged device-context barrier
+  warning. The recorded source flow is consistent with a post-persistence NCCL
+  device-group barrier stall, but no worker stacks were captured. No candidate
+  `status.tsv` row or after-state receipt exists. Separately, the M16
+  reference-control had 14/200 start envelopes above 500,000 ns (maximum
+  1,065,874 ns), c10d had 5/200 (maximum 910,102 ns), and baseline runs 2 and 3
+  had one violation each.
+- Performance/profiler: all timing is ineligible. For audit identity only, the
+  partial c10d payload records reference/candidate ready-region p50s of
+  0.194192/0.192288 ms and paired p10/p50/p90 ratios of
+  0.758696/1.018643/1.265677. The p50 was below 1.03 even before rejection. No
+  backend scout, producer ABI, or Nsight profile was reached.
+- Exact infrastructure delta for the retry: normal TP AllReduce teardown now
+  uses the existing TP CPU group and never injects a final NCCL barrier after a
+  captured raw c10d collective. Measurement admission retries the entire
+  logical A/B pair, with fixed logical order, solely when rederived host start
+  brackets exceed 500 us. The exact input variant alternates for every physical
+  pair to retain stale-output detection. The limit is ten total attempts; every
+  completed physical attempt is retained in a successful result or bounded
+  alignment-failure receipt, and CUDA latency is excluded from admission.
+- Risk/decision/rollback: a serialized JSON without a successful outer command
+  exit is not a completed result. Whole-pair retry avoids one-sided selection,
+  remains bounded and fail-closed, and requires a new clean locked validation.
+  Stock dispatch remained active throughout.
+
+## Infrastructure attempt P2: retry ledger observed; teardown hung with live graphs
+
+- Status: **REJECTED TEARDOWN PROBE; GRAPH-RESET FIX IMPLEMENTED, CLEAN
+  VALIDATION PENDING** on 2026-07-22.
+- Identity: dirty descendants of Harness
+  `46ba02607b54f62cdef5a43c99e558b12b545aa6` and SGLang
+  `49c03b20e861782002eec6f5be7126e7e19c2d28`; TP4 BF16 M16,
+  CUDA Graph/nondefault stream, raw in-place c10d candidate. The payload,
+  incident receipt, explicit rejection note, and manifest are under
+  [runtime/tp_allreduce_shutdown_retry_probe_20260722T185615Z_aborted_live_graph](runtime/tp_allreduce_shutdown_retry_probe_20260722T185615Z_aborted_live_graph/).
+  The payload records the base SHAs and dirty filenames, not the dirty source
+  contents; those files were subsequently modified, so exact source
+  reproduction is unavailable. The lock-wrapper and exit-124 facts are also
+  contemporaneous operator observations because no raw terminal log was
+  copied.
+- Hypothesis: the TP CPU-group final rendezvous would permit clean shutdown,
+  while bounded whole-pair retry would retain 100 eligible logical pairs under
+  rare host preemption.
+- Correctness/alignment: the serialized payload passed exact correctness and
+  accepted 100 logical pairs from 125 physical attempts. All accepted start
+  envelopes stayed below 500,000 ns (reference maximum 440,866 ns; candidate
+  maximum 457,594 ns); 25 whole physical pairs were retained as rejected
+  attempts. Admission did not inspect CUDA latency.
+- Failure evidence: despite the complete payload, the four workers did not
+  exit before the 180-second outer timeout; the wrapper returned 124 at
+  approximately 18:59:23 UTC. The payload also records dirty worktrees and
+  `/home/qinhaiyan/miniconda3/envs/sglang/bin/python`, not the required
+  Kernel-Harness environment.
+- Performance/profiler: ineligible because there is no successful outer exit.
+  For audit identity only, the payload records reference/candidate ready-region
+  p50s of 0.200032/0.204816 ms and paired p10/p50/p90 ratios of
+  0.678812/0.973438/1.248220. They cannot support a backend decision. No profile
+  was collected.
+- Source diagnosis and follow-up delta: source review found a mechanism
+  consistent with the hang: CUDA Graphs retaining captured NCCL work were still
+  alive when process groups were destroyed, and NCCL 2.28.9 waits for those
+  graph references. The runner now registers each graph before capture,
+  synchronizes its execution stream, resets graphs in reverse creation order,
+  severs runner references, confirms success over the TP CPU group, and only
+  then destroys SGLang subgroups and WORLD. A reset failure skips explicit
+  communicator destruction and fails closed.
+- Risk/decision/rollback: the serialized retry ledger is internally coherent,
+  but its timed result remains rejected and clean validation was still required
+  at this point. No backend or threshold change is enabled; stock dispatch
+  remains active. Rollback remains Harness `46ba026` plus SGLang `49c03b20`.
+
+## Infrastructure attempt P3: explicit captured-graph release
+
+- Status: **VALIDATED FOR CLEAN CAMPAIGN USE; NOT A BACKEND PERFORMANCE
+  RESULT** on 2026-07-22.
+- Identity: exact at-probe Kernel-Harness file hashes landed unchanged as
+  `bea4a8cd294a84f2d305cd023eb3fed281de4b1e`; SGLang serving-runtime
+  source `49c03b20e861782002eec6f5be7126e7e19c2d28` (dirty files were confined
+  to offline history/analyzer evidence); TP4 BF16 M16,
+  CUDA Graph/nondefault stream, raw in-place c10d candidate. Result, command,
+  outer-exit receipt, review note, and manifest:
+  [runtime/tp_allreduce_graph_reset_probe_20260722T191541Z_validation](runtime/tp_allreduce_graph_reset_probe_20260722T191541Z_validation/).
+- Hypothesis: captured NCCL graph references, not a final rendezvous alone,
+  caused communicator destruction to wait indefinitely. Explicit graph reset
+  before any process-group teardown should let the same payload exit normally.
+- Exact delta: every `CUDAGraph` is registered immediately after creation,
+  including partial-capture failures. Teardown synchronizes the execution
+  stream, resets graphs in reverse creation order, clears runner graph
+  references, confirms reset success over the TP CPU group, and only then
+  destroys SGLang subgroups and WORLD. Reset failure skips explicit
+  communicator destruction and fails closed.
+- Correctness/alignment: exact correctness passed. Twenty logical A/B pairs
+  were accepted from 21 physical attempts; the one rejected whole pair remains
+  in the ledger. Accepted reference/candidate host envelopes were at most
+  413,319/261,727 ns.
+- Lifecycle result: the locked command acquired physical GPUs 0--3, persisted
+  the result, completed graph and process-group teardown, and returned exit 0
+  after 18.632 seconds. This directly distinguishes it from P1/P2, whose JSON
+  existed but whose outer commands never completed.
+- Performance/profiler: deliberately ineligible because both worktrees were
+  dirty and the probe used only 20 repeats. The payload's favorable speedup is
+  not cited and no profile was collected.
+- Risk/decision/rollback: the lifecycle and alignment infrastructure are
+  accepted for a fresh clean campaign. No SGLang backend, threshold, or TP4/TP8
+  dispatch policy changed; stock remains active. Rollback is the previous
+  committed Harness `46ba026` runner.
 
 ## Planned attempt A0: stock reachability and reference characterization
 

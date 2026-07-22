@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "classification": "locked_lifecycle_validation_with_operator_exit_receipt",
+  "command": [
+    "/home/qinhaiyan/glm52-goal-runs/with_all_gpus_lock.sh",
+    "timeout",
+    "--signal=TERM",
+    "--kill-after=30s",
+    "120s",
+    "env",
+    "SGLANG_ROOT=/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/sglang",
+    "KERNEL_HARNESS_PYTHON=/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/.venv/bin/python",
+    "PYTHONPATH=/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/sglang/python:/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness",
+    "SGLANG_GLM52_OPT=0",
+    "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/serving_native/run.sh",
+    "tp4_allreduce_decode_m16",
+    "--candidate",
+    "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/serving_native/candidates/allreduce_torch.py",
+    "--execution-mode",
+    "cuda_graph",
+    "--stream",
+    "nondefault",
+    "--warmup",
+    "3",
+    "--repeat",
+    "20",
+    "--output",
+    "/tmp/tp_allreduce_graph_reset_probe_20260722T191541Z.json"
+  ],
+  "wrapper_observation": {
+    "allocated_physical_gpus": [0, 1, 2, 3],
+    "exit_code": 0,
+    "wall_time_seconds": 18.631871823,
+    "outer_timeout_seconds": 120,
+    "limitation": "The full terminal stream was returned to the operator but was not persisted as a separate log; result.json is the immutable automatic payload and this exit receipt records the observed wrapper result."
+  },
+  "at_probe_source": {
+    "kernel_harness_base_sha_recorded_by_payload": "46ba02607b54f62cdef5a43c99e558b12b545aa6",
+    "kernel_harness_landed_sha": "bea4a8cd294a84f2d305cd023eb3fed281de4b1e",
+    "kernel_harness_files": {
+      "serving_native/README.md": "a7ca5e95b9a4cbd75804c9f7c52235c1a55884cfae62a81434e1802d991d587b",
+      "serving_native/selftest.py": "90d50d4127b612b3f8a95d49b3f7a666d7cd05267017e7c312f9f0471dd1b4d5",
+      "serving_native/tp_allreduce_runner.py": "9dad4441db21016a3ee56196d2c3c2703679d7d17f89f38a1dc19c1fd03dfa65"
+    },
+    "linkage": "All three file mtimes predate the probe; they were not changed between the probe and the landed commit, and their current committed contents match these hashes.",
+    "sglang_runtime_sha": "49c03b20e861782002eec6f5be7126e7e19c2d28",
+    "sglang_dirty_scope": "The payload lists only glm52_opt/history/tp_allreduce_reachability analyzer, ledger, tests, and evidence; no serving-runtime SGLang source was dirty."
+  },
+  "payload": {
+    "path": "result.json",
+    "mtime_utc": "2026-07-22T19:16:05.212837594Z",
+    "bytes": 177400,
+    "exact_correctness": true,
+    "accepted_logical_pairs": 20,
+    "rejected_physical_pairs": 1,
+    "total_physical_pairs": 21
+  },
+  "eligibility": {
+    "lifecycle_validation": true,
+    "performance_eligible": false,
+    "reasons": [
+      "Kernel-Harness and SGLang worktrees were dirty with the implementation under validation",
+      "short 20-repeat probe was not the predeclared clean campaign"
+    ],
+    "stock_fallback_active": true,
+    "topology": "TP4 diagnostic only; not TP8/DP8/EP8 production evidence"
+  }
+}

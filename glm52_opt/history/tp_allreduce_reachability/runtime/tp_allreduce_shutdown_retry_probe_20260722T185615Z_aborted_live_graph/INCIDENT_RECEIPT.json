@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "classification": "post_run_operator_observation_and_source_diagnosis",
+  "original_output": "/tmp/tp_allreduce_shutdown_retry_probe_20260722T185615Z.json",
+  "archived_payload": "result.json",
+  "filesystem_facts": {
+    "payload_mtime_utc": "2026-07-22T18:56:39.726939113Z",
+    "payload_bytes": 834033,
+    "payload_schema_version": 2,
+    "accepted_logical_pairs": 100,
+    "rejected_physical_pairs": 25,
+    "total_physical_pairs": 125
+  },
+  "operator_observation": {
+    "scheduler_observation": "The operator launched this probe through with_all_gpus_lock.sh, but no terminal lock receipt or exact argv was copied into the archive.",
+    "outer_timeout_seconds": 180,
+    "wrapper_exit_code": 124,
+    "exit_observed_utc_approx": "2026-07-22T18:59:23Z",
+    "observation": "The complete JSON payload was present, but all four workers remained live until the outer timeout terminated the command.",
+    "limitations": "The command's terminal output was not copied into this archive, so the timestamp and post-persistence stall are a contemporaneous operator observation rather than an automatically persisted receipt."
+  },
+  "source_diagnosis": {
+    "classification": "inference",
+    "finding": "The source change replaced the final device-group rendezvous with the TP CPU group, but it did not release the captured reference and candidate CUDA Graphs before NCCL process-group destruction.",
+    "mechanism": "NCCL 2.28.9 retains communicator references from captured graph work and waits for those references during communicator destruction; torch.cuda.CUDAGraph.reset() destroys the graph executable that owns the reference.",
+    "required_order": "stop replay; synchronize execution stream; reset candidate then reference graph; confirm reset over the TP CPU group; destroy SGLang subgroups; destroy WORLD"
+  },
+  "eligibility": {
+    "performance_eligible": false,
+    "reasons": [
+      "outer command timed out after payload persistence",
+      "Kernel-Harness and SGLang worktrees were dirty",
+      "payload records /home/qinhaiyan/miniconda3/envs/sglang/bin/python rather than the required Kernel-Harness environment"
+    ],
+    "stock_fallback_active": true
+  }
+}

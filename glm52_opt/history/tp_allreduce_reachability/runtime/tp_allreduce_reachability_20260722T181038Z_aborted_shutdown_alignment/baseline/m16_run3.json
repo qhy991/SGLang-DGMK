@@ -1,0 +1,6859 @@
+{
+  "all_reduce_trace": {
+    "enabled": false,
+    "evidence_valid": null,
+    "failure_counts_by_rank": null,
+    "measurement_instrumented": false,
+    "paths_by_rank": null,
+    "replay_limitation": "Python observes eager dispatch or CUDA graph capture only; CUDA graph replay does not re-enter this hook. Correlate stable kernel names in an Nsight Systems trace to prove replay execution."
+  },
+  "allreduce": {
+    "candidate_capture_context_by_rank": null,
+    "candidate_contract_by_rank": null,
+    "exact_oracle": "hash[row,col]=(37*(row%127)+17*(col%127)+13*(row%127)*(col%127))%127; base_variant=((hash+shift)%127)-63 for shifts [0,31]; source=base+2*rank-(world_size-1); expected=world_size*base",
+    "message_bytes": 196608,
+    "reference_contract_by_rank": [
+      {
+        "exact_values": true,
+        "local_poststate": "reduced",
+        "output": {
+          "device": "cuda:0",
+          "dtype": "torch.bfloat16",
+          "shape": [
+            16,
+            6144
+          ],
+          "stride": [
+            6144,
+            1
+          ]
+        },
+        "output_aliases_local": true,
+        "source_immutable": true
+      },
+      {
+        "exact_values": true,
+        "local_poststate": "reduced",
+        "output": {
+          "device": "cuda:1",
+          "dtype": "torch.bfloat16",
+          "shape": [
+            16,
+            6144
+          ],
+          "stride": [
+            6144,
+            1
+          ]
+        },
+        "output_aliases_local": true,
+        "source_immutable": true
+      },
+      {
+        "exact_values": true,
+        "local_poststate": "reduced",
+        "output": {
+          "device": "cuda:2",
+          "dtype": "torch.bfloat16",
+          "shape": [
+            16,
+            6144
+          ],
+          "stride": [
+            6144,
+            1
+          ]
+        },
+        "output_aliases_local": true,
+        "source_immutable": true
+      },
+      {
+        "exact_values": true,
+        "local_poststate": "reduced",
+        "output": {
+          "device": "cuda:3",
+          "dtype": "torch.bfloat16",
+          "shape": [
+            16,
+            6144
+          ],
+          "stride": [
+            6144,
+            1
+          ]
+        },
+        "output_aliases_local": true,
+        "source_immutable": true
+      }
+    ],
+    "reference_dispatch_by_rank": [
+      {
+        "communicators": {
+          "custom": {
+            "algorithm": "ONE_SHOT_PUSH",
+            "class": "sglang.srt.distributed.device_communicators.custom_all_reduce_v2.CustomAllReduceV2",
+            "fields": {
+              "config": "ModeConfig(one_shot_push_threshold=2097152, one_shot_pull_threshold=2097152)",
+              "disabled": "False",
+              "max_size": "16777216",
+              "override_algo": "None",
+              "rank": "0",
+              "tms_cudagraph": "False",
+              "world_size": "4"
+            },
+            "python_id": 129773510198000,
+            "should_custom_ar": {
+              "value": true
+            }
+          },
+          "pymscclpp": {
+            "should_mscclpp_allreduce": {
+              "value": false
+            }
+          },
+          "pynccl": {
+            "class": "sglang.srt.distributed.device_communicators.pynccl.PyNcclCommunicator",
+            "fields": {
+              "disabled": "False",
+              "rank": "0",
+              "world_size": "4"
+            },
+            "python_id": 129773510201360,
+            "symmetric_pool_enabled": {
+              "value": false
+            }
+          },
+          "quick": {
+            "should_quick_allreduce": {
+              "value": false
+            }
+          },
+          "torch_symmetric_memory": {
+            "should_torch_symm_mem_allreduce": {
+              "value": false
+            }
+          }
+        },
+        "dtype": "torch.bfloat16",
+        "execution_mode": "cuda_graph",
+        "group_name": "tp:0",
+        "group_ranks": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "local_size": 0,
+        "message_bytes": 196608,
+        "phase": "reference_capture",
+        "predicted_reference_algorithm": "ONE_SHOT_PUSH",
+        "predicted_reference_backend": "custom_all_reduce_outplace",
+        "rank": 0,
+        "shape": [
+          16,
+          6144
+        ],
+        "stream": {
+          "cuda_stream": 98761020174496,
+          "requested": "nondefault"
+        },
+        "stride": [
+          6144,
+          1
+        ],
+        "world_size": 4
+      },
+      {
+        "communicators": {
+          "custom": {
+            "algorithm": "ONE_SHOT_PUSH",
+            "class": "sglang.srt.distributed.device_communicators.custom_all_reduce_v2.CustomAllReduceV2",
+            "fields": {
+              "config": "ModeConfig(one_shot_push_threshold=2097152, one_shot_pull_threshold=2097152)",
+              "disabled": "False",
+              "max_size": "16777216",
+              "override_algo": "None",
+              "rank": "1",
+              "tms_cudagraph": "False",
+              "world_size": "4"
+            },
+            "python_id": 126838438298496,
+            "should_custom_ar": {
+              "value": true
+            }
+          },
+          "pymscclpp": {
+            "should_mscclpp_allreduce": {
+              "value": false
+            }
+          },
+          "pynccl": {
+            "class": "sglang.srt.distributed.device_communicators.pynccl.PyNcclCommunicator",
+            "fields": {
+              "disabled": "False",
+              "rank": "1",
+              "world_size": "4"
+            },
+            "python_id": 126838438531568,
+            "symmetric_pool_enabled": {
+              "value": false
+            }
+          },
+          "quick": {
+            "should_quick_allreduce": {
+              "value": false
+            }
+          },
+          "torch_symmetric_memory": {
+            "should_torch_symm_mem_allreduce": {
+              "value": false
+            }
+          }
+        },
+        "dtype": "torch.bfloat16",
+        "execution_mode": "cuda_graph",
+        "group_name": "tp:0",
+        "group_ranks": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "local_size": 0,
+        "message_bytes": 196608,
+        "phase": "reference_capture",
+        "predicted_reference_algorithm": "ONE_SHOT_PUSH",
+        "predicted_reference_backend": "custom_all_reduce_outplace",
+        "rank": 1,
+        "shape": [
+          16,
+          6144
+        ],
+        "stream": {
+          "cuda_stream": 109346930032960,
+          "requested": "nondefault"
+        },
+        "stride": [
+          6144,
+          1
+        ],
+        "world_size": 4
+      },
+      {
+        "communicators": {
+          "custom": {
+            "algorithm": "ONE_SHOT_PUSH",
+            "class": "sglang.srt.distributed.device_communicators.custom_all_reduce_v2.CustomAllReduceV2",
+            "fields": {
+              "config": "ModeConfig(one_shot_push_threshold=2097152, one_shot_pull_threshold=2097152)",
+              "disabled": "False",
+              "max_size": "16777216",
+              "override_algo": "None",
+              "rank": "2",
+              "tms_cudagraph": "False",
+              "world_size": "4"
+            },
+            "python_id": 123772985872544,
+            "should_custom_ar": {
+              "value": true
+            }
+          },
+          "pymscclpp": {
+            "should_mscclpp_allreduce": {
+              "value": false
+            }
+          },
+          "pynccl": {
+            "class": "sglang.srt.distributed.device_communicators.pynccl.PyNcclCommunicator",
+            "fields": {
+              "disabled": "False",
+              "rank": "2",
+              "world_size": "4"
+            },
+            "python_id": 123772986867344,
+            "symmetric_pool_enabled": {
+              "value": false
+            }
+          },
+          "quick": {
+            "should_quick_allreduce": {
+              "value": false
+            }
+          },
+          "torch_symmetric_memory": {
+            "should_torch_symm_mem_allreduce": {
+              "value": false
+            }
+          }
+        },
+        "dtype": "torch.bfloat16",
+        "execution_mode": "cuda_graph",
+        "group_name": "tp:0",
+        "group_ranks": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "local_size": 0,
+        "message_bytes": 196608,
+        "phase": "reference_capture",
+        "predicted_reference_algorithm": "ONE_SHOT_PUSH",
+        "predicted_reference_backend": "custom_all_reduce_outplace",
+        "rank": 2,
+        "shape": [
+          16,
+          6144
+        ],
+        "stream": {
+          "cuda_stream": 110629615353328,
+          "requested": "nondefault"
+        },
+        "stride": [
+          6144,
+          1
+        ],
+        "world_size": 4
+      },
+      {
+        "communicators": {
+          "custom": {
+            "algorithm": "ONE_SHOT_PUSH",
+            "class": "sglang.srt.distributed.device_communicators.custom_all_reduce_v2.CustomAllReduceV2",
+            "fields": {
+              "config": "ModeConfig(one_shot_push_threshold=2097152, one_shot_pull_threshold=2097152)",
+              "disabled": "False",
+              "max_size": "16777216",
+              "override_algo": "None",
+              "rank": "3",
+              "tms_cudagraph": "False",
+              "world_size": "4"
+            },
+            "python_id": 132739323677248,
+            "should_custom_ar": {
+              "value": true
+            }
+          },
+          "pymscclpp": {
+            "should_mscclpp_allreduce": {
+              "value": false
+            }
+          },
+          "pynccl": {
+            "class": "sglang.srt.distributed.device_communicators.pynccl.PyNcclCommunicator",
+            "fields": {
+              "disabled": "False",
+              "rank": "3",
+              "world_size": "4"
+            },
+            "python_id": 132739322980752,
+            "symmetric_pool_enabled": {
+              "value": false
+            }
+          },
+          "quick": {
+            "should_quick_allreduce": {
+              "value": false
+            }
+          },
+          "torch_symmetric_memory": {
+            "should_torch_symm_mem_allreduce": {
+              "value": false
+            }
+          }
+        },
+        "dtype": "torch.bfloat16",
+        "execution_mode": "cuda_graph",
+        "group_name": "tp:0",
+        "group_ranks": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "local_size": 0,
+        "message_bytes": 196608,
+        "phase": "reference_capture",
+        "predicted_reference_algorithm": "ONE_SHOT_PUSH",
+        "predicted_reference_backend": "custom_all_reduce_outplace",
+        "rank": 3,
+        "shape": [
+          16,
+          6144
+        ],
+        "stream": {
+          "cuda_stream": 100879288830256,
+          "requested": "nondefault"
+        },
+        "stride": [
+          6144,
+          1
+        ],
+        "world_size": 4
+      }
+    ]
+  },
+  "candidate": null,
+  "correctness": {
+    "alternating_input_variants": 2,
+    "candidate_state_guarded": false,
+    "exact_full_checks": "before and after timing",
+    "exact_full_tensor_consumer": "every warmup and measured sample",
+    "exact_position_probe": "every warmup and measured sample",
+    "passed": true,
+    "validation_errors_aggregated_over_tp_cpu_group": true
+  },
+  "disposition": "tp4_reference_characterization_only",
+  "environment": {
+    "device": {
+      "capability": [
+        10,
+        0
+      ],
+      "name": "NVIDIA B200",
+      "rank": 0,
+      "total_memory": 191490555904
+    },
+    "device_by_rank": [
+      {
+        "capability": [
+          10,
+          0
+        ],
+        "name": "NVIDIA B200",
+        "rank": 0,
+        "total_memory": 191490555904
+      },
+      {
+        "capability": [
+          10,
+          0
+        ],
+        "name": "NVIDIA B200",
+        "rank": 1,
+        "total_memory": 191490555904
+      },
+      {
+        "capability": [
+          10,
+          0
+        ],
+        "name": "NVIDIA B200",
+        "rank": 2,
+        "total_memory": 191490555904
+      },
+      {
+        "capability": [
+          10,
+          0
+        ],
+        "name": "NVIDIA B200",
+        "rank": 3,
+        "total_memory": 191490555904
+      }
+    ],
+    "env": {
+      "CUDA_VISIBLE_DEVICES": "0,1,2,3",
+      "NCCL_ALGO": null,
+      "NCCL_PROTO": null,
+      "SGLANG_ALL_REDUCE_TRACE": null,
+      "SGLANG_GLM52_OPT": "0",
+      "SGLANG_OPT_USE_CUSTOM_ALL_REDUCE_V2": null,
+      "SGLANG_ROOT": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/sglang"
+    },
+    "kernel_harness_git": {
+      "branch": "goal/glm52-prod-24-tp_allreduce_reachability",
+      "dirty": false,
+      "root": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness",
+      "sha": "46ba02607b54f62cdef5a43c99e558b12b545aa6",
+      "status": []
+    },
+    "packages": {
+      "flashinfer": {
+        "path": "/mnt/OS-oKqEXySb/home/qinhaiyan/miniconda3/envs/sglang/lib/python3.12/site-packages/flashinfer/__init__.py",
+        "version": "0.6.12"
+      },
+      "sgl_kernel": {
+        "path": "/mnt/OS-oKqEXySb/home/qinhaiyan/miniconda3/envs/sglang/lib/python3.12/site-packages/sgl_kernel/__init__.py",
+        "version": "0.4.4"
+      },
+      "sglang": {
+        "path": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/sglang/python/sglang/__init__.py",
+        "version": "0.5.15"
+      },
+      "torch": {
+        "cuda": "13.0",
+        "nccl": [
+          2,
+          28,
+          9
+        ],
+        "path": "/mnt/OS-oKqEXySb/home/qinhaiyan/miniconda3/envs/sglang/lib/python3.12/site-packages/torch/__init__.py",
+        "version": "2.11.0+cu130"
+      },
+      "triton": {
+        "path": "/mnt/OS-oKqEXySb/home/qinhaiyan/miniconda3/envs/sglang/lib/python3.12/site-packages/triton/__init__.py",
+        "version": "3.6.0"
+      }
+    },
+    "python": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/.venv/bin/python",
+    "python_version": "3.12.13 | packaged by Anaconda, Inc. | (main, Jul  9 2026, 14:38:16) [GCC 14.3.0]",
+    "sglang_git": {
+      "branch": "goal/glm52-prod-24-tp_allreduce_reachability",
+      "dirty": false,
+      "root": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/sglang",
+      "sha": "49c03b20e861782002eec6f5be7126e7e19c2d28",
+      "status": []
+    }
+  },
+  "execution": {
+    "cuda_stream": 98761020174496,
+    "default_to_execution_waits_outside_timing": 5,
+    "mode": "cuda_graph",
+    "nvtx_measurement_range": "serving_native/tp4_allreduce_decode_m16/cuda_graph/nondefault/reference",
+    "nvtx_rank_synchronization": "rank 0 push after a TP CPU-group barrier; all ranks wait at a second barrier before measurement and before rank 0 pop",
+    "stream": "nondefault"
+  },
+  "gate": {
+    "candidate_present": false,
+    "metric": "paired ready-region rank-max p50 speedup",
+    "minimum_speedup": 1.03,
+    "passed": null,
+    "performance_eligible": true,
+    "stock_fallback_active": true
+  },
+  "production_acceptance": "This direct TP4 callable is not proof of the GLM serving caller/ABI and cannot be relabeled as TP8 evidence.",
+  "raw_samples": {
+    "candidate": null,
+    "measured_order": [
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ]
+    ],
+    "rank_order": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "reference": [
+      {
+        "collective_only": {
+          "local_ms": 0.04185599833726883,
+          "rank_max_ms": 0.07020799815654755,
+          "rank_ms": [
+            0.04185599833726883,
+            0.05260799825191498,
+            0.04275200143456459,
+            0.07020799815654755
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.18915200233459473,
+          "rank_max_ms": 0.19631999731063843,
+          "rank_ms": [
+            0.18915200233459473,
+            0.19631999731063843,
+            0.19353599846363068,
+            0.15852800011634827
+          ]
+        },
+        "sample_index": 0,
+        "scheduled_start_arrival_ns_by_rank": [
+          740747744460021,
+          740747744089197,
+          740747744402348,
+          740747743841163
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740747749460021,
+          740747749460021,
+          740747749460021,
+          740747749460021
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740747749461077,
+            740747749511823
+          ],
+          [
+            740747749461113,
+            740747749501939
+          ],
+          [
+            740747749460928,
+            740747749512798
+          ],
+          [
+            740747749460647,
+            740747749484991
+          ]
+        ],
+        "start_record_envelope_span_ns": 52151,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.041280001401901245,
+          "rank_max_ms": 0.066880002617836,
+          "rank_ms": [
+            0.041280001401901245,
+            0.05040000006556511,
+            0.04134399816393852,
+            0.066880002617836
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.18432000279426575,
+          "rank_max_ms": 0.1895039975643158,
+          "rank_ms": [
+            0.18432000279426575,
+            0.17983999848365784,
+            0.1895039975643158,
+            0.14739200472831726
+          ]
+        },
+        "sample_index": 1,
+        "scheduled_start_arrival_ns_by_rank": [
+          740747755388030,
+          740747754288209,
+          740747754516673,
+          740747754518561
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740747760388030,
+          740747760388030,
+          740747760388030,
+          740747760388030
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740747760389346,
+            740747760437736
+          ],
+          [
+            740747760389113,
+            740747760429229
+          ],
+          [
+            740747760389243,
+            740747760438769
+          ],
+          [
+            740747760388617,
+            740747760410895
+          ]
+        ],
+        "start_record_envelope_span_ns": 50152,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.03929600119590759,
+          "rank_max_ms": 0.059487998485565186,
+          "rank_ms": [
+            0.03929600119590759,
+            0.055615998804569244,
+            0.047839999198913574,
+            0.059487998485565186
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.1923840045928955,
+          "rank_max_ms": 0.1923840045928955,
+          "rank_ms": [
+            0.1923840045928955,
+            0.18115200102329254,
+            0.15990400314331055,
+            0.16035200655460358
+          ]
+        },
+        "sample_index": 2,
+        "scheduled_start_arrival_ns_by_rank": [
+          740747766043519,
+          740747765929787,
+          740747765967533,
+          740747765585568
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740747771043519,
+          740747771043519,
+          740747771043519,
+          740747771043519
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740747771044510,
+            740747771090220
+          ],
+          [
+            740747771044313,
+            740747771076072
+          ],
+          [
+            740747771044063,
+            740747771084398
+          ],
+          [
+            740747771044077,
+            740747771068986
+          ]
+        ],
+        "start_record_envelope_span_ns": 46157,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.040192000567913055,
+          "rank_max_ms": 0.06284800171852112,
+          "rank_ms": [
+            0.040192000567913055,
+            0.05212799832224846,
+            0.04483199864625931,
+            0.06284800171852112
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.19571200013160706,
+          "rank_max_ms": 0.19571200013160706,
+          "rank_ms": [
+            0.19571200013160706,
+            0.1865600049495697,
+            0.18483200669288635,
+            0.16575999557971954
+          ]
+        },
+        "sample_index": 3,
+        "scheduled_start_arrival_ns_by_rank": [
+          740747778104658,
+          740747777465766,
+          740747777617199,
+          740747777311625
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740747783104658,
+          740747783104658,
+          740747783104658,
+          740747783104658
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740747783105716,
+            740747783150159
+          ],
+          [
+            740747783105571,
+            740747783140737
+          ],
+          [
+            740747783105549,
+            740747783149265
+          ],
+          [
+            740747783105160,
+            740747783129539
+          ]
+        ],
+        "start_record_envelope_span_ns": 44999,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.03948799893260002,
+          "rank_max_ms": 0.05782400071620941,
+          "rank_ms": [
+            0.03948799893260002,
+            0.048895999789237976,
+            0.03859199956059456,
+            0.05782400071620941
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.18083199858665466,
+          "rank_max_ms": 0.18083199858665466,
+          "rank_ms": [
+            0.18083199858665466,
+            0.1650560051202774,
+            0.17929600179195404,
+            0.15136000514030457
+          ]
+        },
+        "sample_index": 4,
+        "scheduled_start_arrival_ns_by_rank": [
+          740747787683756,
+          740747787472347,
+          740747787149879,
+          740747787242957
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740747792683756,
+          740747792683756,
+          740747792683756,
+          740747792683756
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740747792684825,
+            740747792729354
+          ],
+          [
+            740747792684932,
+            740747792719461
+          ],
+          [
+            740747792684980,
+            740747792731037
+          ],
+          [
+            740747792684400,
+            740747792709680
+          ]
+        ],
+        "start_record_envelope_span_ns": 46637,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.035071998834609985,
+          "rank_max_ms": 0.05478399991989136,
+          "rank_ms": [
+            0.035071998834609985,
+            0.03718400001525879,
+            0.033504001796245575,
+            0.05478399991989136
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.1536320000886917,
+          "rank_max_ms": 0.16435199975967407,
+          "rank_ms": [
+            0.1536320000886917,
+            0.16435199975967407,
+            0.15030400454998016,
+            0.1281599998474121
+          ]
+        },
+        "sample_index": 5,
+        "scheduled_start_arrival_ns_by_rank": [
+          740747797613688,
+          740747797425468,
+          740747797040494,
+          740747797443710
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740747802613688,
+          740747802613688,
+          740747802613688,
+          740747802613688
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740747802614781,
+            740747802652613
+          ],
+          [
+            740747802615027,
+            740747802651114
+          ],
+          [
+            740747802614658,
+            740747802654112
+          ],
+          [
+            740747802614254,
+            740747802632684
+          ]
+        ],
+        "start_record_envelope_span_ns": 39858,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.03750399872660637,
+          "rank_max_ms": 0.05020799860358238,
+          "rank_ms": [
+            0.03750399872660637,
+            0.044256001710891724,
+            0.03977600112557411,
+            0.05020799860358238
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.1709119975566864,
+          "rank_max_ms": 0.17392000555992126,
+          "rank_ms": [
+            0.1709119975566864,
+            0.17392000555992126,
+            0.16704000532627106,
+            0.16406400501728058
+          ]
+        },
+        "sample_index": 6,
+        "scheduled_start_arrival_ns_by_rank": [
+          740747807276845,
+          740747806923720,
+          740747807059776,
+          740747806783069
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740747812276845,
+          740747812276845,
+          740747812276845,
+          740747812276845
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740747812278038,
+            740747812321888
+          ],
+          [
+            740747812278313,
+            740747812316839
+          ],
+          [
+            740747812278047,
+            740747812320692
+          ],
+          [
+            740747812277594,
+            740747812305800
+          ]
+        ],
+        "start_record_envelope_span_ns": 44294,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.03625600039958954,
+          "rank_max_ms": 0.04841599985957146,
+          "rank_ms": [
+            0.03625600039958954,
+            0.04287999868392944,
+            0.0331839993596077,
+            0.04841599985957146
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.14870400726795197,
+          "rank_max_ms": 0.14870400726795197,
+          "rank_ms": [
+            0.14870400726795197,
+            0.13785600662231445,
+            0.14684799313545227,
+            0.12947200238704681
+          ]
+        },
+        "sample_index": 7,
+        "scheduled_start_arrival_ns_by_rank": [
+          740747816304379,
+          740747815917639,
+          740747816239206,
+          740747815760463
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740747821304379,
+          740747821304379,
+          740747821304379,
+          740747821304379
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740747821305353,
+            740747821338209
+          ],
+          [
+            740747821305226,
+            740747821332032
+          ],
+          [
+            740747821305395,
+            740747821340778
+          ],
+          [
+            740747821304972,
+            740747821323971
+          ]
+        ],
+        "start_record_envelope_span_ns": 35806,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.04851200059056282,
+          "rank_max_ms": 0.07039999961853027,
+          "rank_ms": [
+            0.04851200059056282,
+            0.05961599946022034,
+            0.041471999138593674,
+            0.07039999961853027
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.16729600727558136,
+          "rank_max_ms": 0.1736000031232834,
+          "rank_ms": [
+            0.16729600727558136,
+            0.15225599706172943,
+            0.1736000031232834,
+            0.1289920061826706
+          ]
+        },
+        "sample_index": 8,
+        "scheduled_start_arrival_ns_by_rank": [
+          740747825024364,
+          740747824917500,
+          740747824956724,
+          740747825272133
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740747830272133,
+          740747830272133,
+          740747830272133,
+          740747830272133
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740747830273337,
+            740747830315246
+          ],
+          [
+            740747830272753,
+            740747830303514
+          ],
+          [
+            740747830273824,
+            740747830321681
+          ],
+          [
+            740747830272664,
+            740747830292354
+          ]
+        ],
+        "start_record_envelope_span_ns": 49017,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.03670400008559227,
+          "rank_max_ms": 0.05769599974155426,
+          "rank_ms": [
+            0.03670400008559227,
+            0.0427200011909008,
+            0.035392001271247864,
+            0.05769599974155426
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.15647999942302704,
+          "rank_max_ms": 0.15647999942302704,
+          "rank_ms": [
+            0.15647999942302704,
+            0.15491199493408203,
+            0.1520639955997467,
+            0.12707200646400452
+          ]
+        },
+        "sample_index": 9,
+        "scheduled_start_arrival_ns_by_rank": [
+          740747835375219,
+          740747834459225,
+          740747834792430,
+          740747834563877
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740747840375219,
+          740747840375219,
+          740747840375219,
+          740747840375219
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740747840376488,
+            740747840414158
+          ],
+          [
+            740747840376488,
+            740747840409468
+          ],
+          [
+            740747840376040,
+            740747840416334
+          ],
+          [
+            740747840375718,
+            740747840394426
+          ]
+        ],
+        "start_record_envelope_span_ns": 40616,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.039103999733924866,
+          "rank_max_ms": 0.05718399956822395,
+          "rank_ms": [
+            0.039103999733924866,
+            0.04960000142455101,
+            0.03683200106024742,
+            0.05718399956822395
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.18726399540901184,
+          "rank_max_ms": 0.18726399540901184,
+          "rank_ms": [
+            0.18726399540901184,
+            0.13964800536632538,
+            0.16019199788570404,
+            0.12998400628566742
+          ]
+        },
+        "sample_index": 10,
+        "scheduled_start_arrival_ns_by_rank": [
+          740747845400512,
+          740747845433948,
+          740747845461999,
+          740747844784889
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740747850461999,
+          740747850461999,
+          740747850461999,
+          740747850461999
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740747850463434,
+            740747850500880
+          ],
+          [
+            740747850462619,
+            740747850489351
+          ],
+          [
+            740747850462692,
+            740747850502549
+          ],
+          [
+            740747850462525,
+            740747850482708
+          ]
+        ],
+        "start_record_envelope_span_ns": 40024,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.0379519984126091,
+          "rank_max_ms": 0.059967998415231705,
+          "rank_ms": [
+            0.0379519984126091,
+            0.04739199951291084,
+            0.03436800092458725,
+            0.059967998415231705
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.17686399817466736,
+          "rank_max_ms": 0.17686399817466736,
+          "rank_ms": [
+            0.17686399817466736,
+            0.15171200037002563,
+            0.16752000153064728,
+            0.1459520012140274
+          ]
+        },
+        "sample_index": 11,
+        "scheduled_start_arrival_ns_by_rank": [
+          740747854691883,
+          740747854575293,
+          740747854679397,
+          740747854473279
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740747859691883,
+          740747859691883,
+          740747859691883,
+          740747859691883
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740747859693032,
+            740747859731751
+          ],
+          [
+            740747859692847,
+            740747859724917
+          ],
+          [
+            740747859693073,
+            740747859735573
+          ],
+          [
+            740747859692445,
+            740747859711864
+          ]
+        ],
+        "start_record_envelope_span_ns": 43128,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.049695998430252075,
+          "rank_max_ms": 0.06191999837756157,
+          "rank_ms": [
+            0.049695998430252075,
+            0.04966399818658829,
+            0.036607999354600906,
+            0.06191999837756157
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.14908799529075623,
+          "rank_max_ms": 0.1788800060749054,
+          "rank_ms": [
+            0.14908799529075623,
+            0.1621440052986145,
+            0.1788800060749054,
+            0.12240000069141388
+          ]
+        },
+        "sample_index": 12,
+        "scheduled_start_arrival_ns_by_rank": [
+          740747864169834,
+          740747864452016,
+          740747864621732,
+          740747864445054
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740747869621732,
+          740747869621732,
+          740747869621732,
+          740747869621732
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740747869622556,
+            740747869652965
+          ],
+          [
+            740747869622555,
+            740747869653623
+          ],
+          [
+            740747869622885,
+            740747869666482
+          ],
+          [
+            740747869622314,
+            740747869640632
+          ]
+        ],
+        "start_record_envelope_span_ns": 44168,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.04476799815893173,
+          "rank_max_ms": 0.06675200164318085,
+          "rank_ms": [
+            0.04476799815893173,
+            0.049375999718904495,
+            0.04134399816393852,
+            0.06675200164318085
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.17603200674057007,
+          "rank_max_ms": 0.1793919950723648,
+          "rank_ms": [
+            0.17603200674057007,
+            0.1793919950723648,
+            0.1714559942483902,
+            0.14000000059604645
+          ]
+        },
+        "sample_index": 13,
+        "scheduled_start_arrival_ns_by_rank": [
+          740747874083448,
+          740747874256367,
+          740747874133351,
+          740747873798596
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740747879256367,
+          740747879256367,
+          740747879256367,
+          740747879256367
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740747879258428,
+            740747879298050
+          ],
+          [
+            740747879257477,
+            740747879294633
+          ],
+          [
+            740747879257282,
+            740747879303958
+          ],
+          [
+            740747879257045,
+            740747879277643
+          ]
+        ],
+        "start_record_envelope_span_ns": 46913,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.034272000193595886,
+          "rank_max_ms": 0.05955199897289276,
+          "rank_ms": [
+            0.034272000193595886,
+            0.04297599941492081,
+            0.04095999896526337,
+            0.05955199897289276
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.18665599822998047,
+          "rank_max_ms": 0.18665599822998047,
+          "rank_ms": [
+            0.18665599822998047,
+            0.17151999473571777,
+            0.1613440066576004,
+            0.12566399574279785
+          ]
+        },
+        "sample_index": 14,
+        "scheduled_start_arrival_ns_by_rank": [
+          740747883266244,
+          740747883258428,
+          740747883246816,
+          740747882796397
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740747888266244,
+          740747888266244,
+          740747888266244,
+          740747888266244
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740747888267975,
+            740747888307844
+          ],
+          [
+            740747888267543,
+            740747888301724
+          ],
+          [
+            740747888267266,
+            740747888305062
+          ],
+          [
+            740747888266828,
+            740747888285123
+          ]
+        ],
+        "start_record_envelope_span_ns": 41016,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.04604800045490265,
+          "rank_max_ms": 0.053247999399900436,
+          "rank_ms": [
+            0.04604800045490265,
+            0.04710400104522705,
+            0.036639999598264694,
+            0.053247999399900436
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.1722240000963211,
+          "rank_max_ms": 0.18611200153827667,
+          "rank_ms": [
+            0.1722240000963211,
+            0.17817600071430206,
+            0.18611200153827667,
+            0.18563200533390045
+          ]
+        },
+        "sample_index": 15,
+        "scheduled_start_arrival_ns_by_rank": [
+          740747892014204,
+          740747892052372,
+          740747891934082,
+          740747891934379
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740747897052372,
+          740747897052372,
+          740747897052372,
+          740747897052372
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740747897053006,
+            740747897086078
+          ],
+          [
+            740747897053642,
+            740747897085820
+          ],
+          [
+            740747897053902,
+            740747897096076
+          ],
+          [
+            740747897052988,
+            740747897079198
+          ]
+        ],
+        "start_record_envelope_span_ns": 43088,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.040832001715898514,
+          "rank_max_ms": 0.046592000871896744,
+          "rank_ms": [
+            0.040832001715898514,
+            0.04044799879193306,
+            0.03136000037193298,
+            0.046592000871896744
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.13555200397968292,
+          "rank_max_ms": 0.14137600362300873,
+          "rank_ms": [
+            0.13555200397968292,
+            0.13836799561977386,
+            0.14137600362300873,
+            0.13225600123405457
+          ]
+        },
+        "sample_index": 16,
+        "scheduled_start_arrival_ns_by_rank": [
+          740747901186151,
+          740747901397886,
+          740747901430739,
+          740747901116245
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740747906430739,
+          740747906430739,
+          740747906430739,
+          740747906430739
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740747906431583,
+            740747906457579
+          ],
+          [
+            740747906431761,
+            740747906459620
+          ],
+          [
+            740747906431723,
+            740747906467448
+          ],
+          [
+            740747906431272,
+            740747906453121
+          ]
+        ],
+        "start_record_envelope_span_ns": 36176,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.03388800099492073,
+          "rank_max_ms": 0.04294399917125702,
+          "rank_ms": [
+            0.03388800099492073,
+            0.03311999887228012,
+            0.04028800129890442,
+            0.04294399917125702
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.15276800096035004,
+          "rank_max_ms": 0.1650879979133606,
+          "rank_ms": [
+            0.15276800096035004,
+            0.1650879979133606,
+            0.12217599898576736,
+            0.12300799787044525
+          ]
+        },
+        "sample_index": 17,
+        "scheduled_start_arrival_ns_by_rank": [
+          740747910369531,
+          740747910317648,
+          740747910347880,
+          740747910254231
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740747915369531,
+          740747915369531,
+          740747915369531,
+          740747915369531
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740747915370823,
+            740747915402102
+          ],
+          [
+            740747915370711,
+            740747915402182
+          ],
+          [
+            740747915370034,
+            740747915395892
+          ],
+          [
+            740747915370143,
+            740747915391825
+          ]
+        ],
+        "start_record_envelope_span_ns": 32148,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.0498879998922348,
+          "rank_max_ms": 0.06015999987721443,
+          "rank_ms": [
+            0.0498879998922348,
+            0.04713600128889084,
+            0.05084799975156784,
+            0.06015999987721443
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.14732800424098969,
+          "rank_max_ms": 0.19075199961662292,
+          "rank_ms": [
+            0.14732800424098969,
+            0.19075199961662292,
+            0.13635200262069702,
+            0.13126400113105774
+          ]
+        },
+        "sample_index": 18,
+        "scheduled_start_arrival_ns_by_rank": [
+          740747918952496,
+          740747918906258,
+          740747918844265,
+          740747918794533
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740747923952496,
+          740747923952496,
+          740747923952496,
+          740747923952496
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740747923953532,
+            740747923983005
+          ],
+          [
+            740747923954781,
+            740747923985590
+          ],
+          [
+            740747923953064,
+            740747923983088
+          ],
+          [
+            740747923953058,
+            740747923974142
+          ]
+        ],
+        "start_record_envelope_span_ns": 32532,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.04848000034689903,
+          "rank_max_ms": 0.05539200082421303,
+          "rank_ms": [
+            0.04848000034689903,
+            0.0517439991235733,
+            0.0382080003619194,
+            0.05539200082421303
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.16476799547672272,
+          "rank_max_ms": 0.1648000031709671,
+          "rank_ms": [
+            0.16476799547672272,
+            0.13952000439167023,
+            0.1648000031709671,
+            0.13382400572299957
+          ]
+        },
+        "sample_index": 19,
+        "scheduled_start_arrival_ns_by_rank": [
+          740747927785788,
+          740747928581556,
+          740747927818149,
+          740747927672753
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740747933581556,
+          740747933581556,
+          740747933581556,
+          740747933581556
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740747933582453,
+            740747933612552
+          ],
+          [
+            740747933582515,
+            740747933610498
+          ],
+          [
+            740747933582445,
+            740747933623104
+          ],
+          [
+            740747933582221,
+            740747933605527
+          ]
+        ],
+        "start_record_envelope_span_ns": 40883,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.046560000628232956,
+          "rank_max_ms": 0.05859199911355972,
+          "rank_ms": [
+            0.046560000628232956,
+            0.04307200014591217,
+            0.04320000112056732,
+            0.05859199911355972
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.17766399681568146,
+          "rank_max_ms": 0.20454399287700653,
+          "rank_ms": [
+            0.17766399681568146,
+            0.20454399287700653,
+            0.18249599635601044,
+            0.15535999834537506
+          ]
+        },
+        "sample_index": 20,
+        "scheduled_start_arrival_ns_by_rank": [
+          740747936715498,
+          740747937379412,
+          740747936720946,
+          740747936671997
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740747942379412,
+          740747942379412,
+          740747942379412,
+          740747942379412
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740747942380465,
+            740747942420771
+          ],
+          [
+            740747942382193,
+            740747942425288
+          ],
+          [
+            740747942380233,
+            740747942426183
+          ],
+          [
+            740747942380025,
+            740747942407723
+          ]
+        ],
+        "start_record_envelope_span_ns": 46158,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.0352960005402565,
+          "rank_max_ms": 0.04822399839758873,
+          "rank_ms": [
+            0.0352960005402565,
+            0.03907199949026108,
+            0.04092799872159958,
+            0.04822399839758873
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.17343999445438385,
+          "rank_max_ms": 0.17343999445438385,
+          "rank_ms": [
+            0.17343999445438385,
+            0.1727679967880249,
+            0.15593600273132324,
+            0.14300799369812012
+          ]
+        },
+        "sample_index": 21,
+        "scheduled_start_arrival_ns_by_rank": [
+          740747947358076,
+          740747947117013,
+          740747946928930,
+          740747946920894
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740747952358076,
+          740747952358076,
+          740747952358076,
+          740747952358076
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740747952359131,
+            740747952395853
+          ],
+          [
+            740747952359310,
+            740747952394722
+          ],
+          [
+            740747952358842,
+            740747952392693
+          ],
+          [
+            740747952358822,
+            740747952385322
+          ]
+        ],
+        "start_record_envelope_span_ns": 37031,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.03843199834227562,
+          "rank_max_ms": 0.04649600014090538,
+          "rank_ms": [
+            0.03843199834227562,
+            0.03593600168824196,
+            0.04483199864625931,
+            0.04649600014090538
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.1509760022163391,
+          "rank_max_ms": 0.16908800601959229,
+          "rank_ms": [
+            0.1509760022163391,
+            0.16908800601959229,
+            0.13254399597644806,
+            0.14579200744628906
+          ]
+        },
+        "sample_index": 22,
+        "scheduled_start_arrival_ns_by_rank": [
+          740747955831652,
+          740747955410415,
+          740747955773982,
+          740747956310925
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740747961310925,
+          740747961310925,
+          740747961310925,
+          740747961310925
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740747961311832,
+            740747961343612
+          ],
+          [
+            740747961313607,
+            740747961347847
+          ],
+          [
+            740747961311557,
+            740747961338957
+          ],
+          [
+            740747961311583,
+            740747961337733
+          ]
+        ],
+        "start_record_envelope_span_ns": 36290,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.046560000628232956,
+          "rank_max_ms": 0.05596800148487091,
+          "rank_ms": [
+            0.046560000628232956,
+            0.039455998688936234,
+            0.0488319993019104,
+            0.05596800148487091
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.15673600137233734,
+          "rank_max_ms": 0.18892799317836761,
+          "rank_ms": [
+            0.15673600137233734,
+            0.18892799317836761,
+            0.1576319932937622,
+            0.13734400272369385
+          ]
+        },
+        "sample_index": 23,
+        "scheduled_start_arrival_ns_by_rank": [
+          740747963722748,
+          740747963702740,
+          740747964334719,
+          740747963680727
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740747969334719,
+          740747969334719,
+          740747969334719,
+          740747969334719
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740747969335401,
+            740747969367513
+          ],
+          [
+            740747969337009,
+            740747969376113
+          ],
+          [
+            740747969335528,
+            740747969367128
+          ],
+          [
+            740747969335375,
+            740747969360334
+          ]
+        ],
+        "start_record_envelope_span_ns": 40738,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.0350399985909462,
+          "rank_max_ms": 0.051231998950242996,
+          "rank_ms": [
+            0.0350399985909462,
+            0.04016000032424927,
+            0.04255999997258186,
+            0.051231998950242996
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.18246400356292725,
+          "rank_max_ms": 0.18246400356292725,
+          "rank_ms": [
+            0.18246400356292725,
+            0.16857600212097168,
+            0.15379199385643005,
+            0.13811199367046356
+          ]
+        },
+        "sample_index": 24,
+        "scheduled_start_arrival_ns_by_rank": [
+          740747973351670,
+          740747973375595,
+          740747973438955,
+          740747973400747
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740747978438955,
+          740747978438955,
+          740747978438955,
+          740747978438955
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740747978440293,
+            740747978479606
+          ],
+          [
+            740747978440359,
+            740747978476713
+          ],
+          [
+            740747978439537,
+            740747978474580
+          ],
+          [
+            740747978439588,
+            740747978464711
+          ]
+        ],
+        "start_record_envelope_span_ns": 40069,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.03363199904561043,
+          "rank_max_ms": 0.04896000027656555,
+          "rank_ms": [
+            0.03363199904561043,
+            0.04556800052523613,
+            0.03999999910593033,
+            0.04896000027656555
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.17123199999332428,
+          "rank_max_ms": 0.17123199999332428,
+          "rank_ms": [
+            0.17123199999332428,
+            0.14627200365066528,
+            0.1393599957227707,
+            0.13494400680065155
+          ]
+        },
+        "sample_index": 25,
+        "scheduled_start_arrival_ns_by_rank": [
+          740747981599664,
+          740747981710915,
+          740747981673849,
+          740747981908019
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740747986908019,
+          740747986908019,
+          740747986908019,
+          740747986908019
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740747986909327,
+            740747986944024
+          ],
+          [
+            740747986908842,
+            740747986934051
+          ],
+          [
+            740747986908895,
+            740747986938967
+          ],
+          [
+            740747986908521,
+            740747986929244
+          ]
+        ],
+        "start_record_envelope_span_ns": 35503,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.041152000427246094,
+          "rank_max_ms": 0.05270399898290634,
+          "rank_ms": [
+            0.041152000427246094,
+            0.050783999264240265,
+            0.040031999349594116,
+            0.05270399898290634
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.16150400042533875,
+          "rank_max_ms": 0.2054399996995926,
+          "rank_ms": [
+            0.16150400042533875,
+            0.2054399996995926,
+            0.15196800231933594,
+            0.1507200002670288
+          ]
+        },
+        "sample_index": 26,
+        "scheduled_start_arrival_ns_by_rank": [
+          740747990186347,
+          740747991135818,
+          740747990709314,
+          740747990560675
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740747996135818,
+          740747996135818,
+          740747996135818,
+          740747996135818
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740747996136366,
+            740747996167934
+          ],
+          [
+            740747996137705,
+            740747996174019
+          ],
+          [
+            740747996136549,
+            740747996171652
+          ],
+          [
+            740747996136408,
+            740747996159189
+          ]
+        ],
+        "start_record_envelope_span_ns": 37653,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.05315199866890907,
+          "rank_max_ms": 0.0549440011382103,
+          "rank_ms": [
+            0.05315199866890907,
+            0.039455998688936234,
+            0.04150399938225746,
+            0.0549440011382103
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.1496960073709488,
+          "rank_max_ms": 0.20476800203323364,
+          "rank_ms": [
+            0.1496960073709488,
+            0.20476800203323364,
+            0.16435199975967407,
+            0.1372479945421219
+          ]
+        },
+        "sample_index": 27,
+        "scheduled_start_arrival_ns_by_rank": [
+          740747999348689,
+          740747999605994,
+          740747999640909,
+          740747999322941
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748004640909,
+          740748004640909,
+          740748004640909,
+          740748004640909
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748004641678,
+            740748004671655
+          ],
+          [
+            740748004643508,
+            740748004685860
+          ],
+          [
+            740748004641775,
+            740748004684493
+          ],
+          [
+            740748004641603,
+            740748004668536
+          ]
+        ],
+        "start_record_envelope_span_ns": 44257,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.03497600182890892,
+          "rank_max_ms": 0.045632001012563705,
+          "rank_ms": [
+            0.03497600182890892,
+            0.03916800022125244,
+            0.035711999982595444,
+            0.045632001012563705
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.1653759926557541,
+          "rank_max_ms": 0.1653759926557541,
+          "rank_ms": [
+            0.1653759926557541,
+            0.14297600090503693,
+            0.16016000509262085,
+            0.13990400731563568
+          ]
+        },
+        "sample_index": 28,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748009187486,
+          740748009253680,
+          740748009198315,
+          740748008789193
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748014253680,
+          740748014253680,
+          740748014253680,
+          740748014253680
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748014254905,
+            740748014290301
+          ],
+          [
+            740748014254550,
+            740748014285552
+          ],
+          [
+            740748014254632,
+            740748014289611
+          ],
+          [
+            740748014254292,
+            740748014279683
+          ]
+        ],
+        "start_record_envelope_span_ns": 36009,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.04902400076389313,
+          "rank_max_ms": 0.05183999985456467,
+          "rank_ms": [
+            0.04902400076389313,
+            0.03811199963092804,
+            0.05011200159788132,
+            0.05183999985456467
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.16220800578594208,
+          "rank_max_ms": 0.19740800559520721,
+          "rank_ms": [
+            0.16220800578594208,
+            0.19740800559520721,
+            0.18243199586868286,
+            0.1780800074338913
+          ]
+        },
+        "sample_index": 29,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748017603685,
+          740748017425659,
+          740748017397425,
+          740748017378646
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748022603685,
+          740748022603685,
+          740748022603685,
+          740748022603685
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748022604293,
+            740748022638455
+          ],
+          [
+            740748022606249,
+            740748022648464
+          ],
+          [
+            740748022604200,
+            740748022639406
+          ],
+          [
+            740748022604341,
+            740748022635664
+          ]
+        ],
+        "start_record_envelope_span_ns": 44264,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.054207999259233475,
+          "rank_max_ms": 0.06191999837756157,
+          "rank_ms": [
+            0.054207999259233475,
+            0.04726399853825569,
+            0.04054399952292442,
+            0.06191999837756157
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.16550399363040924,
+          "rank_max_ms": 0.19491200149059296,
+          "rank_ms": [
+            0.16550399363040924,
+            0.19491200149059296,
+            0.18624000251293182,
+            0.1650560051202774
+          ]
+        },
+        "sample_index": 30,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748027100550,
+          740748027365122,
+          740748027374607,
+          740748027171856
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748032374607,
+          740748032374607,
+          740748032374607,
+          740748032374607
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748032375210,
+            740748032410178
+          ],
+          [
+            740748032376658,
+            740748032418479
+          ],
+          [
+            740748032375847,
+            740748032424905
+          ],
+          [
+            740748032375248,
+            740748032402964
+          ]
+        ],
+        "start_record_envelope_span_ns": 49695,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.052000001072883606,
+          "rank_max_ms": 0.06748799979686737,
+          "rank_ms": [
+            0.052000001072883606,
+            0.05222399905323982,
+            0.0435199998319149,
+            0.06748799979686737
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.21503999829292297,
+          "rank_max_ms": 0.23887999355793,
+          "rank_ms": [
+            0.21503999829292297,
+            0.23887999355793,
+            0.22617599368095398,
+            0.17897599935531616
+          ]
+        },
+        "sample_index": 31,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748035565668,
+          740748035781340,
+          740748036095326,
+          740748035630561
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748041095326,
+          740748041095326,
+          740748041095326,
+          740748041095326
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748041097143,
+            740748041138309
+          ],
+          [
+            740748041096572,
+            740748041139881
+          ],
+          [
+            740748041096447,
+            740748041148352
+          ],
+          [
+            740748041095980,
+            740748041124309
+          ]
+        ],
+        "start_record_envelope_span_ns": 52372,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.043935999274253845,
+          "rank_max_ms": 0.05795200169086456,
+          "rank_ms": [
+            0.043935999274253845,
+            0.04556800052523613,
+            0.03705599904060364,
+            0.05795200169086456
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.1682240068912506,
+          "rank_max_ms": 0.2011840045452118,
+          "rank_ms": [
+            0.1682240068912506,
+            0.2011840045452118,
+            0.19020800292491913,
+            0.15321600437164307
+          ]
+        },
+        "sample_index": 32,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748047480557,
+          740748047606126,
+          740748047790907,
+          740748047144869
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748052790907,
+          740748052790907,
+          740748052790907,
+          740748052790907
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748052792569,
+            740748052829468
+          ],
+          [
+            740748052792440,
+            740748052831277
+          ],
+          [
+            740748052792169,
+            740748052836120
+          ],
+          [
+            740748052791604,
+            740748052817084
+          ]
+        ],
+        "start_record_envelope_span_ns": 44516,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.03152000159025192,
+          "rank_max_ms": 0.043327998369932175,
+          "rank_ms": [
+            0.03152000159025192,
+            0.043327998369932175,
+            0.03455999866127968,
+            0.04307200014591217
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.15423999726772308,
+          "rank_max_ms": 0.15423999726772308,
+          "rank_ms": [
+            0.15423999726772308,
+            0.12131199985742569,
+            0.13635200262069702,
+            0.12214399874210358
+          ]
+        },
+        "sample_index": 33,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748055590540,
+          740748055410429,
+          740748055656788,
+          740748055330858
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748060656788,
+          740748060656788,
+          740748060656788,
+          740748060656788
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748060657987,
+            740748060691730
+          ],
+          [
+            740748060657462,
+            740748060681313
+          ],
+          [
+            740748060657574,
+            740748060690722
+          ],
+          [
+            740748060657463,
+            740748060681526
+          ]
+        ],
+        "start_record_envelope_span_ns": 34268,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.04575999826192856,
+          "rank_max_ms": 0.05641600117087364,
+          "rank_ms": [
+            0.04575999826192856,
+            0.05443200096487999,
+            0.0424639992415905,
+            0.05641600117087364
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.20499199628829956,
+          "rank_max_ms": 0.20499199628829956,
+          "rank_ms": [
+            0.20499199628829956,
+            0.15919999778270721,
+            0.16262400150299072,
+            0.1756799966096878
+          ]
+        },
+        "sample_index": 34,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748064753796,
+          740748064600719,
+          740748064922668,
+          740748064531766
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748069922668,
+          740748069922668,
+          740748069922668,
+          740748069922668
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748069924089,
+            740748069967399
+          ],
+          [
+            740748069923420,
+            740748069952169
+          ],
+          [
+            740748069923301,
+            740748069963935
+          ],
+          [
+            740748069923241,
+            740748069949828
+          ]
+        ],
+        "start_record_envelope_span_ns": 44158,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.06163199990987778,
+          "rank_max_ms": 0.07791999727487564,
+          "rank_ms": [
+            0.06163199990987778,
+            0.07225599884986877,
+            0.06201599910855293,
+            0.07791999727487564
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.2280000001192093,
+          "rank_max_ms": 0.2280000001192093,
+          "rank_ms": [
+            0.2280000001192093,
+            0.18758399784564972,
+            0.21753600239753723,
+            0.18147200345993042
+          ]
+        },
+        "sample_index": 35,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748075137400,
+          740748074627252,
+          740748074935208,
+          740748074583176
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748080137400,
+          740748080137400,
+          740748080137400,
+          740748080137400
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748080139264,
+            740748080182205
+          ],
+          [
+            740748080138321,
+            740748080172056
+          ],
+          [
+            740748080138517,
+            740748080186564
+          ],
+          [
+            740748080138002,
+            740748080161876
+          ]
+        ],
+        "start_record_envelope_span_ns": 48562,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.0597120001912117,
+          "rank_max_ms": 0.07311999797821045,
+          "rank_ms": [
+            0.0597120001912117,
+            0.0525440014898777,
+            0.04464000090956688,
+            0.07311999797821045
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.16678400337696075,
+          "rank_max_ms": 0.24108800292015076,
+          "rank_ms": [
+            0.16678400337696075,
+            0.19766399264335632,
+            0.24108800292015076,
+            0.16473600268363953
+          ]
+        },
+        "sample_index": 36,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748084785874,
+          740748085084505,
+          740748085556503,
+          740748084740661
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748090556503,
+          740748090556503,
+          740748090556503,
+          740748090556503
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748090557284,
+            740748090595553
+          ],
+          [
+            740748090558381,
+            740748090604817
+          ],
+          [
+            740748090558723,
+            740748090611168
+          ],
+          [
+            740748090557212,
+            740748090583731
+          ]
+        ],
+        "start_record_envelope_span_ns": 53956,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.0639680027961731,
+          "rank_max_ms": 0.0642239972949028,
+          "rank_ms": [
+            0.0639680027961731,
+            0.05587200075387955,
+            0.0451200008392334,
+            0.0642239972949028
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.16582399606704712,
+          "rank_max_ms": 0.21350400149822235,
+          "rank_ms": [
+            0.16582399606704712,
+            0.21199999749660492,
+            0.21350400149822235,
+            0.18675200641155243
+          ]
+        },
+        "sample_index": 37,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748097304665,
+          740748097278376,
+          740748097360934,
+          740748096971008
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748102360934,
+          740748102360934,
+          740748102360934,
+          740748102360934
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748102361634,
+            740748102397087
+          ],
+          [
+            740748102362445,
+            740748102406600
+          ],
+          [
+            740748102362873,
+            740748102416382
+          ],
+          [
+            740748102361810,
+            740748102397480
+          ]
+        ],
+        "start_record_envelope_span_ns": 54748,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.04150399938225746,
+          "rank_max_ms": 0.05331199988722801,
+          "rank_ms": [
+            0.04150399938225746,
+            0.03433600068092346,
+            0.03705599904060364,
+            0.05331199988722801
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.1698240041732788,
+          "rank_max_ms": 0.1698240041732788,
+          "rank_ms": [
+            0.1698240041732788,
+            0.1462080031633377,
+            0.16252799332141876,
+            0.14336000382900238
+          ]
+        },
+        "sample_index": 38,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748108344047,
+          740748108545402,
+          740748108367436,
+          740748108055198
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748113545402,
+          740748113545402,
+          740748113545402,
+          740748113545402
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748113546796,
+            740748113580352
+          ],
+          [
+            740748113545984,
+            740748113587219
+          ],
+          [
+            740748113546265,
+            740748113585092
+          ],
+          [
+            740748113546008,
+            740748113569725
+          ]
+        ],
+        "start_record_envelope_span_ns": 41235,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.04742399975657463,
+          "rank_max_ms": 0.061664000153541565,
+          "rank_ms": [
+            0.04742399975657463,
+            0.040031999349594116,
+            0.03548799827694893,
+            0.061664000153541565
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.18979200720787048,
+          "rank_max_ms": 0.192671999335289,
+          "rank_ms": [
+            0.18979200720787048,
+            0.16678400337696075,
+            0.192671999335289,
+            0.1671999990940094
+          ]
+        },
+        "sample_index": 39,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748117777629,
+          740748117856693,
+          740748117850408,
+          740748117350552
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748122856693,
+          740748122856693,
+          740748122856693,
+          740748122856693
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748122857593,
+            740748122893080
+          ],
+          [
+            740748122857509,
+            740748122901586
+          ],
+          [
+            740748122857860,
+            740748122904006
+          ],
+          [
+            740748122857320,
+            740748122880803
+          ]
+        ],
+        "start_record_envelope_span_ns": 46686,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.05081599950790405,
+          "rank_max_ms": 0.06735999882221222,
+          "rank_ms": [
+            0.05081599950790405,
+            0.03766399994492531,
+            0.043455999344587326,
+            0.06735999882221222
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.1839359998703003,
+          "rank_max_ms": 0.1839359998703003,
+          "rank_ms": [
+            0.1839359998703003,
+            0.1775359958410263,
+            0.17052799463272095,
+            0.15596799552440643
+          ]
+        },
+        "sample_index": 40,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748125837334,
+          740748126192693,
+          740748126753786,
+          740748125894438
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748131753786,
+          740748131753786,
+          740748131753786,
+          740748131753786
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748131755340,
+            740748131793802
+          ],
+          [
+            740748131755042,
+            740748131805516
+          ],
+          [
+            740748131754821,
+            740748131800216
+          ],
+          [
+            740748131754377,
+            740748131778866
+          ]
+        ],
+        "start_record_envelope_span_ns": 51139,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.05315199866890907,
+          "rank_max_ms": 0.06384000182151794,
+          "rank_ms": [
+            0.05315199866890907,
+            0.03807999938726425,
+            0.04371200129389763,
+            0.06384000182151794
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.14975999295711517,
+          "rank_max_ms": 0.1653120070695877,
+          "rank_ms": [
+            0.14975999295711517,
+            0.16432000696659088,
+            0.1653120070695877,
+            0.15238399803638458
+          ]
+        },
+        "sample_index": 41,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748137102801,
+          740748137702909,
+          740748137731747,
+          740748137049174
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748142731747,
+          740748142731747,
+          740748142731747,
+          740748142731747
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748142732584,
+            740748142767471
+          ],
+          [
+            740748142733160,
+            740748142782472
+          ],
+          [
+            740748142732822,
+            740748142777136
+          ],
+          [
+            740748142732284,
+            740748142756387
+          ]
+        ],
+        "start_record_envelope_span_ns": 50188,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.04028800129890442,
+          "rank_max_ms": 0.056832000613212585,
+          "rank_ms": [
+            0.04028800129890442,
+            0.04230400174856186,
+            0.035840000957250595,
+            0.056832000613212585
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.1841920018196106,
+          "rank_max_ms": 0.1841920018196106,
+          "rank_ms": [
+            0.1841920018196106,
+            0.13843199610710144,
+            0.1690559983253479,
+            0.14294399321079254
+          ]
+        },
+        "sample_index": 42,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748146464685,
+          740748146483694,
+          740748146516272,
+          740748146230492
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748151516272,
+          740748151516272,
+          740748151516272,
+          740748151516272
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748151517138,
+            740748151553780
+          ],
+          [
+            740748151516779,
+            740748151556491
+          ],
+          [
+            740748151517317,
+            740748151560593
+          ],
+          [
+            740748151516824,
+            740748151540471
+          ]
+        ],
+        "start_record_envelope_span_ns": 43814,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.06374400109052658,
+          "rank_max_ms": 0.07948800176382065,
+          "rank_ms": [
+            0.06374400109052658,
+            0.044863998889923096,
+            0.05100800096988678,
+            0.07948800176382065
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.19580799341201782,
+          "rank_max_ms": 0.20156799256801605,
+          "rank_ms": [
+            0.19580799341201782,
+            0.20156799256801605,
+            0.19411200284957886,
+            0.15651200711727142
+          ]
+        },
+        "sample_index": 43,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748156327118,
+          740748156632239,
+          740748156566500,
+          740748156169335
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748161632239,
+          740748161632239,
+          740748161632239,
+          740748161632239
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748161633034,
+            740748161671350
+          ],
+          [
+            740748161633735,
+            740748161691309
+          ],
+          [
+            740748161633418,
+            740748161685770
+          ],
+          [
+            740748161632841,
+            740748161655942
+          ]
+        ],
+        "start_record_envelope_span_ns": 58468,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.2794240117073059,
+          "rank_max_ms": 0.2840319871902466,
+          "rank_ms": [
+            0.2794240117073059,
+            0.2417919933795929,
+            0.036320000886917114,
+            0.2840319871902466
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.2893120050430298,
+          "rank_max_ms": 0.2942720055580139,
+          "rank_ms": [
+            0.2893120050430298,
+            0.2519040107727051,
+            0.1759359985589981,
+            0.2942720055580139
+          ]
+        },
+        "sample_index": 44,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748167857939,
+          740748168184776,
+          740748168041454,
+          740748167476358
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748173184776,
+          740748173184776,
+          740748173184776,
+          740748173184776
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748173185208,
+            740748173224005
+          ],
+          [
+            740748173215713,
+            740748173261610
+          ],
+          [
+            740748173419072,
+            740748173465707
+          ],
+          [
+            740748173185313,
+            740748173218844
+          ]
+        ],
+        "start_record_envelope_span_ns": 280499,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.055904000997543335,
+          "rank_max_ms": 0.05897599831223488,
+          "rank_ms": [
+            0.055904000997543335,
+            0.036959998309612274,
+            0.03606399893760681,
+            0.05897599831223488
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.16950400173664093,
+          "rank_max_ms": 0.19551999866962433,
+          "rank_ms": [
+            0.16950400173664093,
+            0.17148800194263458,
+            0.19551999866962433,
+            0.15769599378108978
+          ]
+        },
+        "sample_index": 45,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748177569308,
+          740748177755036,
+          740748177898812,
+          740748177416063
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748182898812,
+          740748182898812,
+          740748182898812,
+          740748182898812
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748182899295,
+            740748182922489
+          ],
+          [
+            740748182899476,
+            740748182941753
+          ],
+          [
+            740748182899829,
+            740748182941476
+          ],
+          [
+            740748182899381,
+            740748182919778
+          ]
+        ],
+        "start_record_envelope_span_ns": 42458,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.06480000168085098,
+          "rank_max_ms": 0.07769600301980972,
+          "rank_ms": [
+            0.06480000168085098,
+            0.05920000001788139,
+            0.04931199923157692,
+            0.07769600301980972
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.16806399822235107,
+          "rank_max_ms": 0.1860799938440323,
+          "rank_ms": [
+            0.16806399822235107,
+            0.1507200002670288,
+            0.1860799938440323,
+            0.1520320028066635
+          ]
+        },
+        "sample_index": 46,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748187789237,
+          740748187911173,
+          740748188139797,
+          740748187645586
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748193139797,
+          740748193139797,
+          740748193139797,
+          740748193139797
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748193140362,
+            740748193169701
+          ],
+          [
+            740748193140341,
+            740748193177157
+          ],
+          [
+            740748193141017,
+            740748193185304
+          ],
+          [
+            740748193140321,
+            740748193159811
+          ]
+        ],
+        "start_record_envelope_span_ns": 44983,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.7914559841156006,
+          "rank_max_ms": 0.7914559841156006,
+          "rank_ms": [
+            0.7914559841156006,
+            0.23084799945354462,
+            0.038015998899936676,
+            0.4060159921646118
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.8016960024833679,
+          "rank_max_ms": 0.8016960024833679,
+          "rank_ms": [
+            0.8016960024833679,
+            0.24105599522590637,
+            0.1770240068435669,
+            0.4163840115070343
+          ]
+        },
+        "sample_index": 47,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748198491202,
+          740748198519506,
+          740748198838309,
+          740748197910049
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748203838309,
+          740748203838309,
+          740748203838309,
+          740748203838309
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748203838926,
+            740748203882278
+          ],
+          [
+            740748204407604,
+            740748204444091
+          ],
+          [
+            740748204588638,
+            740748204635590
+          ],
+          [
+            740748204246111,
+            740748204266953
+          ]
+        ],
+        "start_record_envelope_span_ns": 796664,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.05663999915122986,
+          "rank_max_ms": 0.0615679994225502,
+          "rank_ms": [
+            0.05663999915122986,
+            0.05350400134921074,
+            0.038975998759269714,
+            0.0615679994225502
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.16771200299263,
+          "rank_max_ms": 0.18160000443458557,
+          "rank_ms": [
+            0.16771200299263,
+            0.15087999403476715,
+            0.18160000443458557,
+            0.16128000617027283
+          ]
+        },
+        "sample_index": 48,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748209291815,
+          740748209560409,
+          740748209521842,
+          740748208940740
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748214560409,
+          740748214560409,
+          740748214560409,
+          740748214560409
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748214561099,
+            740748214591936
+          ],
+          [
+            740748214561032,
+            740748214595209
+          ],
+          [
+            740748214561650,
+            740748214609400
+          ],
+          [
+            740748214560995,
+            740748214585540
+          ]
+        ],
+        "start_record_envelope_span_ns": 48405,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.052352000027894974,
+          "rank_max_ms": 0.06032000109553337,
+          "rank_ms": [
+            0.052352000027894974,
+            0.048287998884916306,
+            0.036896001547575,
+            0.06032000109553337
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.20422400534152985,
+          "rank_max_ms": 0.22140799462795258,
+          "rank_ms": [
+            0.20422400534152985,
+            0.19379200041294098,
+            0.22140799462795258,
+            0.1857600063085556
+          ]
+        },
+        "sample_index": 49,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748219667653,
+          740748219854668,
+          740748220082361,
+          740748219699835
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748225082361,
+          740748225082361,
+          740748225082361,
+          740748225082361
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748225083020,
+            740748225115129
+          ],
+          [
+            740748225083345,
+            740748225117757
+          ],
+          [
+            740748225083410,
+            740748225129397
+          ],
+          [
+            740748225082843,
+            740748225110685
+          ]
+        ],
+        "start_record_envelope_span_ns": 46554,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.06627199798822403,
+          "rank_max_ms": 0.07184000313282013,
+          "rank_ms": [
+            0.06627199798822403,
+            0.05363199859857559,
+            0.04163200035691261,
+            0.07184000313282013
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.1679680049419403,
+          "rank_max_ms": 0.19407999515533447,
+          "rank_ms": [
+            0.1679680049419403,
+            0.18220800161361694,
+            0.19407999515533447,
+            0.15596799552440643
+          ]
+        },
+        "sample_index": 50,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748230260442,
+          740748230412720,
+          740748230669701,
+          740748230245994
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748235669701,
+          740748235669701,
+          740748235669701,
+          740748235669701
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748235670263,
+            740748235696641
+          ],
+          [
+            740748235670887,
+            740748235710205
+          ],
+          [
+            740748235670960,
+            740748235722863
+          ],
+          [
+            740748235670258,
+            740748235692858
+          ]
+        ],
+        "start_record_envelope_span_ns": 52605,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.06307200342416763,
+          "rank_max_ms": 0.06444799900054932,
+          "rank_ms": [
+            0.06307200342416763,
+            0.05183999985456467,
+            0.039903998374938965,
+            0.06444799900054932
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.17798399925231934,
+          "rank_max_ms": 0.19023999571800232,
+          "rank_ms": [
+            0.17798399925231934,
+            0.19023999571800232,
+            0.1870719939470291,
+            0.16604800522327423
+          ]
+        },
+        "sample_index": 51,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748239881412,
+          740748240368725,
+          740748240367387,
+          740748239959484
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748245368725,
+          740748245368725,
+          740748245368725,
+          740748245368725
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748245369162,
+            740748245398289
+          ],
+          [
+            740748245369835,
+            740748245410288
+          ],
+          [
+            740748245369747,
+            740748245420941
+          ],
+          [
+            740748245369522,
+            740748245395564
+          ]
+        ],
+        "start_record_envelope_span_ns": 51779,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.07734400033950806,
+          "rank_max_ms": 0.08611200004816055,
+          "rank_ms": [
+            0.07734400033950806,
+            0.06806399673223495,
+            0.048576001077890396,
+            0.08611200004816055
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.18428799510002136,
+          "rank_max_ms": 0.2245440036058426,
+          "rank_ms": [
+            0.18428799510002136,
+            0.18742400407791138,
+            0.2245440036058426,
+            0.15919999778270721
+          ]
+        },
+        "sample_index": 52,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748251029010,
+          740748251321559,
+          740748251533249,
+          740748251008414
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748256533249,
+          740748256533249,
+          740748256533249,
+          740748256533249
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748256533845,
+            740748256565079
+          ],
+          [
+            740748256534308,
+            740748256574721
+          ],
+          [
+            740748256535153,
+            740748256596632
+          ],
+          [
+            740748256533862,
+            740748256556764
+          ]
+        ],
+        "start_record_envelope_span_ns": 62787,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.05929600074887276,
+          "rank_max_ms": 0.06371200084686279,
+          "rank_ms": [
+            0.05929600074887276,
+            0.04806400090456009,
+            0.03759999945759773,
+            0.06371200084686279
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.15590399503707886,
+          "rank_max_ms": 0.18089599907398224,
+          "rank_ms": [
+            0.15590399503707886,
+            0.18089599907398224,
+            0.18063999712467194,
+            0.14924800395965576
+          ]
+        },
+        "sample_index": 53,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748261927259,
+          740748262343253,
+          740748262552242,
+          740748262251773
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748267552242,
+          740748267552242,
+          740748267552242,
+          740748267552242
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748267552780,
+            740748267578593
+          ],
+          [
+            740748267553150,
+            740748267590313
+          ],
+          [
+            740748267553374,
+            740748267601705
+          ],
+          [
+            740748267552812,
+            740748267577175
+          ]
+        ],
+        "start_record_envelope_span_ns": 48925,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.056384000927209854,
+          "rank_max_ms": 0.056384000927209854,
+          "rank_ms": [
+            0.056384000927209854,
+            0.046560000628232956,
+            0.037151999771595,
+            0.0522879995405674
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.16368000209331512,
+          "rank_max_ms": 0.18758399784564972,
+          "rank_ms": [
+            0.16368000209331512,
+            0.17292800545692444,
+            0.18691200017929077,
+            0.18758399784564972
+          ]
+        },
+        "sample_index": 54,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748273797342,
+          740748274410104,
+          740748273985909,
+          740748273612860
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748279410104,
+          740748279410104,
+          740748279410104,
+          740748279410104
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748279410729,
+            740748279435408
+          ],
+          [
+            740748279410855,
+            740748279445694
+          ],
+          [
+            740748279411063,
+            740748279454951
+          ],
+          [
+            740748279410850,
+            740748279441407
+          ]
+        ],
+        "start_record_envelope_span_ns": 44222,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.04873599857091904,
+          "rank_max_ms": 0.050303999334573746,
+          "rank_ms": [
+            0.04873599857091904,
+            0.04227200150489807,
+            0.033824000507593155,
+            0.050303999334573746
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.1520639955997467,
+          "rank_max_ms": 0.1879040002822876,
+          "rank_ms": [
+            0.1520639955997467,
+            0.1650879979133606,
+            0.1879040002822876,
+            0.1589760035276413
+          ]
+        },
+        "sample_index": 55,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748285137949,
+          740748285381883,
+          740748285573151,
+          740748285447321
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748290573151,
+          740748290573151,
+          740748290573151,
+          740748290573151
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748290573722,
+            740748290603609
+          ],
+          [
+            740748290574160,
+            740748290610439
+          ],
+          [
+            740748290574496,
+            740748290617435
+          ],
+          [
+            740748290573787,
+            740748290602492
+          ]
+        ],
+        "start_record_envelope_span_ns": 43713,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.07811199873685837,
+          "rank_max_ms": 0.07811199873685837,
+          "rank_ms": [
+            0.07811199873685837,
+            0.06028800085186958,
+            0.04233599826693535,
+            0.07798399776220322
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.16473600268363953,
+          "rank_max_ms": 0.2062080055475235,
+          "rank_ms": [
+            0.16473600268363953,
+            0.1940159946680069,
+            0.2062080055475235,
+            0.16422399878501892
+          ]
+        },
+        "sample_index": 56,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748294665457,
+          740748295069105,
+          740748295195225,
+          740748294674144
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748300195225,
+          740748300195225,
+          740748300195225,
+          740748300195225
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748300195845,
+            740748300228649
+          ],
+          [
+            740748300196339,
+            740748300249129
+          ],
+          [
+            740748300196434,
+            740748300265573
+          ],
+          [
+            740748300195772,
+            740748300230020
+          ]
+        ],
+        "start_record_envelope_span_ns": 69801,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.06857600063085556,
+          "rank_max_ms": 0.07327999919652939,
+          "rank_ms": [
+            0.06857600063085556,
+            0.06355199962854385,
+            0.03814399987459183,
+            0.07327999919652939
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.17555199563503265,
+          "rank_max_ms": 0.19494399428367615,
+          "rank_ms": [
+            0.17555199563503265,
+            0.19494399428367615,
+            0.1685120016336441,
+            0.16502399742603302
+          ]
+        },
+        "sample_index": 57,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748304604825,
+          740748304542606,
+          740748304957416,
+          740748304530838
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748309957416,
+          740748309957416,
+          740748309957416,
+          740748309957416
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748309958036,
+            740748309986355
+          ],
+          [
+            740748309958359,
+            740748309992808
+          ],
+          [
+            740748309958482,
+            740748310018219
+          ],
+          [
+            740748309957978,
+            740748309982954
+          ]
+        ],
+        "start_record_envelope_span_ns": 60241,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.06387200206518173,
+          "rank_max_ms": 0.06387200206518173,
+          "rank_ms": [
+            0.06387200206518173,
+            0.0514880008995533,
+            0.04016000032424927,
+            0.058400001376867294
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.16592000424861908,
+          "rank_max_ms": 0.1902720034122467,
+          "rank_ms": [
+            0.16592000424861908,
+            0.1902720034122467,
+            0.1847359985113144,
+            0.1712000072002411
+          ]
+        },
+        "sample_index": 58,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748314974781,
+          740748315377413,
+          740748315451568,
+          740748314993411
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748320451568,
+          740748320451568,
+          740748320451568,
+          740748320451568
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748320452105,
+            740748320478550
+          ],
+          [
+            740748320452994,
+            740748320493161
+          ],
+          [
+            740748320453182,
+            740748320504916
+          ],
+          [
+            740748320452202,
+            740748320481393
+          ]
+        ],
+        "start_record_envelope_span_ns": 52811,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.07798399776220322,
+          "rank_max_ms": 0.08115199953317642,
+          "rank_ms": [
+            0.07798399776220322,
+            0.0650240033864975,
+            0.039264000952243805,
+            0.08115199953317642
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.16326400637626648,
+          "rank_max_ms": 0.19315199553966522,
+          "rank_ms": [
+            0.16326400637626648,
+            0.19315199553966522,
+            0.17955200374126434,
+            0.1624639928340912
+          ]
+        },
+        "sample_index": 59,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748325316156,
+          740748325936158,
+          740748326162895,
+          740748325581469
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748331162895,
+          740748331162895,
+          740748331162895,
+          740748331162895
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748331163374,
+            740748331187743
+          ],
+          [
+            740748331163947,
+            740748331200569
+          ],
+          [
+            740748331164048,
+            740748331227095
+          ],
+          [
+            740748331163379,
+            740748331186554
+          ]
+        ],
+        "start_record_envelope_span_ns": 63721,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.06176000088453293,
+          "rank_max_ms": 0.06431999802589417,
+          "rank_ms": [
+            0.06176000088453293,
+            0.05158400163054466,
+            0.039712000638246536,
+            0.06431999802589417
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.19299200177192688,
+          "rank_max_ms": 0.22700800001621246,
+          "rank_ms": [
+            0.19299200177192688,
+            0.21638399362564087,
+            0.22700800001621246,
+            0.1761920005083084
+          ]
+        },
+        "sample_index": 60,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748335932290,
+          740748336715097,
+          740748337088447,
+          740748336114870
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748342088447,
+          740748342088447,
+          740748342088447,
+          740748342088447
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748342088986,
+            740748342121178
+          ],
+          [
+            740748342089770,
+            740748342129803
+          ],
+          [
+            740748342089548,
+            740748342141321
+          ],
+          [
+            740748342089004,
+            740748342115040
+          ]
+        ],
+        "start_record_envelope_span_ns": 52335,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.06537599861621857,
+          "rank_max_ms": 0.07046400010585785,
+          "rank_ms": [
+            0.06537599861621857,
+            0.05135999992489815,
+            0.03683200106024742,
+            0.07046400010585785
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.1664319932460785,
+          "rank_max_ms": 0.18384000658988953,
+          "rank_ms": [
+            0.1664319932460785,
+            0.17638400197029114,
+            0.18384000658988953,
+            0.16438399255275726
+          ]
+        },
+        "sample_index": 61,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748346300226,
+          740748346736869,
+          740748346901122,
+          740748346782915
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748351901122,
+          740748351901122,
+          740748351901122,
+          740748351901122
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748351901592,
+            740748351927446
+          ],
+          [
+            740748351902018,
+            740748351940837
+          ],
+          [
+            740748351902259,
+            740748351955169
+          ],
+          [
+            740748351901610,
+            740748351923167
+          ]
+        ],
+        "start_record_envelope_span_ns": 53577,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.05711999908089638,
+          "rank_max_ms": 0.06099199876189232,
+          "rank_ms": [
+            0.05711999908089638,
+            0.04931199923157692,
+            0.03705599904060364,
+            0.06099199876189232
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.1716800034046173,
+          "rank_max_ms": 0.17535999417304993,
+          "rank_ms": [
+            0.1716800034046173,
+            0.17289599776268005,
+            0.17535999417304993,
+            0.1395840048789978
+          ]
+        },
+        "sample_index": 62,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748356816482,
+          740748356937159,
+          740748357308906,
+          740748356792334
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748362308906,
+          740748362308906,
+          740748362308906,
+          740748362308906
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748362309431,
+            740748362338335
+          ],
+          [
+            740748362309822,
+            740748362345110
+          ],
+          [
+            740748362311317,
+            740748362357912
+          ],
+          [
+            740748362309516,
+            740748362330253
+          ]
+        ],
+        "start_record_envelope_span_ns": 48481,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.057151999324560165,
+          "rank_max_ms": 0.05987200140953064,
+          "rank_ms": [
+            0.057151999324560165,
+            0.04524800181388855,
+            0.0363520011305809,
+            0.05987200140953064
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.15673600137233734,
+          "rank_max_ms": 0.2035199999809265,
+          "rank_ms": [
+            0.15673600137233734,
+            0.1985280066728592,
+            0.2035199999809265,
+            0.1435520052909851
+          ]
+        },
+        "sample_index": 63,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748367120603,
+          740748367805629,
+          740748367475140,
+          740748366859639
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748372805629,
+          740748372805629,
+          740748372805629,
+          740748372805629
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748372806119,
+            740748372830313
+          ],
+          [
+            740748372806741,
+            740748372843467
+          ],
+          [
+            740748372806757,
+            740748372851816
+          ],
+          [
+            740748372806250,
+            740748372828696
+          ]
+        ],
+        "start_record_envelope_span_ns": 45697,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.06918399780988693,
+          "rank_max_ms": 0.07238399982452393,
+          "rank_ms": [
+            0.06918399780988693,
+            0.05711999908089638,
+            0.04259200021624565,
+            0.07238399982452393
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.16998399794101715,
+          "rank_max_ms": 0.21132799983024597,
+          "rank_ms": [
+            0.16998399794101715,
+            0.1998399943113327,
+            0.21132799983024597,
+            0.15558399260044098
+          ]
+        },
+        "sample_index": 64,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748377415767,
+          740748377624916,
+          740748377790153,
+          740748377421124
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748382790153,
+          740748382790153,
+          740748382790153,
+          740748382790153
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748382790719,
+            740748382818106
+          ],
+          [
+            740748382791314,
+            740748382829134
+          ],
+          [
+            740748382791387,
+            740748382844478
+          ],
+          [
+            740748382790725,
+            740748382815033
+          ]
+        ],
+        "start_record_envelope_span_ns": 53759,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.04560000076889992,
+          "rank_max_ms": 0.06563200056552887,
+          "rank_ms": [
+            0.04560000076889992,
+            0.04982399940490723,
+            0.040383998304605484,
+            0.06563200056552887
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.1919039934873581,
+          "rank_max_ms": 0.1940159946680069,
+          "rank_ms": [
+            0.1919039934873581,
+            0.1940159946680069,
+            0.18704000115394592,
+            0.1555200070142746
+          ]
+        },
+        "sample_index": 65,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748388140275,
+          740748388562376,
+          740748388673962,
+          740748388333733
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748393673962,
+          740748393673962,
+          740748393673962,
+          740748393673962
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748393674635,
+            740748393718669
+          ],
+          [
+            740748393675089,
+            740748393715637
+          ],
+          [
+            740748393675098,
+            740748393724327
+          ],
+          [
+            740748393674515,
+            740748393698217
+          ]
+        ],
+        "start_record_envelope_span_ns": 49812,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.05289600044488907,
+          "rank_max_ms": 0.058559998869895935,
+          "rank_ms": [
+            0.05289600044488907,
+            0.04608000069856644,
+            0.03638400137424469,
+            0.058559998869895935
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.14921599626541138,
+          "rank_max_ms": 0.1590079963207245,
+          "rank_ms": [
+            0.14921599626541138,
+            0.1590079963207245,
+            0.15855999290943146,
+            0.13260799646377563
+          ]
+        },
+        "sample_index": 66,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748398670513,
+          740748398787821,
+          740748399332024,
+          740748398681067
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748404332024,
+          740748404332024,
+          740748404332024,
+          740748404332024
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748404332547,
+            740748404359152
+          ],
+          [
+            740748404332960,
+            740748404367253
+          ],
+          [
+            740748404332992,
+            740748404375820
+          ],
+          [
+            740748404332613,
+            740748404352684
+          ]
+        ],
+        "start_record_envelope_span_ns": 43273,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.07004799693822861,
+          "rank_max_ms": 0.0740479975938797,
+          "rank_ms": [
+            0.07004799693822861,
+            0.056832000613212585,
+            0.041760001331567764,
+            0.0740479975938797
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.15529599785804749,
+          "rank_max_ms": 0.19631999731063843,
+          "rank_ms": [
+            0.15529599785804749,
+            0.18723200261592865,
+            0.19631999731063843,
+            0.1526080071926117
+          ]
+        },
+        "sample_index": 67,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748409234016,
+          740748408963535,
+          740748409399218,
+          740748409227197
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748414399218,
+          740748414399218,
+          740748414399218,
+          740748414399218
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748414399805,
+            740748414425203
+          ],
+          [
+            740748414400503,
+            740748414438645
+          ],
+          [
+            740748414400464,
+            740748414454250
+          ],
+          [
+            740748414399863,
+            740748414423034
+          ]
+        ],
+        "start_record_envelope_span_ns": 54445,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.050944000482559204,
+          "rank_max_ms": 0.055904000997543335,
+          "rank_ms": [
+            0.050944000482559204,
+            0.042367998510599136,
+            0.03392000123858452,
+            0.055904000997543335
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.13593600690364838,
+          "rank_max_ms": 0.1562879979610443,
+          "rank_ms": [
+            0.13593600690364838,
+            0.1552319973707199,
+            0.1562879979610443,
+            0.12758399546146393
+          ]
+        },
+        "sample_index": 68,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748420565514,
+          740748420664456,
+          740748420740771,
+          740748420417852
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748425740771,
+          740748425740771,
+          740748425740771,
+          740748425740771
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748425741208,
+            740748425765676
+          ],
+          [
+            740748425741841,
+            740748425774067
+          ],
+          [
+            740748425741597,
+            740748425780905
+          ],
+          [
+            740748425741309,
+            740748425759283
+          ]
+        ],
+        "start_record_envelope_span_ns": 39697,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.059007998555898666,
+          "rank_max_ms": 0.06159999966621399,
+          "rank_ms": [
+            0.059007998555898666,
+            0.047359999269247055,
+            0.036448001861572266,
+            0.06159999966621399
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.16515199840068817,
+          "rank_max_ms": 0.20032000541687012,
+          "rank_ms": [
+            0.16515199840068817,
+            0.19926400482654572,
+            0.20032000541687012,
+            0.16489599645137787
+          ]
+        },
+        "sample_index": 69,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748430664522,
+          740748431094447,
+          740748430954740,
+          740748430532608
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748436094447,
+          740748436094447,
+          740748436094447,
+          740748436094447
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748436094984,
+            740748436119849
+          ],
+          [
+            740748436095317,
+            740748436132081
+          ],
+          [
+            740748436095407,
+            740748436140737
+          ],
+          [
+            740748436095024,
+            740748436116260
+          ]
+        ],
+        "start_record_envelope_span_ns": 45753,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.059328000992536545,
+          "rank_max_ms": 0.06681600213050842,
+          "rank_ms": [
+            0.059328000992536545,
+            0.0533440001308918,
+            0.0395519994199276,
+            0.06681600213050842
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.1759359985589981,
+          "rank_max_ms": 0.20815999805927277,
+          "rank_ms": [
+            0.1759359985589981,
+            0.1887039989233017,
+            0.20815999805927277,
+            0.15798400342464447
+          ]
+        },
+        "sample_index": 70,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748440904012,
+          740748440515643,
+          740748441089203,
+          740748440729109
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748446089203,
+          740748446089203,
+          740748446089203,
+          740748446089203
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748446089703,
+            740748446117574
+          ],
+          [
+            740748446090023,
+            740748446125297
+          ],
+          [
+            740748446090271,
+            740748446137903
+          ],
+          [
+            740748446089774,
+            740748446111028
+          ]
+        ],
+        "start_record_envelope_span_ns": 48200,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.06470400094985962,
+          "rank_max_ms": 0.06470400094985962,
+          "rank_ms": [
+            0.06470400094985962,
+            0.0517439991235733,
+            0.04755200073122978,
+            0.06454399973154068
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.15436799824237823,
+          "rank_max_ms": 0.1932159960269928,
+          "rank_ms": [
+            0.15436799824237823,
+            0.19040000438690186,
+            0.1932159960269928,
+            0.15600000321865082
+          ]
+        },
+        "sample_index": 71,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748451112952,
+          740748451359496,
+          740748451915829,
+          740748450889951
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748456915829,
+          740748456915829,
+          740748456915829,
+          740748456915829
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748456916320,
+            740748456938580
+          ],
+          [
+            740748456917015,
+            740748456953224
+          ],
+          [
+            740748456916923,
+            740748456965394
+          ],
+          [
+            740748456916368,
+            740748456939300
+          ]
+        ],
+        "start_record_envelope_span_ns": 49074,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.06569600105285645,
+          "rank_max_ms": 0.07119999825954437,
+          "rank_ms": [
+            0.06569600105285645,
+            0.05289600044488907,
+            0.04076800122857094,
+            0.07119999825954437
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.15647999942302704,
+          "rank_max_ms": 0.19926400482654572,
+          "rank_ms": [
+            0.15647999942302704,
+            0.19926400482654572,
+            0.19088000059127808,
+            0.15481600165367126
+          ]
+        },
+        "sample_index": 72,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748463309281,
+          740748463100557,
+          740748463713704,
+          740748463417157
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748468713704,
+          740748468713704,
+          740748468713704,
+          740748468713704
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748468714193,
+            740748468740636
+          ],
+          [
+            740748468714756,
+            740748468754292
+          ],
+          [
+            740748468714907,
+            740748468766396
+          ],
+          [
+            740748468714236,
+            740748468736890
+          ]
+        ],
+        "start_record_envelope_span_ns": 52203,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.06015999987721443,
+          "rank_max_ms": 0.06259199976921082,
+          "rank_ms": [
+            0.06015999987721443,
+            0.04841599985957146,
+            0.038047999143600464,
+            0.06259199976921082
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.15510399639606476,
+          "rank_max_ms": 0.18387199938297272,
+          "rank_ms": [
+            0.15510399639606476,
+            0.18387199938297272,
+            0.18105599284172058,
+            0.15772800147533417
+          ]
+        },
+        "sample_index": 73,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748473875962,
+          740748474233604,
+          740748474405100,
+          740748474081781
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748479405100,
+          740748479405100,
+          740748479405100,
+          740748479405100
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748479405623,
+            740748479432161
+          ],
+          [
+            740748479406423,
+            740748479445729
+          ],
+          [
+            740748479406221,
+            740748479454265
+          ],
+          [
+            740748479405638,
+            740748479429294
+          ]
+        ],
+        "start_record_envelope_span_ns": 48642,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.06425599753856659,
+          "rank_max_ms": 0.07228799909353256,
+          "rank_ms": [
+            0.06425599753856659,
+            0.05558399856090546,
+            0.04041599854826927,
+            0.07228799909353256
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.1799039989709854,
+          "rank_max_ms": 0.2085759937763214,
+          "rank_ms": [
+            0.1799039989709854,
+            0.20284800231456757,
+            0.2085759937763214,
+            0.16742399334907532
+          ]
+        },
+        "sample_index": 74,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748485329320,
+          740748485508004,
+          740748485867807,
+          740748485492445
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748490867807,
+          740748490867807,
+          740748490867807,
+          740748490867807
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748490868346,
+            740748490897647
+          ],
+          [
+            740748490868770,
+            740748490906843
+          ],
+          [
+            740748490869318,
+            740748490920788
+          ],
+          [
+            740748490868285,
+            740748490891625
+          ]
+        ],
+        "start_record_envelope_span_ns": 52503,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.055776000022888184,
+          "rank_max_ms": 0.055776000022888184,
+          "rank_ms": [
+            0.055776000022888184,
+            0.04428799822926521,
+            0.036479998379945755,
+            0.05507199838757515
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.14000000059604645,
+          "rank_max_ms": 0.19756799936294556,
+          "rank_ms": [
+            0.14000000059604645,
+            0.1839040070772171,
+            0.19756799936294556,
+            0.13420799374580383
+          ]
+        },
+        "sample_index": 75,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748496686378,
+          740748496760526,
+          740748496813701,
+          740748496635731
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748501813701,
+          740748501813701,
+          740748501813701,
+          740748501813701
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748501814121,
+            740748501836420
+          ],
+          [
+            740748501814458,
+            740748501848441
+          ],
+          [
+            740748501814593,
+            740748501857074
+          ],
+          [
+            740748501814210,
+            740748501834724
+          ]
+        ],
+        "start_record_envelope_span_ns": 42953,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.05999999865889549,
+          "rank_max_ms": 0.06467200070619583,
+          "rank_ms": [
+            0.05999999865889549,
+            0.045024000108242035,
+            0.03788800165057182,
+            0.06467200070619583
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.16140800714492798,
+          "rank_max_ms": 0.1929599940776825,
+          "rank_ms": [
+            0.16140800714492798,
+            0.1929599940776825,
+            0.1817920058965683,
+            0.15334400534629822
+          ]
+        },
+        "sample_index": 76,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748505839514,
+          740748506139337,
+          740748506285423,
+          740748505855738
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748511285423,
+          740748511285423,
+          740748511285423,
+          740748511285423
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748511285945,
+            740748511312227
+          ],
+          [
+            740748511286563,
+            740748511328673
+          ],
+          [
+            740748511286414,
+            740748511334221
+          ],
+          [
+            740748511286028,
+            740748511309916
+          ]
+        ],
+        "start_record_envelope_span_ns": 48276,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.05843200162053108,
+          "rank_max_ms": 0.05920000001788139,
+          "rank_ms": [
+            0.05843200162053108,
+            0.04575999826192856,
+            0.03728000074625015,
+            0.05920000001788139
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.13308799266815186,
+          "rank_max_ms": 0.18636800348758698,
+          "rank_ms": [
+            0.13308799266815186,
+            0.16339200735092163,
+            0.18636800348758698,
+            0.13308799266815186
+          ]
+        },
+        "sample_index": 77,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748516691346,
+          740748517097048,
+          740748517610066,
+          740748516768341
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748522610066,
+          740748522610066,
+          740748522610066,
+          740748522610066
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748522610544,
+            740748522632403
+          ],
+          [
+            740748522610853,
+            740748522644978
+          ],
+          [
+            740748522611165,
+            740748522654537
+          ],
+          [
+            740748522610616,
+            740748522630526
+          ]
+        ],
+        "start_record_envelope_span_ns": 43993,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.06444799900054932,
+          "rank_max_ms": 0.06800000369548798,
+          "rank_ms": [
+            0.06444799900054932,
+            0.04972799867391586,
+            0.039455998688936234,
+            0.06800000369548798
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.1544319987297058,
+          "rank_max_ms": 0.20870399475097656,
+          "rank_ms": [
+            0.1544319987297058,
+            0.20870399475097656,
+            0.1892160028219223,
+            0.155008003115654
+          ]
+        },
+        "sample_index": 78,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748528445932,
+          740748528408688,
+          740748528670056,
+          740748528370492
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748533670056,
+          740748533670056,
+          740748533670056,
+          740748533670056
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748533670682,
+            740748533697347
+          ],
+          [
+            740748533671093,
+            740748533713515
+          ],
+          [
+            740748533671051,
+            740748533721595
+          ],
+          [
+            740748533670539,
+            740748533695574
+          ]
+        ],
+        "start_record_envelope_span_ns": 51056,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.06576000154018402,
+          "rank_max_ms": 0.06825599819421768,
+          "rank_ms": [
+            0.06576000154018402,
+            0.04848000034689903,
+            0.03932800143957138,
+            0.06825599819421768
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.1571200042963028,
+          "rank_max_ms": 0.19699199497699738,
+          "rank_ms": [
+            0.1571200042963028,
+            0.19699199497699738,
+            0.18479999899864197,
+            0.14441600441932678
+          ]
+        },
+        "sample_index": 79,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748537479860,
+          740748537726373,
+          740748537719266,
+          740748537449146
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748542726373,
+          740748542726373,
+          740748542726373,
+          740748542726373
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748542726797,
+            740748542750622
+          ],
+          [
+            740748542727296,
+            740748542767805
+          ],
+          [
+            740748542727647,
+            740748542777110
+          ],
+          [
+            740748542727010,
+            740748542748356
+          ]
+        ],
+        "start_record_envelope_span_ns": 50313,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.055296000093221664,
+          "rank_max_ms": 0.05696000158786774,
+          "rank_ms": [
+            0.055296000093221664,
+            0.050464000552892685,
+            0.04508800059556961,
+            0.05696000158786774
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.14723199605941772,
+          "rank_max_ms": 0.17132799327373505,
+          "rank_ms": [
+            0.14723199605941772,
+            0.14611199498176575,
+            0.17132799327373505,
+            0.1420159935951233
+          ]
+        },
+        "sample_index": 80,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748548310951,
+          740748548313715,
+          740748548928958,
+          740748548548172
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748553928958,
+          740748553928958,
+          740748553928958,
+          740748553928958
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748553929377,
+            740748553950437
+          ],
+          [
+            740748553929612,
+            740748553955870
+          ],
+          [
+            740748553930114,
+            740748553970456
+          ],
+          [
+            740748553929455,
+            740748553948865
+          ]
+        ],
+        "start_record_envelope_span_ns": 41079,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.06534399837255478,
+          "rank_max_ms": 0.06534399837255478,
+          "rank_ms": [
+            0.06534399837255478,
+            0.05999999865889549,
+            0.03859199956059456,
+            0.06252799928188324
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.1456959992647171,
+          "rank_max_ms": 0.18195199966430664,
+          "rank_ms": [
+            0.1456959992647171,
+            0.14451199769973755,
+            0.18195199966430664,
+            0.14767999947071075
+          ]
+        },
+        "sample_index": 81,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748557966713,
+          740748557489267,
+          740748558432922,
+          740748558090070
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748563432922,
+          740748563432922,
+          740748563432922,
+          740748563432922
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748563433412,
+            740748563455170
+          ],
+          [
+            740748563433663,
+            740748563460790
+          ],
+          [
+            740748563434081,
+            740748563481139
+          ],
+          [
+            740748563433620,
+            740748563456274
+          ]
+        ],
+        "start_record_envelope_span_ns": 47727,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.05548800155520439,
+          "rank_max_ms": 0.05830400064587593,
+          "rank_ms": [
+            0.05548800155520439,
+            0.04371200129389763,
+            0.0342399999499321,
+            0.05830400064587593
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.13686400651931763,
+          "rank_max_ms": 0.16303999722003937,
+          "rank_ms": [
+            0.13686400651931763,
+            0.16105599701404572,
+            0.16303999722003937,
+            0.1383039951324463
+          ]
+        },
+        "sample_index": 82,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748569092683,
+          740748569089762,
+          740748569622127,
+          740748569099342
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748574622127,
+          740748574622127,
+          740748574622127,
+          740748574622127
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748574622689,
+            740748574644796
+          ],
+          [
+            740748574623029,
+            740748574656943
+          ],
+          [
+            740748574623126,
+            740748574664990
+          ],
+          [
+            740748574622615,
+            740748574642423
+          ]
+        ],
+        "start_record_envelope_span_ns": 42375,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.06409599632024765,
+          "rank_max_ms": 0.06678400188684464,
+          "rank_ms": [
+            0.06409599632024765,
+            0.04761600121855736,
+            0.0398080013692379,
+            0.06678400188684464
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.16092799603939056,
+          "rank_max_ms": 0.19286400079727173,
+          "rank_ms": [
+            0.16092799603939056,
+            0.19286400079727173,
+            0.1865600049495697,
+            0.14803199470043182
+          ]
+        },
+        "sample_index": 83,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748579084124,
+          740748579580042,
+          740748579693607,
+          740748579186913
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748584693607,
+          740748584693607,
+          740748584693607,
+          740748584693607
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748584694201,
+            740748584718654
+          ],
+          [
+            740748584694805,
+            740748584736160
+          ],
+          [
+            740748584694698,
+            740748584743890
+          ],
+          [
+            740748584694111,
+            740748584716372
+          ]
+        ],
+        "start_record_envelope_span_ns": 49779,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.08003199845552444,
+          "rank_max_ms": 0.08848000317811966,
+          "rank_ms": [
+            0.08003199845552444,
+            0.0695360004901886,
+            0.04899200052022934,
+            0.08848000317811966
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.16364799439907074,
+          "rank_max_ms": 0.20528000593185425,
+          "rank_ms": [
+            0.16364799439907074,
+            0.1873600035905838,
+            0.20528000593185425,
+            0.15807999670505524
+          ]
+        },
+        "sample_index": 84,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748590052072,
+          740748590578473,
+          740748590420816,
+          740748590107567
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748595578473,
+          740748595578473,
+          740748595578473,
+          740748595578473
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748595579057,
+            740748595608862
+          ],
+          [
+            740748595579990,
+            740748595620732
+          ],
+          [
+            740748595580233,
+            740748595641154
+          ],
+          [
+            740748595579130,
+            740748595601308
+          ]
+        ],
+        "start_record_envelope_span_ns": 62097,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.0644799992442131,
+          "rank_max_ms": 0.06457599997520447,
+          "rank_ms": [
+            0.0644799992442131,
+            0.05008000135421753,
+            0.03702399879693985,
+            0.06457599997520447
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.14697599411010742,
+          "rank_max_ms": 0.1802240014076233,
+          "rank_ms": [
+            0.14697599411010742,
+            0.1802240014076233,
+            0.17299200594425201,
+            0.1534080058336258
+          ]
+        },
+        "sample_index": 85,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748599903262,
+          740748600274027,
+          740748600458153,
+          740748599916147
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748605458153,
+          740748605458153,
+          740748605458153,
+          740748605458153
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748605458742,
+            740748605481703
+          ],
+          [
+            740748605459198,
+            740748605497292
+          ],
+          [
+            740748605459988,
+            740748605508612
+          ],
+          [
+            740748605458837,
+            740748605482588
+          ]
+        ],
+        "start_record_envelope_span_ns": 49870,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.04636799916625023,
+          "rank_max_ms": 0.0506879985332489,
+          "rank_ms": [
+            0.04636799916625023,
+            0.04118400067090988,
+            0.0318400003015995,
+            0.0506879985332489
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.1258240044116974,
+          "rank_max_ms": 0.13977600634098053,
+          "rank_ms": [
+            0.1258240044116974,
+            0.12169600278139114,
+            0.13977600634098053,
+            0.11913599818944931
+          ]
+        },
+        "sample_index": 86,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748608680613,
+          740748609140597,
+          740748609255423,
+          740748608725524
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748614255423,
+          740748614255423,
+          740748614255423,
+          740748614255423
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748614255963,
+            740748614276578
+          ],
+          [
+            740748614256006,
+            740748614282811
+          ],
+          [
+            740748614256192,
+            740748614291912
+          ],
+          [
+            740748614256046,
+            740748614273834
+          ]
+        ],
+        "start_record_envelope_span_ns": 35949,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.06550399959087372,
+          "rank_max_ms": 0.06937599927186966,
+          "rank_ms": [
+            0.06550399959087372,
+            0.05375999957323074,
+            0.036928001791238785,
+            0.06937599927186966
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.1435839980840683,
+          "rank_max_ms": 0.17158399522304535,
+          "rank_ms": [
+            0.1435839980840683,
+            0.15084800124168396,
+            0.17158399522304535,
+            0.14537599682807922
+          ]
+        },
+        "sample_index": 87,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748618221969,
+          740748618401618,
+          740748618440199,
+          740748618217189
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748623440199,
+          740748623440199,
+          740748623440199,
+          740748623440199
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748623440749,
+            740748623464022
+          ],
+          [
+            740748623440854,
+            740748623475271
+          ],
+          [
+            740748623441240,
+            740748623492555
+          ],
+          [
+            740748623440739,
+            740748623462240
+          ]
+        ],
+        "start_record_envelope_span_ns": 51816,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.06380800157785416,
+          "rank_max_ms": 0.06585600227117538,
+          "rank_ms": [
+            0.06380800157785416,
+            0.0517439991235733,
+            0.038656000047922134,
+            0.06585600227117538
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.18467199802398682,
+          "rank_max_ms": 0.191103994846344,
+          "rank_ms": [
+            0.18467199802398682,
+            0.1817920058965683,
+            0.191103994846344,
+            0.16998399794101715
+          ]
+        },
+        "sample_index": 88,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748627694514,
+          740748627843068,
+          740748628116538,
+          740748627866921
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748633116538,
+          740748633116538,
+          740748633116538,
+          740748633116538
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748633117029,
+            740748633144338
+          ],
+          [
+            740748633117169,
+            740748633155133
+          ],
+          [
+            740748633117348,
+            740748633167600
+          ],
+          [
+            740748633117093,
+            740748633141426
+          ]
+        ],
+        "start_record_envelope_span_ns": 50571,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.06643199920654297,
+          "rank_max_ms": 0.066880002617836,
+          "rank_ms": [
+            0.06643199920654297,
+            0.053727999329566956,
+            0.04012800008058548,
+            0.066880002617836
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.1432960033416748,
+          "rank_max_ms": 0.39526399970054626,
+          "rank_ms": [
+            0.1432960033416748,
+            0.39526399970054626,
+            0.18188799917697906,
+            0.13971200585365295
+          ]
+        },
+        "sample_index": 89,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748637794981,
+          740748637740031,
+          740748638246510,
+          740748637817577
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748643246510,
+          740748643246510,
+          740748643246510,
+          740748643246510
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748643247007,
+            740748643269205
+          ],
+          [
+            740748643247456,
+            740748643281416
+          ],
+          [
+            740748643247446,
+            740748643296774
+          ],
+          [
+            740748643247130,
+            740748643268147
+          ]
+        ],
+        "start_record_envelope_span_ns": 49767,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.07286400347948074,
+          "rank_max_ms": 0.07286400347948074,
+          "rank_ms": [
+            0.07286400347948074,
+            0.06230400130152702,
+            0.04364800080657005,
+            0.07126399874687195
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.1380160003900528,
+          "rank_max_ms": 0.23849600553512573,
+          "rank_ms": [
+            0.1380160003900528,
+            0.18121600151062012,
+            0.23849600553512573,
+            0.14003199338912964
+          ]
+        },
+        "sample_index": 90,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748648279916,
+          740748648285607,
+          740748648825745,
+          740748648254607
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748653825745,
+          740748653825745,
+          740748653825745,
+          740748653825745
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748653826237,
+            740748653847115
+          ],
+          [
+            740748653826569,
+            740748653858127
+          ],
+          [
+            740748653828294,
+            740748653877927
+          ],
+          [
+            740748653826403,
+            740748653849704
+          ]
+        ],
+        "start_record_envelope_span_ns": 51690,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.06508799642324448,
+          "rank_max_ms": 0.0663679987192154,
+          "rank_ms": [
+            0.06508799642324448,
+            0.0506879985332489,
+            0.03996799886226654,
+            0.0663679987192154
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.16195200383663177,
+          "rank_max_ms": 0.1871359944343567,
+          "rank_ms": [
+            0.16195200383663177,
+            0.1871359944343567,
+            0.18003199994564056,
+            0.15673600137233734
+          ]
+        },
+        "sample_index": 91,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748658920448,
+          740748659173917,
+          740748659327189,
+          740748659098805
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748664327189,
+          740748664327189,
+          740748664327189,
+          740748664327189
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748664327641,
+            740748664352347
+          ],
+          [
+            740748664328158,
+            740748664367066
+          ],
+          [
+            740748664328716,
+            740748664377891
+          ],
+          [
+            740748664327883,
+            740748664350468
+          ]
+        ],
+        "start_record_envelope_span_ns": 50250,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.057312000542879105,
+          "rank_max_ms": 0.057312000542879105,
+          "rank_ms": [
+            0.057312000542879105,
+            0.0459199994802475,
+            0.03721600025892258,
+            0.056543998420238495
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.13574400544166565,
+          "rank_max_ms": 0.2199999988079071,
+          "rank_ms": [
+            0.13574400544166565,
+            0.17951999604701996,
+            0.2199999988079071,
+            0.14425599575042725
+          ]
+        },
+        "sample_index": 92,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748669241079,
+          740748669465340,
+          740748669799206,
+          740748669283142
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748674799206,
+          740748674799206,
+          740748674799206,
+          740748674799206
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748674799600,
+            740748674821608
+          ],
+          [
+            740748674800208,
+            740748674834562
+          ],
+          [
+            740748674800118,
+            740748674843014
+          ],
+          [
+            740748674799837,
+            740748674823560
+          ]
+        ],
+        "start_record_envelope_span_ns": 43414,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.09798400104045868,
+          "rank_max_ms": 0.09798400104045868,
+          "rank_ms": [
+            0.09798400104045868,
+            0.08486399799585342,
+            0.06588800251483917,
+            0.09542399644851685
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.16515199840068817,
+          "rank_max_ms": 0.23084799945354462,
+          "rank_ms": [
+            0.16515199840068817,
+            0.20691199600696564,
+            0.23084799945354462,
+            0.18163199722766876
+          ]
+        },
+        "sample_index": 93,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748679560861,
+          740748679911387,
+          740748679861980,
+          740748679531543
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748684911387,
+          740748684911387,
+          740748684911387,
+          740748684911387
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748684911958,
+            740748684936145
+          ],
+          [
+            740748684912547,
+            740748684949324
+          ],
+          [
+            740748684913786,
+            740748684971531
+          ],
+          [
+            740748684911983,
+            740748684939196
+          ]
+        ],
+        "start_record_envelope_span_ns": 59573,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.09769599884748459,
+          "rank_max_ms": 0.09769599884748459,
+          "rank_ms": [
+            0.09769599884748459,
+            0.06435199826955795,
+            0.04255999997258186,
+            0.09753599762916565
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.17587199807167053,
+          "rank_max_ms": 0.23155200481414795,
+          "rank_ms": [
+            0.17587199807167053,
+            0.2237119972705841,
+            0.23155200481414795,
+            0.18272000551223755
+          ]
+        },
+        "sample_index": 94,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748689438793,
+          740748689823516,
+          740748689967471,
+          740748689623065
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748694967471,
+          740748694967471,
+          740748694967471,
+          740748694967471
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748694967798,
+            740748694997049
+          ],
+          [
+            740748694968368,
+            740748695031471
+          ],
+          [
+            740748694968472,
+            740748695052938
+          ],
+          [
+            740748694968070,
+            740748694995289
+          ]
+        ],
+        "start_record_envelope_span_ns": 85140,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.07276800274848938,
+          "rank_max_ms": 0.07276800274848938,
+          "rank_ms": [
+            0.07276800274848938,
+            0.05753599852323532,
+            0.037728000432252884,
+            0.06937599927186966
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.14787200093269348,
+          "rank_max_ms": 0.1738239973783493,
+          "rank_ms": [
+            0.14787200093269348,
+            0.1738239973783493,
+            0.17155200242996216,
+            0.16655999422073364
+          ]
+        },
+        "sample_index": 95,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748699316023,
+          740748700060633,
+          740748700191940,
+          740748699595107
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748705191940,
+          740748705191940,
+          740748705191940,
+          740748705191940
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748705192376,
+            740748705225109
+          ],
+          [
+            740748705192910,
+            740748705241900
+          ],
+          [
+            740748705192970,
+            740748705261444
+          ],
+          [
+            740748705192584,
+            740748705228991
+          ]
+        ],
+        "start_record_envelope_span_ns": 69068,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.07030399888753891,
+          "rank_max_ms": 0.07030399888753891,
+          "rank_ms": [
+            0.07030399888753891,
+            0.05478399991989136,
+            0.04227200150489807,
+            0.06380800157785416
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.14895999431610107,
+          "rank_max_ms": 0.19996799528598785,
+          "rank_ms": [
+            0.14895999431610107,
+            0.19327999651432037,
+            0.19996799528598785,
+            0.16678400337696075
+          ]
+        },
+        "sample_index": 96,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748709666398,
+          740748709998277,
+          740748710240456,
+          740748709699596
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748715240456,
+          740748715240456,
+          740748715240456,
+          740748715240456
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748715240931,
+            740748715264766
+          ],
+          [
+            740748715241749,
+            740748715281992
+          ],
+          [
+            740748715241740,
+            740748715294064
+          ],
+          [
+            740748715241043,
+            740748715268791
+          ]
+        ],
+        "start_record_envelope_span_ns": 53133,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.06828799843788147,
+          "rank_max_ms": 0.06828799843788147,
+          "rank_ms": [
+            0.06828799843788147,
+            0.05110400170087814,
+            0.041728001087903976,
+            0.06534399837255478
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.16860799491405487,
+          "rank_max_ms": 0.2306240051984787,
+          "rank_ms": [
+            0.16860799491405487,
+            0.2306240051984787,
+            0.22867199778556824,
+            0.1895039975643158
+          ]
+        },
+        "sample_index": 97,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748720280488,
+          740748720784763,
+          740748721057631,
+          740748720253248
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748726057631,
+          740748726057631,
+          740748726057631,
+          740748726057631
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748726058184,
+            740748726083961
+          ],
+          [
+            740748726058707,
+            740748726103724
+          ],
+          [
+            740748726058905,
+            740748726110621
+          ],
+          [
+            740748726058266,
+            740748726086994
+          ]
+        ],
+        "start_record_envelope_span_ns": 52437,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.06656000018119812,
+          "rank_max_ms": 0.06656000018119812,
+          "rank_ms": [
+            0.06656000018119812,
+            0.05215999856591225,
+            0.04092799872159958,
+            0.06470400094985962
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.15798400342464447,
+          "rank_max_ms": 0.19251200556755066,
+          "rank_ms": [
+            0.15798400342464447,
+            0.19174399971961975,
+            0.19251200556755066,
+            0.17472000420093536
+          ]
+        },
+        "sample_index": 98,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748731395939,
+          740748731674211,
+          740748731530983,
+          740748731449712
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748736674211,
+          740748736674211,
+          740748736674211,
+          740748736674211
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748736674732,
+            740748736702494
+          ],
+          [
+            740748736675510,
+            740748736717299
+          ],
+          [
+            740748736675447,
+            740748736727017
+          ],
+          [
+            740748736674822,
+            740748736704031
+          ]
+        ],
+        "start_record_envelope_span_ns": 52285,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.1143679991364479,
+          "rank_max_ms": 0.1170559972524643,
+          "rank_ms": [
+            0.1143679991364479,
+            0.10294400155544281,
+            0.04057599976658821,
+            0.1170559972524643
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.16147199273109436,
+          "rank_max_ms": 0.19315199553966522,
+          "rank_ms": [
+            0.16147199273109436,
+            0.1777919977903366,
+            0.19315199553966522,
+            0.15411199629306793
+          ]
+        },
+        "sample_index": 99,
+        "scheduled_start_arrival_ns_by_rank": [
+          740748740939210,
+          740748741549140,
+          740748741649252,
+          740748741268331
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          740748746649252,
+          740748746649252,
+          740748746649252,
+          740748746649252
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            740748746649812,
+            740748746675259
+          ],
+          [
+            740748746649836,
+            740748746688289
+          ],
+          [
+            740748746697853,
+            740748746749699
+          ],
+          [
+            740748746649833,
+            740748746672540
+          ]
+        ],
+        "start_record_envelope_span_ns": 99887,
+        "variant": 1
+      }
+    ],
+    "warmup_order": [
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ]
+    ]
+  },
+  "readiness_probe": {
+    "dtype": "torch.bfloat16",
+    "full_tensor_consumer": "preallocated BF16 negation output",
+    "full_tensor_validation": "exact on every warmup and measured sample",
+    "num_elements": 60,
+    "positions": [
+      [
+        0,
+        0
+      ],
+      [
+        0,
+        1
+      ],
+      [
+        0,
+        2
+      ],
+      [
+        0,
+        3
+      ],
+      [
+        0,
+        2048
+      ],
+      [
+        0,
+        3072
+      ],
+      [
+        0,
+        6140
+      ],
+      [
+        0,
+        6141
+      ],
+      [
+        0,
+        6142
+      ],
+      [
+        0,
+        6143
+      ],
+      [
+        1,
+        0
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        1,
+        3
+      ],
+      [
+        1,
+        2048
+      ],
+      [
+        1,
+        3072
+      ],
+      [
+        1,
+        6140
+      ],
+      [
+        1,
+        6141
+      ],
+      [
+        1,
+        6142
+      ],
+      [
+        1,
+        6143
+      ],
+      [
+        5,
+        0
+      ],
+      [
+        5,
+        1
+      ],
+      [
+        5,
+        2
+      ],
+      [
+        5,
+        3
+      ],
+      [
+        5,
+        2048
+      ],
+      [
+        5,
+        3072
+      ],
+      [
+        5,
+        6140
+      ],
+      [
+        5,
+        6141
+      ],
+      [
+        5,
+        6142
+      ],
+      [
+        5,
+        6143
+      ],
+      [
+        8,
+        0
+      ],
+      [
+        8,
+        1
+      ],
+      [
+        8,
+        2
+      ],
+      [
+        8,
+        3
+      ],
+      [
+        8,
+        2048
+      ],
+      [
+        8,
+        3072
+      ],
+      [
+        8,
+        6140
+      ],
+      [
+        8,
+        6141
+      ],
+      [
+        8,
+        6142
+      ],
+      [
+        8,
+        6143
+      ],
+      [
+        14,
+        0
+      ],
+      [
+        14,
+        1
+      ],
+      [
+        14,
+        2
+      ],
+      [
+        14,
+        3
+      ],
+      [
+        14,
+        2048
+      ],
+      [
+        14,
+        3072
+      ],
+      [
+        14,
+        6140
+      ],
+      [
+        14,
+        6141
+      ],
+      [
+        14,
+        6142
+      ],
+      [
+        14,
+        6143
+      ],
+      [
+        15,
+        0
+      ],
+      [
+        15,
+        1
+      ],
+      [
+        15,
+        2
+      ],
+      [
+        15,
+        3
+      ],
+      [
+        15,
+        2048
+      ],
+      [
+        15,
+        3072
+      ],
+      [
+        15,
+        6140
+      ],
+      [
+        15,
+        6141
+      ],
+      [
+        15,
+        6142
+      ],
+      [
+        15,
+        6143
+      ]
+    ],
+    "validation": "exact on every warmup and measured sample"
+  },
+  "reference": {
+    "collective_only": {
+      "median_ms": 0.06328000128269196,
+      "min_ms": 0.04294399917125702,
+      "p95_ms": 0.08848000317811966
+    },
+    "gate_metric": "ready_region.rank_max_ms",
+    "readiness_probe_overhead_median_ms": 0.126095999032259,
+    "ready_region": {
+      "median_ms": 0.19174399971961975,
+      "min_ms": 0.13977600634098053,
+      "p95_ms": 0.23849600553512573
+    }
+  },
+  "reference_policy": "SGLANG_GLM52_OPT=0 production GroupCoordinator path",
+  "result_path": "/tmp/tp_allreduce_reachability_20260722T181038Z/baseline/m16_run3.json",
+  "schema_version": 2,
+  "scope": "tp4_allreduce_diagnostic_only",
+  "timing_contract": {
+    "collective_only": "start event through event recorded immediately after run()",
+    "gate_metric": "ready_region rank-max paired p50",
+    "rank_start_alignment": "selected stream synchronized after restoration; TP CPU-group all-gather selects a common same-host monotonic deadline 5 ms after latest arrival; ranks busy-wait; host timestamps bracket every start-event record call",
+    "ready_region": "start event through full-tensor same-stream negation and position-sensitive gather",
+    "restoration": "variant source-to-local copy and consumer/probe poison occur before every start event"
+  },
+  "workload": {
+    "distributed": true,
+    "family": "allreduce",
+    "name": "tp4_allreduce_decode_m16",
+    "notes": "TP4/DP4 decode bucket: local M=16; sum reduction. Standalone diagnostic; production caller/ABI not yet proven.",
+    "params": {
+      "dtype": "bfloat16",
+      "hidden": 6144,
+      "local_tokens": 16
+    },
+    "phase": "decode",
+    "source_symbol": "sglang.srt.distributed.parallel_state.GroupCoordinator.all_reduce",
+    "world_size": 4
+  }
+}

@@ -1,0 +1,6510 @@
+{
+  "all_reduce_trace": {
+    "enabled": false,
+    "evidence_valid": null,
+    "failure_counts_by_rank": null,
+    "measurement_instrumented": false,
+    "paths_by_rank": null,
+    "replay_limitation": "Python observes eager dispatch or CUDA graph capture only; CUDA graph replay does not re-enter this hook. Correlate stable kernel names in an Nsight Systems trace to prove replay execution."
+  },
+  "allreduce": {
+    "candidate_capture_context_by_rank": [
+      {
+        "communicators": {
+          "custom": {
+            "algorithm": "ONE_SHOT_PUSH",
+            "class": "sglang.srt.distributed.device_communicators.custom_all_reduce_v2.CustomAllReduceV2",
+            "fields": {
+              "config": "ModeConfig(one_shot_push_threshold=2097152, one_shot_pull_threshold=2097152)",
+              "disabled": "False",
+              "max_size": "16777216",
+              "override_algo": "None",
+              "rank": "0",
+              "tms_cudagraph": "False",
+              "world_size": "4"
+            },
+            "python_id": 127169811813232,
+            "should_custom_ar": {
+              "value": true
+            }
+          },
+          "pymscclpp": {
+            "should_mscclpp_allreduce": {
+              "value": false
+            }
+          },
+          "pynccl": {
+            "class": "sglang.srt.distributed.device_communicators.pynccl.PyNcclCommunicator",
+            "fields": {
+              "disabled": "False",
+              "rank": "0",
+              "world_size": "4"
+            },
+            "python_id": 127169811986192,
+            "symmetric_pool_enabled": {
+              "value": false
+            }
+          },
+          "quick": {
+            "should_quick_allreduce": {
+              "value": false
+            }
+          },
+          "torch_symmetric_memory": {
+            "should_torch_symm_mem_allreduce": {
+              "value": false
+            }
+          }
+        },
+        "dtype": "torch.bfloat16",
+        "execution_mode": "cuda_graph",
+        "group_name": "tp:0",
+        "group_ranks": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "local_size": 0,
+        "message_bytes": 196608,
+        "phase": "candidate_capture",
+        "predicted_reference_algorithm": "ONE_SHOT_PUSH",
+        "predicted_reference_backend": "custom_all_reduce_outplace",
+        "rank": 0,
+        "shape": [
+          16,
+          6144
+        ],
+        "stream": {
+          "cuda_stream": 102453816422000,
+          "requested": "nondefault"
+        },
+        "stride": [
+          6144,
+          1
+        ],
+        "world_size": 4
+      },
+      {
+        "communicators": {
+          "custom": {
+            "algorithm": "ONE_SHOT_PUSH",
+            "class": "sglang.srt.distributed.device_communicators.custom_all_reduce_v2.CustomAllReduceV2",
+            "fields": {
+              "config": "ModeConfig(one_shot_push_threshold=2097152, one_shot_pull_threshold=2097152)",
+              "disabled": "False",
+              "max_size": "16777216",
+              "override_algo": "None",
+              "rank": "1",
+              "tms_cudagraph": "False",
+              "world_size": "4"
+            },
+            "python_id": 128419121206128,
+            "should_custom_ar": {
+              "value": true
+            }
+          },
+          "pymscclpp": {
+            "should_mscclpp_allreduce": {
+              "value": false
+            }
+          },
+          "pynccl": {
+            "class": "sglang.srt.distributed.device_communicators.pynccl.PyNcclCommunicator",
+            "fields": {
+              "disabled": "False",
+              "rank": "1",
+              "world_size": "4"
+            },
+            "python_id": 128419060053680,
+            "symmetric_pool_enabled": {
+              "value": false
+            }
+          },
+          "quick": {
+            "should_quick_allreduce": {
+              "value": false
+            }
+          },
+          "torch_symmetric_memory": {
+            "should_torch_symm_mem_allreduce": {
+              "value": false
+            }
+          }
+        },
+        "dtype": "torch.bfloat16",
+        "execution_mode": "cuda_graph",
+        "group_name": "tp:0",
+        "group_ranks": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "local_size": 0,
+        "message_bytes": 196608,
+        "phase": "candidate_capture",
+        "predicted_reference_algorithm": "ONE_SHOT_PUSH",
+        "predicted_reference_backend": "custom_all_reduce_outplace",
+        "rank": 1,
+        "shape": [
+          16,
+          6144
+        ],
+        "stream": {
+          "cuda_stream": 94156803933072,
+          "requested": "nondefault"
+        },
+        "stride": [
+          6144,
+          1
+        ],
+        "world_size": 4
+      },
+      {
+        "communicators": {
+          "custom": {
+            "algorithm": "ONE_SHOT_PUSH",
+            "class": "sglang.srt.distributed.device_communicators.custom_all_reduce_v2.CustomAllReduceV2",
+            "fields": {
+              "config": "ModeConfig(one_shot_push_threshold=2097152, one_shot_pull_threshold=2097152)",
+              "disabled": "False",
+              "max_size": "16777216",
+              "override_algo": "None",
+              "rank": "2",
+              "tms_cudagraph": "False",
+              "world_size": "4"
+            },
+            "python_id": 137611681616128,
+            "should_custom_ar": {
+              "value": true
+            }
+          },
+          "pymscclpp": {
+            "should_mscclpp_allreduce": {
+              "value": false
+            }
+          },
+          "pynccl": {
+            "class": "sglang.srt.distributed.device_communicators.pynccl.PyNcclCommunicator",
+            "fields": {
+              "disabled": "False",
+              "rank": "2",
+              "world_size": "4"
+            },
+            "python_id": 137611681474720,
+            "symmetric_pool_enabled": {
+              "value": false
+            }
+          },
+          "quick": {
+            "should_quick_allreduce": {
+              "value": false
+            }
+          },
+          "torch_symmetric_memory": {
+            "should_torch_symm_mem_allreduce": {
+              "value": false
+            }
+          }
+        },
+        "dtype": "torch.bfloat16",
+        "execution_mode": "cuda_graph",
+        "group_name": "tp:0",
+        "group_ranks": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "local_size": 0,
+        "message_bytes": 196608,
+        "phase": "candidate_capture",
+        "predicted_reference_algorithm": "ONE_SHOT_PUSH",
+        "predicted_reference_backend": "custom_all_reduce_outplace",
+        "rank": 2,
+        "shape": [
+          16,
+          6144
+        ],
+        "stream": {
+          "cuda_stream": 110066308932672,
+          "requested": "nondefault"
+        },
+        "stride": [
+          6144,
+          1
+        ],
+        "world_size": 4
+      },
+      {
+        "communicators": {
+          "custom": {
+            "algorithm": "ONE_SHOT_PUSH",
+            "class": "sglang.srt.distributed.device_communicators.custom_all_reduce_v2.CustomAllReduceV2",
+            "fields": {
+              "config": "ModeConfig(one_shot_push_threshold=2097152, one_shot_pull_threshold=2097152)",
+              "disabled": "False",
+              "max_size": "16777216",
+              "override_algo": "None",
+              "rank": "3",
+              "tms_cudagraph": "False",
+              "world_size": "4"
+            },
+            "python_id": 138555858218464,
+            "should_custom_ar": {
+              "value": true
+            }
+          },
+          "pymscclpp": {
+            "should_mscclpp_allreduce": {
+              "value": false
+            }
+          },
+          "pynccl": {
+            "class": "sglang.srt.distributed.device_communicators.pynccl.PyNcclCommunicator",
+            "fields": {
+              "disabled": "False",
+              "rank": "3",
+              "world_size": "4"
+            },
+            "python_id": 138555919607584,
+            "symmetric_pool_enabled": {
+              "value": false
+            }
+          },
+          "quick": {
+            "should_quick_allreduce": {
+              "value": false
+            }
+          },
+          "torch_symmetric_memory": {
+            "should_torch_symm_mem_allreduce": {
+              "value": false
+            }
+          }
+        },
+        "dtype": "torch.bfloat16",
+        "execution_mode": "cuda_graph",
+        "group_name": "tp:0",
+        "group_ranks": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "local_size": 0,
+        "message_bytes": 196608,
+        "phase": "candidate_capture",
+        "predicted_reference_algorithm": "ONE_SHOT_PUSH",
+        "predicted_reference_backend": "custom_all_reduce_outplace",
+        "rank": 3,
+        "shape": [
+          16,
+          6144
+        ],
+        "stream": {
+          "cuda_stream": 109158740749120,
+          "requested": "nondefault"
+        },
+        "stride": [
+          6144,
+          1
+        ],
+        "world_size": 4
+      }
+    ],
+    "candidate_contract_by_rank": [
+      {
+        "exact_values": true,
+        "local_poststate": "reduced",
+        "output": {
+          "device": "cuda:0",
+          "dtype": "torch.bfloat16",
+          "shape": [
+            16,
+            6144
+          ],
+          "stride": [
+            6144,
+            1
+          ]
+        },
+        "output_aliases_local": true,
+        "source_immutable": true
+      },
+      {
+        "exact_values": true,
+        "local_poststate": "reduced",
+        "output": {
+          "device": "cuda:1",
+          "dtype": "torch.bfloat16",
+          "shape": [
+            16,
+            6144
+          ],
+          "stride": [
+            6144,
+            1
+          ]
+        },
+        "output_aliases_local": true,
+        "source_immutable": true
+      },
+      {
+        "exact_values": true,
+        "local_poststate": "reduced",
+        "output": {
+          "device": "cuda:2",
+          "dtype": "torch.bfloat16",
+          "shape": [
+            16,
+            6144
+          ],
+          "stride": [
+            6144,
+            1
+          ]
+        },
+        "output_aliases_local": true,
+        "source_immutable": true
+      },
+      {
+        "exact_values": true,
+        "local_poststate": "reduced",
+        "output": {
+          "device": "cuda:3",
+          "dtype": "torch.bfloat16",
+          "shape": [
+            16,
+            6144
+          ],
+          "stride": [
+            6144,
+            1
+          ]
+        },
+        "output_aliases_local": true,
+        "source_immutable": true
+      }
+    ],
+    "exact_oracle": "hash[row,col]=(37*(row%127)+17*(col%127)+13*(row%127)*(col%127))%127; base_variant=((hash+shift)%127)-63 for shifts [0,31]; source=base+2*rank-(world_size-1); expected=world_size*base",
+    "message_bytes": 196608,
+    "reference_contract_by_rank": [
+      {
+        "exact_values": true,
+        "local_poststate": "reduced",
+        "output": {
+          "device": "cuda:0",
+          "dtype": "torch.bfloat16",
+          "shape": [
+            16,
+            6144
+          ],
+          "stride": [
+            6144,
+            1
+          ]
+        },
+        "output_aliases_local": true,
+        "source_immutable": true
+      },
+      {
+        "exact_values": true,
+        "local_poststate": "reduced",
+        "output": {
+          "device": "cuda:1",
+          "dtype": "torch.bfloat16",
+          "shape": [
+            16,
+            6144
+          ],
+          "stride": [
+            6144,
+            1
+          ]
+        },
+        "output_aliases_local": true,
+        "source_immutable": true
+      },
+      {
+        "exact_values": true,
+        "local_poststate": "reduced",
+        "output": {
+          "device": "cuda:2",
+          "dtype": "torch.bfloat16",
+          "shape": [
+            16,
+            6144
+          ],
+          "stride": [
+            6144,
+            1
+          ]
+        },
+        "output_aliases_local": true,
+        "source_immutable": true
+      },
+      {
+        "exact_values": true,
+        "local_poststate": "reduced",
+        "output": {
+          "device": "cuda:3",
+          "dtype": "torch.bfloat16",
+          "shape": [
+            16,
+            6144
+          ],
+          "stride": [
+            6144,
+            1
+          ]
+        },
+        "output_aliases_local": true,
+        "source_immutable": true
+      }
+    ],
+    "reference_dispatch_by_rank": [
+      {
+        "communicators": {
+          "custom": {
+            "algorithm": "ONE_SHOT_PUSH",
+            "class": "sglang.srt.distributed.device_communicators.custom_all_reduce_v2.CustomAllReduceV2",
+            "fields": {
+              "config": "ModeConfig(one_shot_push_threshold=2097152, one_shot_pull_threshold=2097152)",
+              "disabled": "False",
+              "max_size": "16777216",
+              "override_algo": "None",
+              "rank": "0",
+              "tms_cudagraph": "False",
+              "world_size": "4"
+            },
+            "python_id": 127169811813232,
+            "should_custom_ar": {
+              "value": true
+            }
+          },
+          "pymscclpp": {
+            "should_mscclpp_allreduce": {
+              "value": false
+            }
+          },
+          "pynccl": {
+            "class": "sglang.srt.distributed.device_communicators.pynccl.PyNcclCommunicator",
+            "fields": {
+              "disabled": "False",
+              "rank": "0",
+              "world_size": "4"
+            },
+            "python_id": 127169811986192,
+            "symmetric_pool_enabled": {
+              "value": false
+            }
+          },
+          "quick": {
+            "should_quick_allreduce": {
+              "value": false
+            }
+          },
+          "torch_symmetric_memory": {
+            "should_torch_symm_mem_allreduce": {
+              "value": false
+            }
+          }
+        },
+        "dtype": "torch.bfloat16",
+        "execution_mode": "cuda_graph",
+        "group_name": "tp:0",
+        "group_ranks": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "local_size": 0,
+        "message_bytes": 196608,
+        "phase": "reference_capture",
+        "predicted_reference_algorithm": "ONE_SHOT_PUSH",
+        "predicted_reference_backend": "custom_all_reduce_outplace",
+        "rank": 0,
+        "shape": [
+          16,
+          6144
+        ],
+        "stream": {
+          "cuda_stream": 102453816422000,
+          "requested": "nondefault"
+        },
+        "stride": [
+          6144,
+          1
+        ],
+        "world_size": 4
+      },
+      {
+        "communicators": {
+          "custom": {
+            "algorithm": "ONE_SHOT_PUSH",
+            "class": "sglang.srt.distributed.device_communicators.custom_all_reduce_v2.CustomAllReduceV2",
+            "fields": {
+              "config": "ModeConfig(one_shot_push_threshold=2097152, one_shot_pull_threshold=2097152)",
+              "disabled": "False",
+              "max_size": "16777216",
+              "override_algo": "None",
+              "rank": "1",
+              "tms_cudagraph": "False",
+              "world_size": "4"
+            },
+            "python_id": 128419121206128,
+            "should_custom_ar": {
+              "value": true
+            }
+          },
+          "pymscclpp": {
+            "should_mscclpp_allreduce": {
+              "value": false
+            }
+          },
+          "pynccl": {
+            "class": "sglang.srt.distributed.device_communicators.pynccl.PyNcclCommunicator",
+            "fields": {
+              "disabled": "False",
+              "rank": "1",
+              "world_size": "4"
+            },
+            "python_id": 128419060053680,
+            "symmetric_pool_enabled": {
+              "value": false
+            }
+          },
+          "quick": {
+            "should_quick_allreduce": {
+              "value": false
+            }
+          },
+          "torch_symmetric_memory": {
+            "should_torch_symm_mem_allreduce": {
+              "value": false
+            }
+          }
+        },
+        "dtype": "torch.bfloat16",
+        "execution_mode": "cuda_graph",
+        "group_name": "tp:0",
+        "group_ranks": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "local_size": 0,
+        "message_bytes": 196608,
+        "phase": "reference_capture",
+        "predicted_reference_algorithm": "ONE_SHOT_PUSH",
+        "predicted_reference_backend": "custom_all_reduce_outplace",
+        "rank": 1,
+        "shape": [
+          16,
+          6144
+        ],
+        "stream": {
+          "cuda_stream": 94156803933072,
+          "requested": "nondefault"
+        },
+        "stride": [
+          6144,
+          1
+        ],
+        "world_size": 4
+      },
+      {
+        "communicators": {
+          "custom": {
+            "algorithm": "ONE_SHOT_PUSH",
+            "class": "sglang.srt.distributed.device_communicators.custom_all_reduce_v2.CustomAllReduceV2",
+            "fields": {
+              "config": "ModeConfig(one_shot_push_threshold=2097152, one_shot_pull_threshold=2097152)",
+              "disabled": "False",
+              "max_size": "16777216",
+              "override_algo": "None",
+              "rank": "2",
+              "tms_cudagraph": "False",
+              "world_size": "4"
+            },
+            "python_id": 137611681616128,
+            "should_custom_ar": {
+              "value": true
+            }
+          },
+          "pymscclpp": {
+            "should_mscclpp_allreduce": {
+              "value": false
+            }
+          },
+          "pynccl": {
+            "class": "sglang.srt.distributed.device_communicators.pynccl.PyNcclCommunicator",
+            "fields": {
+              "disabled": "False",
+              "rank": "2",
+              "world_size": "4"
+            },
+            "python_id": 137611681474720,
+            "symmetric_pool_enabled": {
+              "value": false
+            }
+          },
+          "quick": {
+            "should_quick_allreduce": {
+              "value": false
+            }
+          },
+          "torch_symmetric_memory": {
+            "should_torch_symm_mem_allreduce": {
+              "value": false
+            }
+          }
+        },
+        "dtype": "torch.bfloat16",
+        "execution_mode": "cuda_graph",
+        "group_name": "tp:0",
+        "group_ranks": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "local_size": 0,
+        "message_bytes": 196608,
+        "phase": "reference_capture",
+        "predicted_reference_algorithm": "ONE_SHOT_PUSH",
+        "predicted_reference_backend": "custom_all_reduce_outplace",
+        "rank": 2,
+        "shape": [
+          16,
+          6144
+        ],
+        "stream": {
+          "cuda_stream": 110066308932672,
+          "requested": "nondefault"
+        },
+        "stride": [
+          6144,
+          1
+        ],
+        "world_size": 4
+      },
+      {
+        "communicators": {
+          "custom": {
+            "algorithm": "ONE_SHOT_PUSH",
+            "class": "sglang.srt.distributed.device_communicators.custom_all_reduce_v2.CustomAllReduceV2",
+            "fields": {
+              "config": "ModeConfig(one_shot_push_threshold=2097152, one_shot_pull_threshold=2097152)",
+              "disabled": "False",
+              "max_size": "16777216",
+              "override_algo": "None",
+              "rank": "3",
+              "tms_cudagraph": "False",
+              "world_size": "4"
+            },
+            "python_id": 138555858218464,
+            "should_custom_ar": {
+              "value": true
+            }
+          },
+          "pymscclpp": {
+            "should_mscclpp_allreduce": {
+              "value": false
+            }
+          },
+          "pynccl": {
+            "class": "sglang.srt.distributed.device_communicators.pynccl.PyNcclCommunicator",
+            "fields": {
+              "disabled": "False",
+              "rank": "3",
+              "world_size": "4"
+            },
+            "python_id": 138555919607584,
+            "symmetric_pool_enabled": {
+              "value": false
+            }
+          },
+          "quick": {
+            "should_quick_allreduce": {
+              "value": false
+            }
+          },
+          "torch_symmetric_memory": {
+            "should_torch_symm_mem_allreduce": {
+              "value": false
+            }
+          }
+        },
+        "dtype": "torch.bfloat16",
+        "execution_mode": "cuda_graph",
+        "group_name": "tp:0",
+        "group_ranks": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "local_size": 0,
+        "message_bytes": 196608,
+        "phase": "reference_capture",
+        "predicted_reference_algorithm": "ONE_SHOT_PUSH",
+        "predicted_reference_backend": "custom_all_reduce_outplace",
+        "rank": 3,
+        "shape": [
+          16,
+          6144
+        ],
+        "stream": {
+          "cuda_stream": 109158740749120,
+          "requested": "nondefault"
+        },
+        "stride": [
+          6144,
+          1
+        ],
+        "world_size": 4
+      }
+    ]
+  },
+  "candidate": {
+    "collective_only": {
+      "median_ms": 0.07753599807620049,
+      "min_ms": 0.05526399984955788,
+      "p95_ms": 0.09795200079679489
+    },
+    "gate_metric": "ready_region.rank_max_ms",
+    "manifest": {
+      "entries": [
+        {
+          "path": "allreduce_torch.py",
+          "sha256": "6793d235066fb8679fd98c1153e4d82741f195d4ba224449caa8ab38f9e07cd6",
+          "size": 224,
+          "type": "file"
+        }
+      ],
+      "entrypoint": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/serving_native/candidates/allreduce_torch.py",
+      "entrypoint_sha256_at_import": "6793d235066fb8679fd98c1153e4d82741f195d4ba224449caa8ab38f9e07cd6",
+      "excluded_generated_files": [
+        "**/__pycache__/**",
+        "**/*.pyc"
+      ],
+      "manifest_sha256": "af7a19e204b4fb90430c109efa28aa9528c22901d2452952d4afcb8a95e7c22f",
+      "requested_path": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/serving_native/candidates/allreduce_torch.py",
+      "root": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/serving_native/candidates"
+    },
+    "paired_p10_speedup": 0.8547269185134889,
+    "paired_p90_speedup": 1.1915445908587867,
+    "passes_3pct_median_gate": true,
+    "readiness_probe_overhead_median_ms": 0.169088002294302,
+    "ready_region": {
+      "median_ms": 0.24942399561405182,
+      "min_ms": 0.2085759937763214,
+      "p95_ms": 0.2839359939098358
+    },
+    "speedup": 1.056422673547149,
+    "speedup_metric": "paired ready-region rank-max"
+  },
+  "correctness": {
+    "alternating_input_variants": 2,
+    "candidate_state_guarded": true,
+    "exact_full_checks": "before and after timing",
+    "exact_full_tensor_consumer": "every warmup and measured sample",
+    "exact_position_probe": "every warmup and measured sample",
+    "passed": true,
+    "validation_errors_aggregated_over_tp_cpu_group": true
+  },
+  "disposition": "tp4_diagnostic_candidate_win_only",
+  "environment": {
+    "device": {
+      "capability": [
+        10,
+        0
+      ],
+      "name": "NVIDIA B200",
+      "rank": 0,
+      "total_memory": 191490555904
+    },
+    "device_by_rank": [
+      {
+        "capability": [
+          10,
+          0
+        ],
+        "name": "NVIDIA B200",
+        "rank": 0,
+        "total_memory": 191490555904
+      },
+      {
+        "capability": [
+          10,
+          0
+        ],
+        "name": "NVIDIA B200",
+        "rank": 1,
+        "total_memory": 191490555904
+      },
+      {
+        "capability": [
+          10,
+          0
+        ],
+        "name": "NVIDIA B200",
+        "rank": 2,
+        "total_memory": 191490555904
+      },
+      {
+        "capability": [
+          10,
+          0
+        ],
+        "name": "NVIDIA B200",
+        "rank": 3,
+        "total_memory": 191490555904
+      }
+    ],
+    "env": {
+      "CUDA_VISIBLE_DEVICES": "0,1,2,3",
+      "NCCL_ALGO": null,
+      "NCCL_PROTO": null,
+      "SGLANG_ALL_REDUCE_TRACE": null,
+      "SGLANG_GLM52_OPT": "0",
+      "SGLANG_OPT_USE_CUSTOM_ALL_REDUCE_V2": null,
+      "SGLANG_ROOT": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/sglang"
+    },
+    "kernel_harness_git": {
+      "branch": "goal/glm52-prod-24-tp_allreduce_reachability",
+      "dirty": true,
+      "root": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness",
+      "sha": "46ba02607b54f62cdef5a43c99e558b12b545aa6",
+      "status": [
+        "M serving_native/README.md",
+        " M serving_native/selftest.py",
+        " M serving_native/tp_allreduce_runner.py"
+      ]
+    },
+    "packages": {
+      "flashinfer": {
+        "path": "/mnt/OS-oKqEXySb/home/qinhaiyan/miniconda3/envs/sglang/lib/python3.12/site-packages/flashinfer/__init__.py",
+        "version": "0.6.12"
+      },
+      "sgl_kernel": {
+        "path": "/mnt/OS-oKqEXySb/home/qinhaiyan/miniconda3/envs/sglang/lib/python3.12/site-packages/sgl_kernel/__init__.py",
+        "version": "0.4.4"
+      },
+      "sglang": {
+        "path": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/sglang/python/sglang/__init__.py",
+        "version": "0.5.15"
+      },
+      "torch": {
+        "cuda": "13.0",
+        "nccl": [
+          2,
+          28,
+          9
+        ],
+        "path": "/mnt/OS-oKqEXySb/home/qinhaiyan/miniconda3/envs/sglang/lib/python3.12/site-packages/torch/__init__.py",
+        "version": "2.11.0+cu130"
+      },
+      "triton": {
+        "path": "/mnt/OS-oKqEXySb/home/qinhaiyan/miniconda3/envs/sglang/lib/python3.12/site-packages/triton/__init__.py",
+        "version": "3.6.0"
+      }
+    },
+    "python": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/.venv/bin/python",
+    "python_version": "3.12.13 | packaged by Anaconda, Inc. | (main, Jul  9 2026, 14:38:16) [GCC 14.3.0]",
+    "sglang_git": {
+      "branch": "goal/glm52-prod-24-tp_allreduce_reachability",
+      "dirty": true,
+      "root": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/sglang",
+      "sha": "49c03b20e861782002eec6f5be7126e7e19c2d28",
+      "status": [
+        "M glm52_opt/history/tp_allreduce_reachability/analyze_tp4_campaign.py",
+        " M glm52_opt/history/tp_allreduce_reachability/attempt_ledger.md",
+        " M glm52_opt/history/tp_allreduce_reachability/test_analyze_tp4_campaign.py",
+        "?? glm52_opt/history/tp_allreduce_reachability/runtime/tp_allreduce_reachability_20260722T181038Z_aborted_shutdown_alignment/",
+        "?? glm52_opt/history/tp_allreduce_reachability/runtime/tp_allreduce_shutdown_retry_probe_20260722T185615Z_aborted_live_graph/"
+      ]
+    }
+  },
+  "execution": {
+    "cuda_stream": 102453816422000,
+    "default_to_execution_waits_outside_timing": 7,
+    "mode": "cuda_graph",
+    "nvtx_measurement_range": "serving_native/tp4_allreduce_decode_m16/cuda_graph/nondefault/paired",
+    "nvtx_rank_synchronization": "rank 0 push after a TP CPU-group barrier; all ranks wait at a second barrier before measurement and before rank 0 pop",
+    "stream": "nondefault"
+  },
+  "gate": {
+    "candidate_present": true,
+    "metric": "paired ready-region rank-max p50 speedup",
+    "minimum_speedup": 1.03,
+    "passed": true,
+    "performance_eligible": true,
+    "stock_fallback_active": true
+  },
+  "production_acceptance": "This direct TP4 callable is not proof of the GLM serving caller/ABI and cannot be relabeled as TP8 evidence.",
+  "raw_samples": {
+    "alignment_policy": {
+      "accepted_pair_attempts": 20,
+      "admission_fields": [
+        "scheduled_start_arrival_ns_by_rank",
+        "scheduled_start_target_ns_by_rank",
+        "start_record_bracket_ns_by_rank",
+        "start_record_envelope_span_ns"
+      ],
+      "initial_input_variant": 0,
+      "latency_fields_excluded": true,
+      "max_pair_attempts": 10,
+      "next_input_variant": 1,
+      "rejected_pair_attempts": 1,
+      "requested_logical_pairs": 20,
+      "start_record_envelope_limit_ns": 500000,
+      "total_pair_attempts": 21
+    },
+    "candidate": [
+      {
+        "collective_only": {
+          "local_ms": 0.07158400118350983,
+          "rank_max_ms": 0.07347200065851212,
+          "rank_ms": [
+            0.07158400118350983,
+            0.07347200065851212,
+            0.062272001057863235,
+            0.07321599870920181
+          ]
+        },
+        "pair_attempt_id": 0,
+        "pair_retry_ordinal": 0,
+        "position": 1,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.1648319959640503,
+          "rank_max_ms": 0.24515199661254883,
+          "rank_ms": [
+            0.1648319959640503,
+            0.1610880047082901,
+            0.24515199661254883,
+            0.17523199319839478
+          ]
+        },
+        "sample_index": 0,
+        "scheduled_start_arrival_ns_by_rank": [
+          743866715382839,
+          743866715310137,
+          743866715204191,
+          743866715212309
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          743866720382839,
+          743866720382839,
+          743866720382839,
+          743866720382839
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            743866720384049,
+            743866720425090
+          ],
+          [
+            743866720383538,
+            743866720416609
+          ],
+          [
+            743866720385440,
+            743866720435355
+          ],
+          [
+            743866720384347,
+            743866720422998
+          ]
+        ],
+        "start_record_envelope_span_ns": 51817,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.04873599857091904,
+          "rank_max_ms": 0.05526399984955788,
+          "rank_ms": [
+            0.04873599857091904,
+            0.05459199845790863,
+            0.05523199960589409,
+            0.05526399984955788
+          ]
+        },
+        "pair_attempt_id": 1,
+        "pair_retry_ordinal": 0,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.1907840073108673,
+          "rank_max_ms": 0.26211199164390564,
+          "rank_ms": [
+            0.1907840073108673,
+            0.18326400220394135,
+            0.26211199164390564,
+            0.1897599995136261
+          ]
+        },
+        "sample_index": 1,
+        "scheduled_start_arrival_ns_by_rank": [
+          743866725827800,
+          743866725892389,
+          743866725897132,
+          743866725689193
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          743866730897132,
+          743866730897132,
+          743866730897132,
+          743866730897132
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            743866730898097,
+            743866730939028
+          ],
+          [
+            743866730897636,
+            743866730929402
+          ],
+          [
+            743866730898229,
+            743866730936985
+          ],
+          [
+            743866730897850,
+            743866730933546
+          ]
+        ],
+        "start_record_envelope_span_ns": 41392,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.05567999929189682,
+          "rank_max_ms": 0.06239999830722809,
+          "rank_ms": [
+            0.05567999929189682,
+            0.06032000109553337,
+            0.05721599981188774,
+            0.06239999830722809
+          ]
+        },
+        "pair_attempt_id": 2,
+        "pair_retry_ordinal": 0,
+        "position": 1,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.1526080071926117,
+          "rank_max_ms": 0.2085759937763214,
+          "rank_ms": [
+            0.1526080071926117,
+            0.15132799744606018,
+            0.2085759937763214,
+            0.15139199793338776
+          ]
+        },
+        "sample_index": 2,
+        "scheduled_start_arrival_ns_by_rank": [
+          743866756397713,
+          743866756438886,
+          743866756407968,
+          743866756262218
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          743866761438886,
+          743866761438886,
+          743866761438886,
+          743866761438886
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            743866761440129,
+            743866761478120
+          ],
+          [
+            743866761439539,
+            743866761469629
+          ],
+          [
+            743866761441193,
+            743866761479632
+          ],
+          [
+            743866761439971,
+            743866761471078
+          ]
+        ],
+        "start_record_envelope_span_ns": 40093,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.06943999975919724,
+          "rank_max_ms": 0.07900799810886383,
+          "rank_ms": [
+            0.06943999975919724,
+            0.07507199794054031,
+            0.06431999802589417,
+            0.07900799810886383
+          ]
+        },
+        "pair_attempt_id": 3,
+        "pair_retry_ordinal": 0,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.1775680035352707,
+          "rank_max_ms": 0.26291200518608093,
+          "rank_ms": [
+            0.1775680035352707,
+            0.17481599748134613,
+            0.26291200518608093,
+            0.17001600563526154
+          ]
+        },
+        "sample_index": 3,
+        "scheduled_start_arrival_ns_by_rank": [
+          743866767345932,
+          743866766896102,
+          743866767507462,
+          743866767278350
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          743866772507462,
+          743866772507462,
+          743866772507462,
+          743866772507462
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            743866772508712,
+            743866772552804
+          ],
+          [
+            743866772508080,
+            743866772542090
+          ],
+          [
+            743866772510644,
+            743866772561320
+          ],
+          [
+            743866772508533,
+            743866772542367
+          ]
+        ],
+        "start_record_envelope_span_ns": 53240,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.05567999929189682,
+          "rank_max_ms": 0.06560000032186508,
+          "rank_ms": [
+            0.05567999929189682,
+            0.06035200133919716,
+            0.05632000043988228,
+            0.06560000032186508
+          ]
+        },
+        "pair_attempt_id": 4,
+        "pair_retry_ordinal": 0,
+        "position": 1,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.18425600230693817,
+          "rank_max_ms": 0.24675199389457703,
+          "rank_ms": [
+            0.18425600230693817,
+            0.18719999492168427,
+            0.24675199389457703,
+            0.17289599776268005
+          ]
+        },
+        "sample_index": 4,
+        "scheduled_start_arrival_ns_by_rank": [
+          743866799364879,
+          743866799363802,
+          743866799119403,
+          743866799233071
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          743866804364879,
+          743866804364879,
+          743866804364879,
+          743866804364879
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            743866804365784,
+            743866804409326
+          ],
+          [
+            743866804365843,
+            743866804401744
+          ],
+          [
+            743866804366050,
+            743866804409188
+          ],
+          [
+            743866804366107,
+            743866804399564
+          ]
+        ],
+        "start_record_envelope_span_ns": 43542,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.05660799890756607,
+          "rank_max_ms": 0.06319999694824219,
+          "rank_ms": [
+            0.05660799890756607,
+            0.05859199911355972,
+            0.05843200162053108,
+            0.06319999694824219
+          ]
+        },
+        "pair_attempt_id": 5,
+        "pair_retry_ordinal": 0,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.17641599476337433,
+          "rank_max_ms": 0.2839359939098358,
+          "rank_ms": [
+            0.17641599476337433,
+            0.18220800161361694,
+            0.2839359939098358,
+            0.1902720034122467
+          ]
+        },
+        "sample_index": 5,
+        "scheduled_start_arrival_ns_by_rank": [
+          743866811725160,
+          743866811146497,
+          743866810834323,
+          743866811439203
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          743866816725160,
+          743866816725160,
+          743866816725160,
+          743866816725160
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            743866816726038,
+            743866816772694
+          ],
+          [
+            743866816725866,
+            743866816762035
+          ],
+          [
+            743866816726262,
+            743866816771163
+          ],
+          [
+            743866816726399,
+            743866816766596
+          ]
+        ],
+        "start_record_envelope_span_ns": 46828,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.05452800169587135,
+          "rank_max_ms": 0.06102399900555611,
+          "rank_ms": [
+            0.05452800169587135,
+            0.05503999814391136,
+            0.05619199946522713,
+            0.06102399900555611
+          ]
+        },
+        "pair_attempt_id": 6,
+        "pair_retry_ordinal": 0,
+        "position": 1,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.17772799730300903,
+          "rank_max_ms": 0.22732800245285034,
+          "rank_ms": [
+            0.17772799730300903,
+            0.18121600151062012,
+            0.22732800245285034,
+            0.17766399681568146
+          ]
+        },
+        "sample_index": 6,
+        "scheduled_start_arrival_ns_by_rank": [
+          743866846475460,
+          743866846410618,
+          743866846341941,
+          743866846508550
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          743866851508550,
+          743866851508550,
+          743866851508550,
+          743866851508550
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            743866851509767,
+            743866851552668
+          ],
+          [
+            743866851509519,
+            743866851548222
+          ],
+          [
+            743866851509488,
+            743866851552320
+          ],
+          [
+            743866851509834,
+            743866851545953
+          ]
+        ],
+        "start_record_envelope_span_ns": 43180,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.06831999868154526,
+          "rank_max_ms": 0.06918399780988693,
+          "rank_ms": [
+            0.06831999868154526,
+            0.06790400296449661,
+            0.05875200033187866,
+            0.06918399780988693
+          ]
+        },
+        "pair_attempt_id": 7,
+        "pair_retry_ordinal": 0,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.14457599818706512,
+          "rank_max_ms": 0.24198399484157562,
+          "rank_ms": [
+            0.14457599818706512,
+            0.14127999544143677,
+            0.24198399484157562,
+            0.1510079950094223
+          ]
+        },
+        "sample_index": 7,
+        "scheduled_start_arrival_ns_by_rank": [
+          743866855678194,
+          743866856076810,
+          743866855872947,
+          743866855701270
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          743866861076810,
+          743866861076810,
+          743866861076810,
+          743866861076810
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            743866861077834,
+            743866861110902
+          ],
+          [
+            743866861077587,
+            743866861104586
+          ],
+          [
+            743866861079552,
+            743866861122360
+          ],
+          [
+            743866861077821,
+            743866861108814
+          ]
+        ],
+        "start_record_envelope_span_ns": 44773,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.0708480030298233,
+          "rank_max_ms": 0.07465600222349167,
+          "rank_ms": [
+            0.0708480030298233,
+            0.07465600222349167,
+            0.06400000303983688,
+            0.07305599749088287
+          ]
+        },
+        "pair_attempt_id": 8,
+        "pair_retry_ordinal": 0,
+        "position": 1,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.14982399344444275,
+          "rank_max_ms": 0.2725119888782501,
+          "rank_ms": [
+            0.14982399344444275,
+            0.166143998503685,
+            0.2725119888782501,
+            0.17260800302028656
+          ]
+        },
+        "sample_index": 8,
+        "scheduled_start_arrival_ns_by_rank": [
+          743866888650794,
+          743866888747977,
+          743866888463064,
+          743866888396460
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          743866893747977,
+          743866893747977,
+          743866893747977,
+          743866893747977
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            743866893748717,
+            743866893784091
+          ],
+          [
+            743866893748949,
+            743866893779143
+          ],
+          [
+            743866893750944,
+            743866893795841
+          ],
+          [
+            743866893749379,
+            743866893783502
+          ]
+        ],
+        "start_record_envelope_span_ns": 47124,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.09795200079679489,
+          "rank_max_ms": 0.09795200079679489,
+          "rank_ms": [
+            0.09795200079679489,
+            0.07875200361013412,
+            0.06764800101518631,
+            0.08003199845552444
+          ]
+        },
+        "pair_attempt_id": 9,
+        "pair_retry_ordinal": 0,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.12675200402736664,
+          "rank_max_ms": 0.267520010471344,
+          "rank_ms": [
+            0.12675200402736664,
+            0.17552000284194946,
+            0.267520010471344,
+            0.18134400248527527
+          ]
+        },
+        "sample_index": 9,
+        "scheduled_start_arrival_ns_by_rank": [
+          743866900193558,
+          743866900116366,
+          743866900585677,
+          743866900453235
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          743866905585677,
+          743866905585677,
+          743866905585677,
+          743866905585677
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            743866905586146,
+            743866905608704
+          ],
+          [
+            743866905586574,
+            743866905621792
+          ],
+          [
+            743866905589078,
+            743866905643118
+          ],
+          [
+            743866905587538,
+            743866905626923
+          ]
+        ],
+        "start_record_envelope_span_ns": 56972,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.08511999994516373,
+          "rank_max_ms": 0.09251199662685394,
+          "rank_ms": [
+            0.08511999994516373,
+            0.0920960009098053,
+            0.06825599819421768,
+            0.09251199662685394
+          ]
+        },
+        "pair_attempt_id": 10,
+        "pair_retry_ordinal": 0,
+        "position": 1,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.16940799355506897,
+          "rank_max_ms": 0.2625280022621155,
+          "rank_ms": [
+            0.16940799355506897,
+            0.17020800709724426,
+            0.2625280022621155,
+            0.18243199586868286
+          ]
+        },
+        "sample_index": 10,
+        "scheduled_start_arrival_ns_by_rank": [
+          743866932966243,
+          743866932762897,
+          743866932715955,
+          743866932601023
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          743866937966243,
+          743866937966243,
+          743866937966243,
+          743866937966243
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            743866937967412,
+            743866938022291
+          ],
+          [
+            743866937967063,
+            743866938011431
+          ],
+          [
+            743866937969043,
+            743866938043087
+          ],
+          [
+            743866937967485,
+            743866938017150
+          ]
+        ],
+        "start_record_envelope_span_ns": 76024,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.07449600100517273,
+          "rank_max_ms": 0.0772479996085167,
+          "rank_ms": [
+            0.07449600100517273,
+            0.07215999811887741,
+            0.06147199869155884,
+            0.0772479996085167
+          ]
+        },
+        "pair_attempt_id": 11,
+        "pair_retry_ordinal": 0,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.14390400052070618,
+          "rank_max_ms": 0.22604799270629883,
+          "rank_ms": [
+            0.14390400052070618,
+            0.15078400075435638,
+            0.22604799270629883,
+            0.15007999539375305
+          ]
+        },
+        "sample_index": 11,
+        "scheduled_start_arrival_ns_by_rank": [
+          743866943457326,
+          743866943556453,
+          743866943503313,
+          743866943411224
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          743866948556453,
+          743866948556453,
+          743866948556453,
+          743866948556453
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            743866948557344,
+            743866948591588
+          ],
+          [
+            743866948557151,
+            743866948586505
+          ],
+          [
+            743866948559442,
+            743866948605845
+          ],
+          [
+            743866948557402,
+            743866948587752
+          ]
+        ],
+        "start_record_envelope_span_ns": 48694,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.1783680021762848,
+          "rank_max_ms": 0.275519996881485,
+          "rank_ms": [
+            0.1783680021762848,
+            0.275519996881485,
+            0.2736319899559021,
+            0.05843200162053108
+          ]
+        },
+        "pair_attempt_id": 12,
+        "pair_retry_ordinal": 0,
+        "position": 1,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.2173759937286377,
+          "rank_max_ms": 0.28537601232528687,
+          "rank_ms": [
+            0.2173759937286377,
+            0.28537601232528687,
+            0.2836480140686035,
+            0.2017280012369156
+          ]
+        },
+        "sample_index": 12,
+        "scheduled_start_arrival_ns_by_rank": [
+          743866976793118,
+          743866976652538,
+          743866976666798,
+          743866976568748
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          743866981793118,
+          743866981793118,
+          743866981793118,
+          743866981793118
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            743866981886170,
+            743866981933025
+          ],
+          [
+            743866981793862,
+            743866981830765
+          ],
+          [
+            743866981793759,
+            743866981837117
+          ],
+          [
+            743866981982351,
+            743866982055486
+          ]
+        ],
+        "start_record_envelope_span_ns": 261727,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.0745600014925003,
+          "rank_max_ms": 0.08348800241947174,
+          "rank_ms": [
+            0.0745600014925003,
+            0.07702399790287018,
+            0.06534399837255478,
+            0.08348800241947174
+          ]
+        },
+        "pair_attempt_id": 13,
+        "pair_retry_ordinal": 0,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.16649599373340607,
+          "rank_max_ms": 0.2520959973335266,
+          "rank_ms": [
+            0.16649599373340607,
+            0.16819199919700623,
+            0.2520959973335266,
+            0.1637440025806427
+          ]
+        },
+        "sample_index": 13,
+        "scheduled_start_arrival_ns_by_rank": [
+          743866988260772,
+          743866988217272,
+          743866988165656,
+          743866988530049
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          743866993530049,
+          743866993530049,
+          743866993530049,
+          743866993530049
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            743866993531298,
+            743866993572303
+          ],
+          [
+            743866993531037,
+            743866993564483
+          ],
+          [
+            743866993532895,
+            743866993584688
+          ],
+          [
+            743866993531036,
+            743866993562913
+          ]
+        ],
+        "start_record_envelope_span_ns": 53652,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.07407999783754349,
+          "rank_max_ms": 0.07407999783754349,
+          "rank_ms": [
+            0.07407999783754349,
+            0.06275200098752975,
+            0.056832000613212585,
+            0.06313599646091461
+          ]
+        },
+        "pair_attempt_id": 15,
+        "pair_retry_ordinal": 1,
+        "position": 1,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.11414399743080139,
+          "rank_max_ms": 0.22060799598693848,
+          "rank_ms": [
+            0.11414399743080139,
+            0.14841599762439728,
+            0.22060799598693848,
+            0.1621440052986145
+          ]
+        },
+        "sample_index": 14,
+        "scheduled_start_arrival_ns_by_rank": [
+          743867042086258,
+          743867042428264,
+          743867042271346,
+          743867042350706
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          743867047428264,
+          743867047428264,
+          743867047428264,
+          743867047428264
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            743867047428840,
+            743867047449317
+          ],
+          [
+            743867047429039,
+            743867047457509
+          ],
+          [
+            743867047431038,
+            743867047470453
+          ],
+          [
+            743867047429435,
+            743867047461349
+          ]
+        ],
+        "start_record_envelope_span_ns": 41613,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.08521600067615509,
+          "rank_max_ms": 0.08521600067615509,
+          "rank_ms": [
+            0.08521600067615509,
+            0.07571200281381607,
+            0.060575999319553375,
+            0.07145600020885468
+          ]
+        },
+        "pair_attempt_id": 16,
+        "pair_retry_ordinal": 0,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.14339199662208557,
+          "rank_max_ms": 0.2724800109863281,
+          "rank_ms": [
+            0.14339199662208557,
+            0.17657600343227386,
+            0.2724800109863281,
+            0.2295999974012375
+          ]
+        },
+        "sample_index": 15,
+        "scheduled_start_arrival_ns_by_rank": [
+          743867051553931,
+          743867051856002,
+          743867051787764,
+          743867051700252
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          743867056856002,
+          743867056856002,
+          743867056856002,
+          743867056856002
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            743867056856619,
+            743867056881168
+          ],
+          [
+            743867056856855,
+            743867056888973
+          ],
+          [
+            743867056858783,
+            743867056907166
+          ],
+          [
+            743867056857994,
+            743867056899545
+          ]
+        ],
+        "start_record_envelope_span_ns": 50547,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.08287999778985977,
+          "rank_max_ms": 0.08700799942016602,
+          "rank_ms": [
+            0.08287999778985977,
+            0.0745600014925003,
+            0.061503998935222626,
+            0.08700799942016602
+          ]
+        },
+        "pair_attempt_id": 17,
+        "pair_retry_ordinal": 0,
+        "position": 1,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.1207680031657219,
+          "rank_max_ms": 0.227743998169899,
+          "rank_ms": [
+            0.1207680031657219,
+            0.15014399588108063,
+            0.227743998169899,
+            0.11868800222873688
+          ]
+        },
+        "sample_index": 16,
+        "scheduled_start_arrival_ns_by_rank": [
+          743867080396287,
+          743867080481678,
+          743867080357728,
+          743867080091886
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          743867085481678,
+          743867085481678,
+          743867085481678,
+          743867085481678
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            743867085482425,
+            743867085505865
+          ],
+          [
+            743867085482517,
+            743867085510522
+          ],
+          [
+            743867085484195,
+            743867085532368
+          ],
+          [
+            743867085482231,
+            743867085500237
+          ]
+        ],
+        "start_record_envelope_span_ns": 50137,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.05657599866390228,
+          "rank_max_ms": 0.07929600030183792,
+          "rank_ms": [
+            0.05657599866390228,
+            0.06838399916887283,
+            0.06128000095486641,
+            0.07929600030183792
+          ]
+        },
+        "pair_attempt_id": 18,
+        "pair_retry_ordinal": 0,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.18614399433135986,
+          "rank_max_ms": 0.24489599466323853,
+          "rank_ms": [
+            0.18614399433135986,
+            0.17532800137996674,
+            0.24489599466323853,
+            0.14524799585342407
+          ]
+        },
+        "sample_index": 17,
+        "scheduled_start_arrival_ns_by_rank": [
+          743867091186366,
+          743867091369944,
+          743867090954779,
+          743867091150165
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          743867096369944,
+          743867096369944,
+          743867096369944,
+          743867096369944
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            743867096371538,
+            743867096420635
+          ],
+          [
+            743867096370753,
+            743867096406008
+          ],
+          [
+            743867096372280,
+            743867096420435
+          ],
+          [
+            743867096370559,
+            743867096396242
+          ]
+        ],
+        "start_record_envelope_span_ns": 50076,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.07555200159549713,
+          "rank_max_ms": 0.09308800101280212,
+          "rank_ms": [
+            0.07555200159549713,
+            0.08032000064849854,
+            0.06675200164318085,
+            0.09308800101280212
+          ]
+        },
+        "pair_attempt_id": 19,
+        "pair_retry_ordinal": 0,
+        "position": 1,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.16883200407028198,
+          "rank_max_ms": 0.26022401452064514,
+          "rank_ms": [
+            0.16883200407028198,
+            0.16995200514793396,
+            0.26022401452064514,
+            0.1372160017490387
+          ]
+        },
+        "sample_index": 18,
+        "scheduled_start_arrival_ns_by_rank": [
+          743867120387473,
+          743867120379954,
+          743867120455858,
+          743867120219345
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          743867125455858,
+          743867125455858,
+          743867125455858,
+          743867125455858
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            743867125457027,
+            743867125496781
+          ],
+          [
+            743867125456768,
+            743867125490393
+          ],
+          [
+            743867125458812,
+            743867125510362
+          ],
+          [
+            743867125456488,
+            743867125478746
+          ]
+        ],
+        "start_record_envelope_span_ns": 53874,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.07782399654388428,
+          "rank_max_ms": 0.07782399654388428,
+          "rank_ms": [
+            0.07782399654388428,
+            0.06617599725723267,
+            0.05488000065088272,
+            0.07420799881219864
+          ]
+        },
+        "pair_attempt_id": 20,
+        "pair_retry_ordinal": 0,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.11593600362539291,
+          "rank_max_ms": 0.2149440050125122,
+          "rank_ms": [
+            0.11593600362539291,
+            0.1435520052909851,
+            0.2149440050125122,
+            0.12387199699878693
+          ]
+        },
+        "sample_index": 19,
+        "scheduled_start_arrival_ns_by_rank": [
+          743867129547061,
+          743867130030025,
+          743867129742703,
+          743867129616269
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          743867135030025,
+          743867135030025,
+          743867135030025,
+          743867135030025
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            743867135030594,
+            743867135053083
+          ],
+          [
+            743867135030777,
+            743867135059504
+          ],
+          [
+            743867135032642,
+            743867135075418
+          ],
+          [
+            743867135030605,
+            743867135055138
+          ]
+        ],
+        "start_record_envelope_span_ns": 44824,
+        "variant": 0
+      }
+    ],
+    "measured_order": [
+      [
+        "reference",
+        "candidate"
+      ],
+      [
+        "candidate",
+        "reference"
+      ],
+      [
+        "reference",
+        "candidate"
+      ],
+      [
+        "candidate",
+        "reference"
+      ],
+      [
+        "reference",
+        "candidate"
+      ],
+      [
+        "candidate",
+        "reference"
+      ],
+      [
+        "reference",
+        "candidate"
+      ],
+      [
+        "candidate",
+        "reference"
+      ],
+      [
+        "reference",
+        "candidate"
+      ],
+      [
+        "candidate",
+        "reference"
+      ],
+      [
+        "reference",
+        "candidate"
+      ],
+      [
+        "candidate",
+        "reference"
+      ],
+      [
+        "reference",
+        "candidate"
+      ],
+      [
+        "candidate",
+        "reference"
+      ],
+      [
+        "reference",
+        "candidate"
+      ],
+      [
+        "candidate",
+        "reference"
+      ],
+      [
+        "reference",
+        "candidate"
+      ],
+      [
+        "candidate",
+        "reference"
+      ],
+      [
+        "reference",
+        "candidate"
+      ],
+      [
+        "candidate",
+        "reference"
+      ]
+    ],
+    "measurement_attempts": [
+      {
+        "accepted": true,
+        "attempt_id": 0,
+        "logical_pair_index": 0,
+        "order": [
+          "reference",
+          "candidate"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 0,
+        "samples": {
+          "candidate": {
+            "collective_only": {
+              "local_ms": 0.07158400118350983,
+              "rank_max_ms": 0.07347200065851212,
+              "rank_ms": [
+                0.07158400118350983,
+                0.07347200065851212,
+                0.062272001057863235,
+                0.07321599870920181
+              ]
+            },
+            "pair_attempt_id": 0,
+            "pair_retry_ordinal": 0,
+            "position": 1,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.1648319959640503,
+              "rank_max_ms": 0.24515199661254883,
+              "rank_ms": [
+                0.1648319959640503,
+                0.1610880047082901,
+                0.24515199661254883,
+                0.17523199319839478
+              ]
+            },
+            "sample_index": 0,
+            "scheduled_start_arrival_ns_by_rank": [
+              743866715382839,
+              743866715310137,
+              743866715204191,
+              743866715212309
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743866720382839,
+              743866720382839,
+              743866720382839,
+              743866720382839
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743866720384049,
+                743866720425090
+              ],
+              [
+                743866720383538,
+                743866720416609
+              ],
+              [
+                743866720385440,
+                743866720435355
+              ],
+              [
+                743866720384347,
+                743866720422998
+              ]
+            ],
+            "start_record_envelope_span_ns": 51817,
+            "variant": 0
+          },
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.05814399942755699,
+              "rank_max_ms": 0.06880000233650208,
+              "rank_ms": [
+                0.05814399942755699,
+                0.06880000233650208,
+                0.05113599821925163,
+                0.06652799993753433
+              ]
+            },
+            "pair_attempt_id": 0,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.16847999393939972,
+              "rank_max_ms": 0.28543999791145325,
+              "rank_ms": [
+                0.16847999393939972,
+                0.17231999337673187,
+                0.28543999791145325,
+                0.17180800437927246
+              ]
+            },
+            "sample_index": 0,
+            "scheduled_start_arrival_ns_by_rank": [
+              743866705024578,
+              743866704968180,
+              743866704911004,
+              743866705042609
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743866710042609,
+              743866710042609,
+              743866710042609,
+              743866710042609
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743866710043665,
+                743866710088140
+              ],
+              [
+                743866710043493,
+                743866710078813
+              ],
+              [
+                743866710046304,
+                743866710099166
+              ],
+              [
+                743866710043667,
+                743866710081085
+              ]
+            ],
+            "start_record_envelope_span_ns": 55673,
+            "variant": 0
+          }
+        },
+        "variant": 0
+      },
+      {
+        "accepted": true,
+        "attempt_id": 1,
+        "logical_pair_index": 1,
+        "order": [
+          "candidate",
+          "reference"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 0,
+        "samples": {
+          "candidate": {
+            "collective_only": {
+              "local_ms": 0.04873599857091904,
+              "rank_max_ms": 0.05526399984955788,
+              "rank_ms": [
+                0.04873599857091904,
+                0.05459199845790863,
+                0.05523199960589409,
+                0.05526399984955788
+              ]
+            },
+            "pair_attempt_id": 1,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.1907840073108673,
+              "rank_max_ms": 0.26211199164390564,
+              "rank_ms": [
+                0.1907840073108673,
+                0.18326400220394135,
+                0.26211199164390564,
+                0.1897599995136261
+              ]
+            },
+            "sample_index": 1,
+            "scheduled_start_arrival_ns_by_rank": [
+              743866725827800,
+              743866725892389,
+              743866725897132,
+              743866725689193
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743866730897132,
+              743866730897132,
+              743866730897132,
+              743866730897132
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743866730898097,
+                743866730939028
+              ],
+              [
+                743866730897636,
+                743866730929402
+              ],
+              [
+                743866730898229,
+                743866730936985
+              ],
+              [
+                743866730897850,
+                743866730933546
+              ]
+            ],
+            "start_record_envelope_span_ns": 41392,
+            "variant": 1
+          },
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.07344000041484833,
+              "rank_max_ms": 0.08256000280380249,
+              "rank_ms": [
+                0.07344000041484833,
+                0.08256000280380249,
+                0.05555199831724167,
+                0.08086399734020233
+              ]
+            },
+            "pair_attempt_id": 1,
+            "pair_retry_ordinal": 0,
+            "position": 1,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.17494399845600128,
+              "rank_max_ms": 0.27823999524116516,
+              "rank_ms": [
+                0.17494399845600128,
+                0.18566399812698364,
+                0.27823999524116516,
+                0.16387200355529785
+              ]
+            },
+            "sample_index": 1,
+            "scheduled_start_arrival_ns_by_rank": [
+              743866735375460,
+              743866735172100,
+              743866735061395,
+              743866735568441
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743866740568441,
+              743866740568441,
+              743866740568441,
+              743866740568441
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743866740569893,
+                743866740614820
+              ],
+              [
+                743866740569431,
+                743866740607570
+              ],
+              [
+                743866740572023,
+                743866740637331
+              ],
+              [
+                743866740569308,
+                743866740605866
+              ]
+            ],
+            "start_record_envelope_span_ns": 68023,
+            "variant": 1
+          }
+        },
+        "variant": 1
+      },
+      {
+        "accepted": true,
+        "attempt_id": 2,
+        "logical_pair_index": 2,
+        "order": [
+          "reference",
+          "candidate"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 0,
+        "samples": {
+          "candidate": {
+            "collective_only": {
+              "local_ms": 0.05567999929189682,
+              "rank_max_ms": 0.06239999830722809,
+              "rank_ms": [
+                0.05567999929189682,
+                0.06032000109553337,
+                0.05721599981188774,
+                0.06239999830722809
+              ]
+            },
+            "pair_attempt_id": 2,
+            "pair_retry_ordinal": 0,
+            "position": 1,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.1526080071926117,
+              "rank_max_ms": 0.2085759937763214,
+              "rank_ms": [
+                0.1526080071926117,
+                0.15132799744606018,
+                0.2085759937763214,
+                0.15139199793338776
+              ]
+            },
+            "sample_index": 2,
+            "scheduled_start_arrival_ns_by_rank": [
+              743866756397713,
+              743866756438886,
+              743866756407968,
+              743866756262218
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743866761438886,
+              743866761438886,
+              743866761438886,
+              743866761438886
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743866761440129,
+                743866761478120
+              ],
+              [
+                743866761439539,
+                743866761469629
+              ],
+              [
+                743866761441193,
+                743866761479632
+              ],
+              [
+                743866761439971,
+                743866761471078
+              ]
+            ],
+            "start_record_envelope_span_ns": 40093,
+            "variant": 0
+          },
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.18227200210094452,
+              "rank_max_ms": 0.4128960072994232,
+              "rank_ms": [
+                0.18227200210094452,
+                0.4128960072994232,
+                0.3816959857940674,
+                0.05023999884724617
+              ]
+            },
+            "pair_attempt_id": 2,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.19142399728298187,
+              "rank_max_ms": 0.423007994890213,
+              "rank_ms": [
+                0.19142399728298187,
+                0.423007994890213,
+                0.39187198877334595,
+                0.18307200074195862
+              ]
+            },
+            "sample_index": 2,
+            "scheduled_start_arrival_ns_by_rank": [
+              743866745559122,
+              743866745705689,
+              743866745699963,
+              743866745716799
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743866750716799,
+              743866750716799,
+              743866750716799,
+              743866750716799
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743866751103892,
+                743866751143806
+              ],
+              [
+                743866750881475,
+                743866750913248
+              ],
+              [
+                743866750910274,
+                743866750946400
+              ],
+              [
+                743866751261467,
+                743866751294794
+              ]
+            ],
+            "start_record_envelope_span_ns": 413319,
+            "variant": 0
+          }
+        },
+        "variant": 0
+      },
+      {
+        "accepted": true,
+        "attempt_id": 3,
+        "logical_pair_index": 3,
+        "order": [
+          "candidate",
+          "reference"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 0,
+        "samples": {
+          "candidate": {
+            "collective_only": {
+              "local_ms": 0.06943999975919724,
+              "rank_max_ms": 0.07900799810886383,
+              "rank_ms": [
+                0.06943999975919724,
+                0.07507199794054031,
+                0.06431999802589417,
+                0.07900799810886383
+              ]
+            },
+            "pair_attempt_id": 3,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.1775680035352707,
+              "rank_max_ms": 0.26291200518608093,
+              "rank_ms": [
+                0.1775680035352707,
+                0.17481599748134613,
+                0.26291200518608093,
+                0.17001600563526154
+              ]
+            },
+            "sample_index": 3,
+            "scheduled_start_arrival_ns_by_rank": [
+              743866767345932,
+              743866766896102,
+              743866767507462,
+              743866767278350
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743866772507462,
+              743866772507462,
+              743866772507462,
+              743866772507462
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743866772508712,
+                743866772552804
+              ],
+              [
+                743866772508080,
+                743866772542090
+              ],
+              [
+                743866772510644,
+                743866772561320
+              ],
+              [
+                743866772508533,
+                743866772542367
+              ]
+            ],
+            "start_record_envelope_span_ns": 53240,
+            "variant": 1
+          },
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.05593600124120712,
+              "rank_max_ms": 0.06729599833488464,
+              "rank_ms": [
+                0.05593600124120712,
+                0.06729599833488464,
+                0.05225599929690361,
+                0.06137600168585777
+              ]
+            },
+            "pair_attempt_id": 3,
+            "pair_retry_ordinal": 0,
+            "position": 1,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.16889600455760956,
+              "rank_max_ms": 0.2611199915409088,
+              "rank_ms": [
+                0.16889600455760956,
+                0.16652800142765045,
+                0.2611199915409088,
+                0.16329599916934967
+              ]
+            },
+            "sample_index": 3,
+            "scheduled_start_arrival_ns_by_rank": [
+              743866778047977,
+              743866778461390,
+              743866778613470,
+              743866778300844
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743866783613470,
+              743866783613470,
+              743866783613470,
+              743866783613470
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743866783614849,
+                743866783658571
+              ],
+              [
+                743866783614386,
+                743866783648840
+              ],
+              [
+                743866783615849,
+                743866783667752
+              ],
+              [
+                743866783614572,
+                743866783650739
+              ]
+            ],
+            "start_record_envelope_span_ns": 53366,
+            "variant": 1
+          }
+        },
+        "variant": 1
+      },
+      {
+        "accepted": true,
+        "attempt_id": 4,
+        "logical_pair_index": 4,
+        "order": [
+          "reference",
+          "candidate"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 0,
+        "samples": {
+          "candidate": {
+            "collective_only": {
+              "local_ms": 0.05567999929189682,
+              "rank_max_ms": 0.06560000032186508,
+              "rank_ms": [
+                0.05567999929189682,
+                0.06035200133919716,
+                0.05632000043988228,
+                0.06560000032186508
+              ]
+            },
+            "pair_attempt_id": 4,
+            "pair_retry_ordinal": 0,
+            "position": 1,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.18425600230693817,
+              "rank_max_ms": 0.24675199389457703,
+              "rank_ms": [
+                0.18425600230693817,
+                0.18719999492168427,
+                0.24675199389457703,
+                0.17289599776268005
+              ]
+            },
+            "sample_index": 4,
+            "scheduled_start_arrival_ns_by_rank": [
+              743866799364879,
+              743866799363802,
+              743866799119403,
+              743866799233071
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743866804364879,
+              743866804364879,
+              743866804364879,
+              743866804364879
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743866804365784,
+                743866804409326
+              ],
+              [
+                743866804365843,
+                743866804401744
+              ],
+              [
+                743866804366050,
+                743866804409188
+              ],
+              [
+                743866804366107,
+                743866804399564
+              ]
+            ],
+            "start_record_envelope_span_ns": 43542,
+            "variant": 0
+          },
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.05929600074887276,
+              "rank_max_ms": 0.06940799951553345,
+              "rank_ms": [
+                0.05929600074887276,
+                0.06940799951553345,
+                0.052032001316547394,
+                0.06761600077152252
+              ]
+            },
+            "pair_attempt_id": 4,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.18732799589633942,
+              "rank_max_ms": 0.2940160036087036,
+              "rank_ms": [
+                0.18732799589633942,
+                0.18409599363803864,
+                0.2940160036087036,
+                0.17641599476337433
+              ]
+            },
+            "sample_index": 4,
+            "scheduled_start_arrival_ns_by_rank": [
+              743866788692393,
+              743866788825441,
+              743866788668834,
+              743866788541721
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743866793825441,
+              743866793825441,
+              743866793825441,
+              743866793825441
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743866793826371,
+                743866793870163
+              ],
+              [
+                743866793826325,
+                743866793858405
+              ],
+              [
+                743866793828985,
+                743866793881351
+              ],
+              [
+                743866793826178,
+                743866793861286
+              ]
+            ],
+            "start_record_envelope_span_ns": 55173,
+            "variant": 0
+          }
+        },
+        "variant": 0
+      },
+      {
+        "accepted": true,
+        "attempt_id": 5,
+        "logical_pair_index": 5,
+        "order": [
+          "candidate",
+          "reference"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 0,
+        "samples": {
+          "candidate": {
+            "collective_only": {
+              "local_ms": 0.05660799890756607,
+              "rank_max_ms": 0.06319999694824219,
+              "rank_ms": [
+                0.05660799890756607,
+                0.05859199911355972,
+                0.05843200162053108,
+                0.06319999694824219
+              ]
+            },
+            "pair_attempt_id": 5,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.17641599476337433,
+              "rank_max_ms": 0.2839359939098358,
+              "rank_ms": [
+                0.17641599476337433,
+                0.18220800161361694,
+                0.2839359939098358,
+                0.1902720034122467
+              ]
+            },
+            "sample_index": 5,
+            "scheduled_start_arrival_ns_by_rank": [
+              743866811725160,
+              743866811146497,
+              743866810834323,
+              743866811439203
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743866816725160,
+              743866816725160,
+              743866816725160,
+              743866816725160
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743866816726038,
+                743866816772694
+              ],
+              [
+                743866816725866,
+                743866816762035
+              ],
+              [
+                743866816726262,
+                743866816771163
+              ],
+              [
+                743866816726399,
+                743866816766596
+              ]
+            ],
+            "start_record_envelope_span_ns": 46828,
+            "variant": 1
+          },
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.03545600175857544,
+              "rank_max_ms": 0.04416000097990036,
+              "rank_ms": [
+                0.03545600175857544,
+                0.04416000097990036,
+                0.040991999208927155,
+                0.04153599962592125
+              ]
+            },
+            "pair_attempt_id": 5,
+            "pair_retry_ordinal": 0,
+            "position": 1,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.15855999290943146,
+              "rank_max_ms": 0.21449600160121918,
+              "rank_ms": [
+                0.15855999290943146,
+                0.15692800283432007,
+                0.21449600160121918,
+                0.15795199573040009
+              ]
+            },
+            "sample_index": 5,
+            "scheduled_start_arrival_ns_by_rank": [
+              743866825047909,
+              743866823877090,
+              743866823780032,
+              743866823675216
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743866830047909,
+              743866830047909,
+              743866830047909,
+              743866830047909
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743866830049339,
+                743866830089926
+              ],
+              [
+                743866830048662,
+                743866830082084
+              ],
+              [
+                743866830048914,
+                743866830088456
+              ],
+              [
+                743866830049026,
+                743866830083763
+              ]
+            ],
+            "start_record_envelope_span_ns": 41264,
+            "variant": 1
+          }
+        },
+        "variant": 1
+      },
+      {
+        "accepted": true,
+        "attempt_id": 6,
+        "logical_pair_index": 6,
+        "order": [
+          "reference",
+          "candidate"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 0,
+        "samples": {
+          "candidate": {
+            "collective_only": {
+              "local_ms": 0.05452800169587135,
+              "rank_max_ms": 0.06102399900555611,
+              "rank_ms": [
+                0.05452800169587135,
+                0.05503999814391136,
+                0.05619199946522713,
+                0.06102399900555611
+              ]
+            },
+            "pair_attempt_id": 6,
+            "pair_retry_ordinal": 0,
+            "position": 1,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.17772799730300903,
+              "rank_max_ms": 0.22732800245285034,
+              "rank_ms": [
+                0.17772799730300903,
+                0.18121600151062012,
+                0.22732800245285034,
+                0.17766399681568146
+              ]
+            },
+            "sample_index": 6,
+            "scheduled_start_arrival_ns_by_rank": [
+              743866846475460,
+              743866846410618,
+              743866846341941,
+              743866846508550
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743866851508550,
+              743866851508550,
+              743866851508550,
+              743866851508550
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743866851509767,
+                743866851552668
+              ],
+              [
+                743866851509519,
+                743866851548222
+              ],
+              [
+                743866851509488,
+                743866851552320
+              ],
+              [
+                743866851509834,
+                743866851545953
+              ]
+            ],
+            "start_record_envelope_span_ns": 43180,
+            "variant": 0
+          },
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.03999999910593033,
+              "rank_max_ms": 0.048128001391887665,
+              "rank_ms": [
+                0.03999999910593033,
+                0.048128001391887665,
+                0.03753599897027016,
+                0.046592000871896744
+              ]
+            },
+            "pair_attempt_id": 6,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.14560000598430634,
+              "rank_max_ms": 0.2038400024175644,
+              "rank_ms": [
+                0.14560000598430634,
+                0.1440960019826889,
+                0.2038400024175644,
+                0.14998400211334229
+              ]
+            },
+            "sample_index": 6,
+            "scheduled_start_arrival_ns_by_rank": [
+              743866835428366,
+              743866835682487,
+              743866835702143,
+              743866835083961
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743866840702143,
+              743866840702143,
+              743866840702143,
+              743866840702143
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743866840702976,
+                743866840740185
+              ],
+              [
+                743866840702766,
+                743866840732351
+              ],
+              [
+                743866840703552,
+                743866840743460
+              ],
+              [
+                743866840703404,
+                743866840734799
+              ]
+            ],
+            "start_record_envelope_span_ns": 40694,
+            "variant": 0
+          }
+        },
+        "variant": 0
+      },
+      {
+        "accepted": true,
+        "attempt_id": 7,
+        "logical_pair_index": 7,
+        "order": [
+          "candidate",
+          "reference"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 0,
+        "samples": {
+          "candidate": {
+            "collective_only": {
+              "local_ms": 0.06831999868154526,
+              "rank_max_ms": 0.06918399780988693,
+              "rank_ms": [
+                0.06831999868154526,
+                0.06790400296449661,
+                0.05875200033187866,
+                0.06918399780988693
+              ]
+            },
+            "pair_attempt_id": 7,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.14457599818706512,
+              "rank_max_ms": 0.24198399484157562,
+              "rank_ms": [
+                0.14457599818706512,
+                0.14127999544143677,
+                0.24198399484157562,
+                0.1510079950094223
+              ]
+            },
+            "sample_index": 7,
+            "scheduled_start_arrival_ns_by_rank": [
+              743866855678194,
+              743866856076810,
+              743866855872947,
+              743866855701270
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743866861076810,
+              743866861076810,
+              743866861076810,
+              743866861076810
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743866861077834,
+                743866861110902
+              ],
+              [
+                743866861077587,
+                743866861104586
+              ],
+              [
+                743866861079552,
+                743866861122360
+              ],
+              [
+                743866861077821,
+                743866861108814
+              ]
+            ],
+            "start_record_envelope_span_ns": 44773,
+            "variant": 1
+          },
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.2062080055475235,
+              "rank_max_ms": 0.2062080055475235,
+              "rank_ms": [
+                0.2062080055475235,
+                0.1345919966697693,
+                0.2035519927740097,
+                0.03033600002527237
+              ]
+            },
+            "pair_attempt_id": 7,
+            "pair_retry_ordinal": 0,
+            "position": 1,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.21625599265098572,
+              "rank_max_ms": 0.21625599265098572,
+              "rank_ms": [
+                0.21625599265098572,
+                0.17235200107097626,
+                0.21359999477863312,
+                0.1598079949617386
+              ]
+            },
+            "sample_index": 7,
+            "scheduled_start_arrival_ns_by_rank": [
+              743866867594664,
+              743866867069174,
+              743866867725893,
+              743866868129416
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743866873129416,
+              743866873129416,
+              743866873129416,
+              743866873129416
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743866873510896,
+                743866873553748
+              ],
+              [
+                743866873588248,
+                743866873623239
+              ],
+              [
+                743866873511659,
+                743866873554713
+              ],
+              [
+                743866873688920,
+                743866873724967
+              ]
+            ],
+            "start_record_envelope_span_ns": 214071,
+            "variant": 1
+          }
+        },
+        "variant": 1
+      },
+      {
+        "accepted": true,
+        "attempt_id": 8,
+        "logical_pair_index": 8,
+        "order": [
+          "reference",
+          "candidate"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 0,
+        "samples": {
+          "candidate": {
+            "collective_only": {
+              "local_ms": 0.0708480030298233,
+              "rank_max_ms": 0.07465600222349167,
+              "rank_ms": [
+                0.0708480030298233,
+                0.07465600222349167,
+                0.06400000303983688,
+                0.07305599749088287
+              ]
+            },
+            "pair_attempt_id": 8,
+            "pair_retry_ordinal": 0,
+            "position": 1,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.14982399344444275,
+              "rank_max_ms": 0.2725119888782501,
+              "rank_ms": [
+                0.14982399344444275,
+                0.166143998503685,
+                0.2725119888782501,
+                0.17260800302028656
+              ]
+            },
+            "sample_index": 8,
+            "scheduled_start_arrival_ns_by_rank": [
+              743866888650794,
+              743866888747977,
+              743866888463064,
+              743866888396460
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743866893747977,
+              743866893747977,
+              743866893747977,
+              743866893747977
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743866893748717,
+                743866893784091
+              ],
+              [
+                743866893748949,
+                743866893779143
+              ],
+              [
+                743866893750944,
+                743866893795841
+              ],
+              [
+                743866893749379,
+                743866893783502
+              ]
+            ],
+            "start_record_envelope_span_ns": 47124,
+            "variant": 0
+          },
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.058368001133203506,
+              "rank_max_ms": 0.06787200272083282,
+              "rank_ms": [
+                0.058368001133203506,
+                0.06787200272083282,
+                0.04870399832725525,
+                0.05804799869656563
+              ]
+            },
+            "pair_attempt_id": 8,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.1462399959564209,
+              "rank_max_ms": 0.24348799884319305,
+              "rank_ms": [
+                0.1462399959564209,
+                0.15065599977970123,
+                0.24348799884319305,
+                0.1953279972076416
+              ]
+            },
+            "sample_index": 8,
+            "scheduled_start_arrival_ns_by_rank": [
+              743866878305567,
+              743866878373509,
+              743866878281968,
+              743866878308587
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743866883373509,
+              743866883373509,
+              743866883373509,
+              743866883373509
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743866883375064,
+                743866883412813
+              ],
+              [
+                743866883374338,
+                743866883405485
+              ],
+              [
+                743866883376312,
+                743866883426736
+              ],
+              [
+                743866883375133,
+                743866883415579
+              ]
+            ],
+            "start_record_envelope_span_ns": 52398,
+            "variant": 0
+          }
+        },
+        "variant": 0
+      },
+      {
+        "accepted": true,
+        "attempt_id": 9,
+        "logical_pair_index": 9,
+        "order": [
+          "candidate",
+          "reference"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 0,
+        "samples": {
+          "candidate": {
+            "collective_only": {
+              "local_ms": 0.09795200079679489,
+              "rank_max_ms": 0.09795200079679489,
+              "rank_ms": [
+                0.09795200079679489,
+                0.07875200361013412,
+                0.06764800101518631,
+                0.08003199845552444
+              ]
+            },
+            "pair_attempt_id": 9,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.12675200402736664,
+              "rank_max_ms": 0.267520010471344,
+              "rank_ms": [
+                0.12675200402736664,
+                0.17552000284194946,
+                0.267520010471344,
+                0.18134400248527527
+              ]
+            },
+            "sample_index": 9,
+            "scheduled_start_arrival_ns_by_rank": [
+              743866900193558,
+              743866900116366,
+              743866900585677,
+              743866900453235
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743866905585677,
+              743866905585677,
+              743866905585677,
+              743866905585677
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743866905586146,
+                743866905608704
+              ],
+              [
+                743866905586574,
+                743866905621792
+              ],
+              [
+                743866905589078,
+                743866905643118
+              ],
+              [
+                743866905587538,
+                743866905626923
+              ]
+            ],
+            "start_record_envelope_span_ns": 56972,
+            "variant": 1
+          },
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.05974400043487549,
+              "rank_max_ms": 0.06998399645090103,
+              "rank_ms": [
+                0.05974400043487549,
+                0.06998399645090103,
+                0.055424001067876816,
+                0.06620799750089645
+              ]
+            },
+            "pair_attempt_id": 9,
+            "pair_retry_ordinal": 0,
+            "position": 1,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.18531200289726257,
+              "rank_max_ms": 0.28204798698425293,
+              "rank_ms": [
+                0.18531200289726257,
+                0.18300800025463104,
+                0.28204798698425293,
+                0.21104000508785248
+              ]
+            },
+            "sample_index": 9,
+            "scheduled_start_arrival_ns_by_rank": [
+              743866911496680,
+              743866911861889,
+              743866911878918,
+              743866911707378
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743866916878918,
+              743866916878918,
+              743866916878918,
+              743866916878918
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743866916880486,
+                743866916924754
+              ],
+              [
+                743866916879854,
+                743866916914621
+              ],
+              [
+                743866916881919,
+                743866916935077
+              ],
+              [
+                743866916879734,
+                743866916918237
+              ]
+            ],
+            "start_record_envelope_span_ns": 55343,
+            "variant": 1
+          }
+        },
+        "variant": 1
+      },
+      {
+        "accepted": true,
+        "attempt_id": 10,
+        "logical_pair_index": 10,
+        "order": [
+          "reference",
+          "candidate"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 0,
+        "samples": {
+          "candidate": {
+            "collective_only": {
+              "local_ms": 0.08511999994516373,
+              "rank_max_ms": 0.09251199662685394,
+              "rank_ms": [
+                0.08511999994516373,
+                0.0920960009098053,
+                0.06825599819421768,
+                0.09251199662685394
+              ]
+            },
+            "pair_attempt_id": 10,
+            "pair_retry_ordinal": 0,
+            "position": 1,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.16940799355506897,
+              "rank_max_ms": 0.2625280022621155,
+              "rank_ms": [
+                0.16940799355506897,
+                0.17020800709724426,
+                0.2625280022621155,
+                0.18243199586868286
+              ]
+            },
+            "sample_index": 10,
+            "scheduled_start_arrival_ns_by_rank": [
+              743866932966243,
+              743866932762897,
+              743866932715955,
+              743866932601023
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743866937966243,
+              743866937966243,
+              743866937966243,
+              743866937966243
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743866937967412,
+                743866938022291
+              ],
+              [
+                743866937967063,
+                743866938011431
+              ],
+              [
+                743866937969043,
+                743866938043087
+              ],
+              [
+                743866937967485,
+                743866938017150
+              ]
+            ],
+            "start_record_envelope_span_ns": 76024,
+            "variant": 0
+          },
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.06508799642324448,
+              "rank_max_ms": 0.07555200159549713,
+              "rank_ms": [
+                0.06508799642324448,
+                0.07555200159549713,
+                0.055743999779224396,
+                0.07462400197982788
+              ]
+            },
+            "pair_attempt_id": 10,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.18111999332904816,
+              "rank_max_ms": 0.3092480003833771,
+              "rank_ms": [
+                0.18111999332904816,
+                0.1807679980993271,
+                0.3092480003833771,
+                0.1695680022239685
+              ]
+            },
+            "sample_index": 10,
+            "scheduled_start_arrival_ns_by_rank": [
+              743866922483294,
+              743866922721654,
+              743866922267900,
+              743866922214906
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743866927721654,
+              743866927721654,
+              743866927721654,
+              743866927721654
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743866927722724,
+                743866927769663
+              ],
+              [
+                743866927722564,
+                743866927759886
+              ],
+              [
+                743866927725168,
+                743866927785186
+              ],
+              [
+                743866927722586,
+                743866927759336
+              ]
+            ],
+            "start_record_envelope_span_ns": 62622,
+            "variant": 0
+          }
+        },
+        "variant": 0
+      },
+      {
+        "accepted": true,
+        "attempt_id": 11,
+        "logical_pair_index": 11,
+        "order": [
+          "candidate",
+          "reference"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 0,
+        "samples": {
+          "candidate": {
+            "collective_only": {
+              "local_ms": 0.07449600100517273,
+              "rank_max_ms": 0.0772479996085167,
+              "rank_ms": [
+                0.07449600100517273,
+                0.07215999811887741,
+                0.06147199869155884,
+                0.0772479996085167
+              ]
+            },
+            "pair_attempt_id": 11,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.14390400052070618,
+              "rank_max_ms": 0.22604799270629883,
+              "rank_ms": [
+                0.14390400052070618,
+                0.15078400075435638,
+                0.22604799270629883,
+                0.15007999539375305
+              ]
+            },
+            "sample_index": 11,
+            "scheduled_start_arrival_ns_by_rank": [
+              743866943457326,
+              743866943556453,
+              743866943503313,
+              743866943411224
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743866948556453,
+              743866948556453,
+              743866948556453,
+              743866948556453
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743866948557344,
+                743866948591588
+              ],
+              [
+                743866948557151,
+                743866948586505
+              ],
+              [
+                743866948559442,
+                743866948605845
+              ],
+              [
+                743866948557402,
+                743866948587752
+              ]
+            ],
+            "start_record_envelope_span_ns": 48694,
+            "variant": 1
+          },
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.0589120015501976,
+              "rank_max_ms": 0.06614399701356888,
+              "rank_ms": [
+                0.0589120015501976,
+                0.06614399701356888,
+                0.04982399940490723,
+                0.06560000032186508
+              ]
+            },
+            "pair_attempt_id": 11,
+            "pair_retry_ordinal": 0,
+            "position": 1,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.14892800152301788,
+              "rank_max_ms": 0.2483839988708496,
+              "rank_ms": [
+                0.14892800152301788,
+                0.16252799332141876,
+                0.2483839988708496,
+                0.15199999511241913
+              ]
+            },
+            "sample_index": 11,
+            "scheduled_start_arrival_ns_by_rank": [
+              743866954659488,
+              743866954538915,
+              743866954274902,
+              743866954397961
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743866959659488,
+              743866959659488,
+              743866959659488,
+              743866959659488
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743866959660776,
+                743866959698759
+              ],
+              [
+                743866959660278,
+                743866959693618
+              ],
+              [
+                743866959662164,
+                743866959711232
+              ],
+              [
+                743866959660575,
+                743866959691814
+              ]
+            ],
+            "start_record_envelope_span_ns": 50954,
+            "variant": 1
+          }
+        },
+        "variant": 1
+      },
+      {
+        "accepted": true,
+        "attempt_id": 12,
+        "logical_pair_index": 12,
+        "order": [
+          "reference",
+          "candidate"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 0,
+        "samples": {
+          "candidate": {
+            "collective_only": {
+              "local_ms": 0.1783680021762848,
+              "rank_max_ms": 0.275519996881485,
+              "rank_ms": [
+                0.1783680021762848,
+                0.275519996881485,
+                0.2736319899559021,
+                0.05843200162053108
+              ]
+            },
+            "pair_attempt_id": 12,
+            "pair_retry_ordinal": 0,
+            "position": 1,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.2173759937286377,
+              "rank_max_ms": 0.28537601232528687,
+              "rank_ms": [
+                0.2173759937286377,
+                0.28537601232528687,
+                0.2836480140686035,
+                0.2017280012369156
+              ]
+            },
+            "sample_index": 12,
+            "scheduled_start_arrival_ns_by_rank": [
+              743866976793118,
+              743866976652538,
+              743866976666798,
+              743866976568748
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743866981793118,
+              743866981793118,
+              743866981793118,
+              743866981793118
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743866981886170,
+                743866981933025
+              ],
+              [
+                743866981793862,
+                743866981830765
+              ],
+              [
+                743866981793759,
+                743866981837117
+              ],
+              [
+                743866981982351,
+                743866982055486
+              ]
+            ],
+            "start_record_envelope_span_ns": 261727,
+            "variant": 0
+          },
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.08057600259780884,
+              "rank_max_ms": 0.08428800106048584,
+              "rank_ms": [
+                0.08057600259780884,
+                0.08428800106048584,
+                0.07257600128650665,
+                0.07974400371313095
+              ]
+            },
+            "pair_attempt_id": 12,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.16867199540138245,
+              "rank_max_ms": 0.2761920094490051,
+              "rank_ms": [
+                0.16867199540138245,
+                0.17660799622535706,
+                0.2761920094490051,
+                0.18963199853897095
+              ]
+            },
+            "sample_index": 12,
+            "scheduled_start_arrival_ns_by_rank": [
+              743866965920590,
+              743866965251043,
+              743866965681349,
+              743866965389564
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743866970920590,
+              743866970920590,
+              743866970920590,
+              743866970920590
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743866970921667,
+                743866970958829
+              ],
+              [
+                743866970921383,
+                743866970953661
+              ],
+              [
+                743866970923472,
+                743866970971999
+              ],
+              [
+                743866970922047,
+                743866970959392
+              ]
+            ],
+            "start_record_envelope_span_ns": 50616,
+            "variant": 0
+          }
+        },
+        "variant": 0
+      },
+      {
+        "accepted": true,
+        "attempt_id": 13,
+        "logical_pair_index": 13,
+        "order": [
+          "candidate",
+          "reference"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 0,
+        "samples": {
+          "candidate": {
+            "collective_only": {
+              "local_ms": 0.0745600014925003,
+              "rank_max_ms": 0.08348800241947174,
+              "rank_ms": [
+                0.0745600014925003,
+                0.07702399790287018,
+                0.06534399837255478,
+                0.08348800241947174
+              ]
+            },
+            "pair_attempt_id": 13,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.16649599373340607,
+              "rank_max_ms": 0.2520959973335266,
+              "rank_ms": [
+                0.16649599373340607,
+                0.16819199919700623,
+                0.2520959973335266,
+                0.1637440025806427
+              ]
+            },
+            "sample_index": 13,
+            "scheduled_start_arrival_ns_by_rank": [
+              743866988260772,
+              743866988217272,
+              743866988165656,
+              743866988530049
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743866993530049,
+              743866993530049,
+              743866993530049,
+              743866993530049
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743866993531298,
+                743866993572303
+              ],
+              [
+                743866993531037,
+                743866993564483
+              ],
+              [
+                743866993532895,
+                743866993584688
+              ],
+              [
+                743866993531036,
+                743866993562913
+              ]
+            ],
+            "start_record_envelope_span_ns": 53652,
+            "variant": 1
+          },
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.05923200026154518,
+              "rank_max_ms": 0.06864000111818314,
+              "rank_ms": [
+                0.05923200026154518,
+                0.06531199812889099,
+                0.05238400027155876,
+                0.06864000111818314
+              ]
+            },
+            "pair_attempt_id": 13,
+            "pair_retry_ordinal": 0,
+            "position": 1,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.18163199722766876,
+              "rank_max_ms": 0.2754879891872406,
+              "rank_ms": [
+                0.18163199722766876,
+                0.2173440009355545,
+                0.2754879891872406,
+                0.17558400332927704
+              ]
+            },
+            "sample_index": 13,
+            "scheduled_start_arrival_ns_by_rank": [
+              743867000225585,
+              743867000541389,
+              743867000198853,
+              743867000147516
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743867005541389,
+              743867005541389,
+              743867005541389,
+              743867005541389
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743867005542499,
+                743867005590739
+              ],
+              [
+                743867005542726,
+                743867005585981
+              ],
+              [
+                743867005545092,
+                743867005600060
+              ],
+              [
+                743867005542447,
+                743867005580035
+              ]
+            ],
+            "start_record_envelope_span_ns": 57613,
+            "variant": 1
+          }
+        },
+        "variant": 1
+      },
+      {
+        "accepted": false,
+        "attempt_id": 14,
+        "logical_pair_index": 14,
+        "order": [
+          "reference",
+          "candidate"
+        ],
+        "rejection_reasons": [
+          {
+            "limit_ns": 500000,
+            "side": "reference",
+            "start_record_envelope_span_ns": 1670494
+          }
+        ],
+        "retry_ordinal": 0,
+        "samples": {
+          "candidate": {
+            "collective_only": {
+              "local_ms": 0.07740800082683563,
+              "rank_max_ms": 0.07843200117349625,
+              "rank_ms": [
+                0.07740800082683563,
+                0.07843200117349625,
+                0.05852799862623215,
+                0.07360000163316727
+              ]
+            },
+            "pair_attempt_id": 14,
+            "pair_retry_ordinal": 0,
+            "position": 1,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.11769600212574005,
+              "rank_max_ms": 0.21830399334430695,
+              "rank_ms": [
+                0.11769600212574005,
+                0.11750400066375732,
+                0.21830399334430695,
+                0.13446399569511414
+              ]
+            },
+            "sample_index": 14,
+            "scheduled_start_arrival_ns_by_rank": [
+              743867023185361,
+              743867023136680,
+              743867023372692,
+              743867023498528
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743867028498528,
+              743867028498528,
+              743867028498528,
+              743867028498528
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743867028499162,
+                743867028522970
+              ],
+              [
+                743867028499045,
+                743867028518794
+              ],
+              [
+                743867028501027,
+                743867028545055
+              ],
+              [
+                743867028499324,
+                743867028527134
+              ]
+            ],
+            "start_record_envelope_span_ns": 46010,
+            "variant": 0
+          },
+          "reference": {
+            "collective_only": {
+              "local_ms": 1.6509759426116943,
+              "rank_max_ms": 1.683359980583191,
+              "rank_ms": [
+                1.6509759426116943,
+                1.683359980583191,
+                0.03705599904060364,
+                1.665727972984314
+              ]
+            },
+            "pair_attempt_id": 14,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 1.6601279973983765,
+              "rank_max_ms": 1.6935679912567139,
+              "rank_ms": [
+                1.6601279973983765,
+                1.6935679912567139,
+                0.20028799772262573,
+                1.675968050956726
+              ]
+            },
+            "sample_index": 14,
+            "scheduled_start_arrival_ns_by_rank": [
+              743867012124418,
+              743867011496624,
+              743867011987276,
+              743867011901792
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743867017124418,
+              743867017124418,
+              743867017124418,
+              743867017124418
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743867017126580,
+                743867017183660
+              ],
+              [
+                743867017124914,
+                743867017149405
+              ],
+              [
+                743867018756286,
+                743867018795408
+              ],
+              [
+                743867017125495,
+                743867017168588
+              ]
+            ],
+            "start_record_envelope_span_ns": 1670494,
+            "variant": 0
+          }
+        },
+        "variant": 0
+      },
+      {
+        "accepted": true,
+        "attempt_id": 15,
+        "logical_pair_index": 14,
+        "order": [
+          "reference",
+          "candidate"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 1,
+        "samples": {
+          "candidate": {
+            "collective_only": {
+              "local_ms": 0.07407999783754349,
+              "rank_max_ms": 0.07407999783754349,
+              "rank_ms": [
+                0.07407999783754349,
+                0.06275200098752975,
+                0.056832000613212585,
+                0.06313599646091461
+              ]
+            },
+            "pair_attempt_id": 15,
+            "pair_retry_ordinal": 1,
+            "position": 1,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.11414399743080139,
+              "rank_max_ms": 0.22060799598693848,
+              "rank_ms": [
+                0.11414399743080139,
+                0.14841599762439728,
+                0.22060799598693848,
+                0.1621440052986145
+              ]
+            },
+            "sample_index": 14,
+            "scheduled_start_arrival_ns_by_rank": [
+              743867042086258,
+              743867042428264,
+              743867042271346,
+              743867042350706
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743867047428264,
+              743867047428264,
+              743867047428264,
+              743867047428264
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743867047428840,
+                743867047449317
+              ],
+              [
+                743867047429039,
+                743867047457509
+              ],
+              [
+                743867047431038,
+                743867047470453
+              ],
+              [
+                743867047429435,
+                743867047461349
+              ]
+            ],
+            "start_record_envelope_span_ns": 41613,
+            "variant": 1
+          },
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.0634239986538887,
+              "rank_max_ms": 0.0634239986538887,
+              "rank_ms": [
+                0.0634239986538887,
+                0.05766399949789047,
+                0.04435199871659279,
+                0.054207999259233475
+              ]
+            },
+            "pair_attempt_id": 15,
+            "pair_retry_ordinal": 1,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.1252480000257492,
+              "rank_max_ms": 0.2343360036611557,
+              "rank_ms": [
+                0.1252480000257492,
+                0.15401600301265717,
+                0.2343360036611557,
+                0.16089600324630737
+              ]
+            },
+            "sample_index": 14,
+            "scheduled_start_arrival_ns_by_rank": [
+              743867033428495,
+              743867033308656,
+              743867033638726,
+              743867033268627
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743867038638726,
+              743867038638726,
+              743867038638726,
+              743867038638726
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743867038639362,
+                743867038667208
+              ],
+              [
+                743867038639631,
+                743867038670739
+              ],
+              [
+                743867038641005,
+                743867038686961
+              ],
+              [
+                743867038640085,
+                743867038673968
+              ]
+            ],
+            "start_record_envelope_span_ns": 47599,
+            "variant": 1
+          }
+        },
+        "variant": 1
+      },
+      {
+        "accepted": true,
+        "attempt_id": 16,
+        "logical_pair_index": 15,
+        "order": [
+          "candidate",
+          "reference"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 0,
+        "samples": {
+          "candidate": {
+            "collective_only": {
+              "local_ms": 0.08521600067615509,
+              "rank_max_ms": 0.08521600067615509,
+              "rank_ms": [
+                0.08521600067615509,
+                0.07571200281381607,
+                0.060575999319553375,
+                0.07145600020885468
+              ]
+            },
+            "pair_attempt_id": 16,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.14339199662208557,
+              "rank_max_ms": 0.2724800109863281,
+              "rank_ms": [
+                0.14339199662208557,
+                0.17657600343227386,
+                0.2724800109863281,
+                0.2295999974012375
+              ]
+            },
+            "sample_index": 15,
+            "scheduled_start_arrival_ns_by_rank": [
+              743867051553931,
+              743867051856002,
+              743867051787764,
+              743867051700252
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743867056856002,
+              743867056856002,
+              743867056856002,
+              743867056856002
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743867056856619,
+                743867056881168
+              ],
+              [
+                743867056856855,
+                743867056888973
+              ],
+              [
+                743867056858783,
+                743867056907166
+              ],
+              [
+                743867056857994,
+                743867056899545
+              ]
+            ],
+            "start_record_envelope_span_ns": 50547,
+            "variant": 0
+          },
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.05660799890756607,
+              "rank_max_ms": 0.07401599735021591,
+              "rank_ms": [
+                0.05660799890756607,
+                0.061216000467538834,
+                0.04761600121855736,
+                0.07401599735021591
+              ]
+            },
+            "pair_attempt_id": 16,
+            "pair_retry_ordinal": 0,
+            "position": 1,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.1432960033416748,
+              "rank_max_ms": 0.23289600014686584,
+              "rank_ms": [
+                0.1432960033416748,
+                0.1552640050649643,
+                0.23289600014686584,
+                0.11823999881744385
+              ]
+            },
+            "sample_index": 15,
+            "scheduled_start_arrival_ns_by_rank": [
+              743867062290861,
+              743867062344122,
+              743867062071609,
+              743867062146693
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743867067344122,
+              743867067344122,
+              743867067344122,
+              743867067344122
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743867067345385,
+                743867067381524
+              ],
+              [
+                743867067344856,
+                743867067376754
+              ],
+              [
+                743867067347082,
+                743867067394700
+              ],
+              [
+                743867067344728,
+                743867067363990
+              ]
+            ],
+            "start_record_envelope_span_ns": 49972,
+            "variant": 0
+          }
+        },
+        "variant": 0
+      },
+      {
+        "accepted": true,
+        "attempt_id": 17,
+        "logical_pair_index": 16,
+        "order": [
+          "reference",
+          "candidate"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 0,
+        "samples": {
+          "candidate": {
+            "collective_only": {
+              "local_ms": 0.08287999778985977,
+              "rank_max_ms": 0.08700799942016602,
+              "rank_ms": [
+                0.08287999778985977,
+                0.0745600014925003,
+                0.061503998935222626,
+                0.08700799942016602
+              ]
+            },
+            "pair_attempt_id": 17,
+            "pair_retry_ordinal": 0,
+            "position": 1,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.1207680031657219,
+              "rank_max_ms": 0.227743998169899,
+              "rank_ms": [
+                0.1207680031657219,
+                0.15014399588108063,
+                0.227743998169899,
+                0.11868800222873688
+              ]
+            },
+            "sample_index": 16,
+            "scheduled_start_arrival_ns_by_rank": [
+              743867080396287,
+              743867080481678,
+              743867080357728,
+              743867080091886
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743867085481678,
+              743867085481678,
+              743867085481678,
+              743867085481678
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743867085482425,
+                743867085505865
+              ],
+              [
+                743867085482517,
+                743867085510522
+              ],
+              [
+                743867085484195,
+                743867085532368
+              ],
+              [
+                743867085482231,
+                743867085500237
+              ]
+            ],
+            "start_record_envelope_span_ns": 50137,
+            "variant": 1
+          },
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.05539200082421303,
+              "rank_max_ms": 0.06755200028419495,
+              "rank_ms": [
+                0.05539200082421303,
+                0.06095999851822853,
+                0.045024000108242035,
+                0.06755200028419495
+              ]
+            },
+            "pair_attempt_id": 17,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.16262400150299072,
+              "rank_max_ms": 0.23891200125217438,
+              "rank_ms": [
+                0.16262400150299072,
+                0.1573760062456131,
+                0.23891200125217438,
+                0.13740800321102142
+              ]
+            },
+            "sample_index": 16,
+            "scheduled_start_arrival_ns_by_rank": [
+              743867071641449,
+              743867071860186,
+              743867071742527,
+              743867071428332
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743867076860186,
+              743867076860186,
+              743867076860186,
+              743867076860186
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743867076861857,
+                743867076896990
+              ],
+              [
+                743867076861001,
+                743867076890449
+              ],
+              [
+                743867076864181,
+                743867076908545
+              ],
+              [
+                743867076860715,
+                743867076884001
+              ]
+            ],
+            "start_record_envelope_span_ns": 47830,
+            "variant": 1
+          }
+        },
+        "variant": 1
+      },
+      {
+        "accepted": true,
+        "attempt_id": 18,
+        "logical_pair_index": 17,
+        "order": [
+          "candidate",
+          "reference"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 0,
+        "samples": {
+          "candidate": {
+            "collective_only": {
+              "local_ms": 0.05657599866390228,
+              "rank_max_ms": 0.07929600030183792,
+              "rank_ms": [
+                0.05657599866390228,
+                0.06838399916887283,
+                0.06128000095486641,
+                0.07929600030183792
+              ]
+            },
+            "pair_attempt_id": 18,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.18614399433135986,
+              "rank_max_ms": 0.24489599466323853,
+              "rank_ms": [
+                0.18614399433135986,
+                0.17532800137996674,
+                0.24489599466323853,
+                0.14524799585342407
+              ]
+            },
+            "sample_index": 17,
+            "scheduled_start_arrival_ns_by_rank": [
+              743867091186366,
+              743867091369944,
+              743867090954779,
+              743867091150165
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743867096369944,
+              743867096369944,
+              743867096369944,
+              743867096369944
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743867096371538,
+                743867096420635
+              ],
+              [
+                743867096370753,
+                743867096406008
+              ],
+              [
+                743867096372280,
+                743867096420435
+              ],
+              [
+                743867096370559,
+                743867096396242
+              ]
+            ],
+            "start_record_envelope_span_ns": 50076,
+            "variant": 0
+          },
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.0759039968252182,
+              "rank_max_ms": 0.0814720019698143,
+              "rank_ms": [
+                0.0759039968252182,
+                0.06943999975919724,
+                0.053727999329566956,
+                0.0814720019698143
+              ]
+            },
+            "pair_attempt_id": 18,
+            "pair_retry_ordinal": 0,
+            "position": 1,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.13020800054073334,
+              "rank_max_ms": 0.2592320144176483,
+              "rank_ms": [
+                0.13020800054073334,
+                0.16976000368595123,
+                0.2592320144176483,
+                0.1345919966697693
+              ]
+            },
+            "sample_index": 17,
+            "scheduled_start_arrival_ns_by_rank": [
+              743867101288398,
+              743867101423079,
+              743867101346372,
+              743867100852797
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743867106423079,
+              743867106423079,
+              743867106423079,
+              743867106423079
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743867106423682,
+                743867106452525
+              ],
+              [
+                743867106423976,
+                743867106459300
+              ],
+              [
+                743867106426278,
+                743867106478856
+              ],
+              [
+                743867106423626,
+                743867106447346
+              ]
+            ],
+            "start_record_envelope_span_ns": 55230,
+            "variant": 0
+          }
+        },
+        "variant": 0
+      },
+      {
+        "accepted": true,
+        "attempt_id": 19,
+        "logical_pair_index": 18,
+        "order": [
+          "reference",
+          "candidate"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 0,
+        "samples": {
+          "candidate": {
+            "collective_only": {
+              "local_ms": 0.07555200159549713,
+              "rank_max_ms": 0.09308800101280212,
+              "rank_ms": [
+                0.07555200159549713,
+                0.08032000064849854,
+                0.06675200164318085,
+                0.09308800101280212
+              ]
+            },
+            "pair_attempt_id": 19,
+            "pair_retry_ordinal": 0,
+            "position": 1,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.16883200407028198,
+              "rank_max_ms": 0.26022401452064514,
+              "rank_ms": [
+                0.16883200407028198,
+                0.16995200514793396,
+                0.26022401452064514,
+                0.1372160017490387
+              ]
+            },
+            "sample_index": 18,
+            "scheduled_start_arrival_ns_by_rank": [
+              743867120387473,
+              743867120379954,
+              743867120455858,
+              743867120219345
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743867125455858,
+              743867125455858,
+              743867125455858,
+              743867125455858
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743867125457027,
+                743867125496781
+              ],
+              [
+                743867125456768,
+                743867125490393
+              ],
+              [
+                743867125458812,
+                743867125510362
+              ],
+              [
+                743867125456488,
+                743867125478746
+              ]
+            ],
+            "start_record_envelope_span_ns": 53874,
+            "variant": 1
+          },
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.04390399903059006,
+              "rank_max_ms": 0.04390399903059006,
+              "rank_ms": [
+                0.04390399903059006,
+                0.04118400067090988,
+                0.036768000572919846,
+                0.043776001781225204
+              ]
+            },
+            "pair_attempt_id": 19,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.12800000607967377,
+              "rank_max_ms": 0.1998080015182495,
+              "rank_ms": [
+                0.12800000607967377,
+                0.14771200716495514,
+                0.1998080015182495,
+                0.1438719928264618
+              ]
+            },
+            "sample_index": 18,
+            "scheduled_start_arrival_ns_by_rank": [
+              743867111188921,
+              743867111470273,
+              743867111371151,
+              743867111105854
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743867116470273,
+              743867116470273,
+              743867116470273,
+              743867116470273
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743867116470954,
+                743867116503002
+              ],
+              [
+                743867116471012,
+                743867116503691
+              ],
+              [
+                743867116471322,
+                743867116510572
+              ],
+              [
+                743867116470991,
+                743867116502471
+              ]
+            ],
+            "start_record_envelope_span_ns": 39618,
+            "variant": 1
+          }
+        },
+        "variant": 1
+      },
+      {
+        "accepted": true,
+        "attempt_id": 20,
+        "logical_pair_index": 19,
+        "order": [
+          "candidate",
+          "reference"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 0,
+        "samples": {
+          "candidate": {
+            "collective_only": {
+              "local_ms": 0.07782399654388428,
+              "rank_max_ms": 0.07782399654388428,
+              "rank_ms": [
+                0.07782399654388428,
+                0.06617599725723267,
+                0.05488000065088272,
+                0.07420799881219864
+              ]
+            },
+            "pair_attempt_id": 20,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.11593600362539291,
+              "rank_max_ms": 0.2149440050125122,
+              "rank_ms": [
+                0.11593600362539291,
+                0.1435520052909851,
+                0.2149440050125122,
+                0.12387199699878693
+              ]
+            },
+            "sample_index": 19,
+            "scheduled_start_arrival_ns_by_rank": [
+              743867129547061,
+              743867130030025,
+              743867129742703,
+              743867129616269
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743867135030025,
+              743867135030025,
+              743867135030025,
+              743867135030025
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743867135030594,
+                743867135053083
+              ],
+              [
+                743867135030777,
+                743867135059504
+              ],
+              [
+                743867135032642,
+                743867135075418
+              ],
+              [
+                743867135030605,
+                743867135055138
+              ]
+            ],
+            "start_record_envelope_span_ns": 44824,
+            "variant": 0
+          },
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.0729919970035553,
+              "rank_max_ms": 0.0729919970035553,
+              "rank_ms": [
+                0.0729919970035553,
+                0.07011199742555618,
+                0.04972799867391586,
+                0.07215999811887741
+              ]
+            },
+            "pair_attempt_id": 20,
+            "pair_retry_ordinal": 0,
+            "position": 1,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.12380799651145935,
+              "rank_max_ms": 0.27001601457595825,
+              "rank_ms": [
+                0.12380799651145935,
+                0.15839999914169312,
+                0.27001601457595825,
+                0.14934399724006653
+              ]
+            },
+            "sample_index": 19,
+            "scheduled_start_arrival_ns_by_rank": [
+              743867139526841,
+              743867139682113,
+              743867139741578,
+              743867139543049
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              743867144741578,
+              743867144741578,
+              743867144741578,
+              743867144741578
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                743867144742202,
+                743867144768487
+              ],
+              [
+                743867144742474,
+                743867144773107
+              ],
+              [
+                743867144744730,
+                743867144795071
+              ],
+              [
+                743867144742487,
+                743867144770476
+              ]
+            ],
+            "start_record_envelope_span_ns": 52869,
+            "variant": 0
+          }
+        },
+        "variant": 0
+      }
+    ],
+    "rank_order": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "reference": [
+      {
+        "collective_only": {
+          "local_ms": 0.05814399942755699,
+          "rank_max_ms": 0.06880000233650208,
+          "rank_ms": [
+            0.05814399942755699,
+            0.06880000233650208,
+            0.05113599821925163,
+            0.06652799993753433
+          ]
+        },
+        "pair_attempt_id": 0,
+        "pair_retry_ordinal": 0,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.16847999393939972,
+          "rank_max_ms": 0.28543999791145325,
+          "rank_ms": [
+            0.16847999393939972,
+            0.17231999337673187,
+            0.28543999791145325,
+            0.17180800437927246
+          ]
+        },
+        "sample_index": 0,
+        "scheduled_start_arrival_ns_by_rank": [
+          743866705024578,
+          743866704968180,
+          743866704911004,
+          743866705042609
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          743866710042609,
+          743866710042609,
+          743866710042609,
+          743866710042609
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            743866710043665,
+            743866710088140
+          ],
+          [
+            743866710043493,
+            743866710078813
+          ],
+          [
+            743866710046304,
+            743866710099166
+          ],
+          [
+            743866710043667,
+            743866710081085
+          ]
+        ],
+        "start_record_envelope_span_ns": 55673,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.07344000041484833,
+          "rank_max_ms": 0.08256000280380249,
+          "rank_ms": [
+            0.07344000041484833,
+            0.08256000280380249,
+            0.05555199831724167,
+            0.08086399734020233
+          ]
+        },
+        "pair_attempt_id": 1,
+        "pair_retry_ordinal": 0,
+        "position": 1,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.17494399845600128,
+          "rank_max_ms": 0.27823999524116516,
+          "rank_ms": [
+            0.17494399845600128,
+            0.18566399812698364,
+            0.27823999524116516,
+            0.16387200355529785
+          ]
+        },
+        "sample_index": 1,
+        "scheduled_start_arrival_ns_by_rank": [
+          743866735375460,
+          743866735172100,
+          743866735061395,
+          743866735568441
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          743866740568441,
+          743866740568441,
+          743866740568441,
+          743866740568441
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            743866740569893,
+            743866740614820
+          ],
+          [
+            743866740569431,
+            743866740607570
+          ],
+          [
+            743866740572023,
+            743866740637331
+          ],
+          [
+            743866740569308,
+            743866740605866
+          ]
+        ],
+        "start_record_envelope_span_ns": 68023,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.18227200210094452,
+          "rank_max_ms": 0.4128960072994232,
+          "rank_ms": [
+            0.18227200210094452,
+            0.4128960072994232,
+            0.3816959857940674,
+            0.05023999884724617
+          ]
+        },
+        "pair_attempt_id": 2,
+        "pair_retry_ordinal": 0,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.19142399728298187,
+          "rank_max_ms": 0.423007994890213,
+          "rank_ms": [
+            0.19142399728298187,
+            0.423007994890213,
+            0.39187198877334595,
+            0.18307200074195862
+          ]
+        },
+        "sample_index": 2,
+        "scheduled_start_arrival_ns_by_rank": [
+          743866745559122,
+          743866745705689,
+          743866745699963,
+          743866745716799
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          743866750716799,
+          743866750716799,
+          743866750716799,
+          743866750716799
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            743866751103892,
+            743866751143806
+          ],
+          [
+            743866750881475,
+            743866750913248
+          ],
+          [
+            743866750910274,
+            743866750946400
+          ],
+          [
+            743866751261467,
+            743866751294794
+          ]
+        ],
+        "start_record_envelope_span_ns": 413319,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.05593600124120712,
+          "rank_max_ms": 0.06729599833488464,
+          "rank_ms": [
+            0.05593600124120712,
+            0.06729599833488464,
+            0.05225599929690361,
+            0.06137600168585777
+          ]
+        },
+        "pair_attempt_id": 3,
+        "pair_retry_ordinal": 0,
+        "position": 1,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.16889600455760956,
+          "rank_max_ms": 0.2611199915409088,
+          "rank_ms": [
+            0.16889600455760956,
+            0.16652800142765045,
+            0.2611199915409088,
+            0.16329599916934967
+          ]
+        },
+        "sample_index": 3,
+        "scheduled_start_arrival_ns_by_rank": [
+          743866778047977,
+          743866778461390,
+          743866778613470,
+          743866778300844
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          743866783613470,
+          743866783613470,
+          743866783613470,
+          743866783613470
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            743866783614849,
+            743866783658571
+          ],
+          [
+            743866783614386,
+            743866783648840
+          ],
+          [
+            743866783615849,
+            743866783667752
+          ],
+          [
+            743866783614572,
+            743866783650739
+          ]
+        ],
+        "start_record_envelope_span_ns": 53366,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.05929600074887276,
+          "rank_max_ms": 0.06940799951553345,
+          "rank_ms": [
+            0.05929600074887276,
+            0.06940799951553345,
+            0.052032001316547394,
+            0.06761600077152252
+          ]
+        },
+        "pair_attempt_id": 4,
+        "pair_retry_ordinal": 0,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.18732799589633942,
+          "rank_max_ms": 0.2940160036087036,
+          "rank_ms": [
+            0.18732799589633942,
+            0.18409599363803864,
+            0.2940160036087036,
+            0.17641599476337433
+          ]
+        },
+        "sample_index": 4,
+        "scheduled_start_arrival_ns_by_rank": [
+          743866788692393,
+          743866788825441,
+          743866788668834,
+          743866788541721
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          743866793825441,
+          743866793825441,
+          743866793825441,
+          743866793825441
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            743866793826371,
+            743866793870163
+          ],
+          [
+            743866793826325,
+            743866793858405
+          ],
+          [
+            743866793828985,
+            743866793881351
+          ],
+          [
+            743866793826178,
+            743866793861286
+          ]
+        ],
+        "start_record_envelope_span_ns": 55173,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.03545600175857544,
+          "rank_max_ms": 0.04416000097990036,
+          "rank_ms": [
+            0.03545600175857544,
+            0.04416000097990036,
+            0.040991999208927155,
+            0.04153599962592125
+          ]
+        },
+        "pair_attempt_id": 5,
+        "pair_retry_ordinal": 0,
+        "position": 1,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.15855999290943146,
+          "rank_max_ms": 0.21449600160121918,
+          "rank_ms": [
+            0.15855999290943146,
+            0.15692800283432007,
+            0.21449600160121918,
+            0.15795199573040009
+          ]
+        },
+        "sample_index": 5,
+        "scheduled_start_arrival_ns_by_rank": [
+          743866825047909,
+          743866823877090,
+          743866823780032,
+          743866823675216
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          743866830047909,
+          743866830047909,
+          743866830047909,
+          743866830047909
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            743866830049339,
+            743866830089926
+          ],
+          [
+            743866830048662,
+            743866830082084
+          ],
+          [
+            743866830048914,
+            743866830088456
+          ],
+          [
+            743866830049026,
+            743866830083763
+          ]
+        ],
+        "start_record_envelope_span_ns": 41264,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.03999999910593033,
+          "rank_max_ms": 0.048128001391887665,
+          "rank_ms": [
+            0.03999999910593033,
+            0.048128001391887665,
+            0.03753599897027016,
+            0.046592000871896744
+          ]
+        },
+        "pair_attempt_id": 6,
+        "pair_retry_ordinal": 0,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.14560000598430634,
+          "rank_max_ms": 0.2038400024175644,
+          "rank_ms": [
+            0.14560000598430634,
+            0.1440960019826889,
+            0.2038400024175644,
+            0.14998400211334229
+          ]
+        },
+        "sample_index": 6,
+        "scheduled_start_arrival_ns_by_rank": [
+          743866835428366,
+          743866835682487,
+          743866835702143,
+          743866835083961
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          743866840702143,
+          743866840702143,
+          743866840702143,
+          743866840702143
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            743866840702976,
+            743866840740185
+          ],
+          [
+            743866840702766,
+            743866840732351
+          ],
+          [
+            743866840703552,
+            743866840743460
+          ],
+          [
+            743866840703404,
+            743866840734799
+          ]
+        ],
+        "start_record_envelope_span_ns": 40694,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.2062080055475235,
+          "rank_max_ms": 0.2062080055475235,
+          "rank_ms": [
+            0.2062080055475235,
+            0.1345919966697693,
+            0.2035519927740097,
+            0.03033600002527237
+          ]
+        },
+        "pair_attempt_id": 7,
+        "pair_retry_ordinal": 0,
+        "position": 1,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.21625599265098572,
+          "rank_max_ms": 0.21625599265098572,
+          "rank_ms": [
+            0.21625599265098572,
+            0.17235200107097626,
+            0.21359999477863312,
+            0.1598079949617386
+          ]
+        },
+        "sample_index": 7,
+        "scheduled_start_arrival_ns_by_rank": [
+          743866867594664,
+          743866867069174,
+          743866867725893,
+          743866868129416
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          743866873129416,
+          743866873129416,
+          743866873129416,
+          743866873129416
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            743866873510896,
+            743866873553748
+          ],
+          [
+            743866873588248,
+            743866873623239
+          ],
+          [
+            743866873511659,
+            743866873554713
+          ],
+          [
+            743866873688920,
+            743866873724967
+          ]
+        ],
+        "start_record_envelope_span_ns": 214071,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.058368001133203506,
+          "rank_max_ms": 0.06787200272083282,
+          "rank_ms": [
+            0.058368001133203506,
+            0.06787200272083282,
+            0.04870399832725525,
+            0.05804799869656563
+          ]
+        },
+        "pair_attempt_id": 8,
+        "pair_retry_ordinal": 0,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.1462399959564209,
+          "rank_max_ms": 0.24348799884319305,
+          "rank_ms": [
+            0.1462399959564209,
+            0.15065599977970123,
+            0.24348799884319305,
+            0.1953279972076416
+          ]
+        },
+        "sample_index": 8,
+        "scheduled_start_arrival_ns_by_rank": [
+          743866878305567,
+          743866878373509,
+          743866878281968,
+          743866878308587
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          743866883373509,
+          743866883373509,
+          743866883373509,
+          743866883373509
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            743866883375064,
+            743866883412813
+          ],
+          [
+            743866883374338,
+            743866883405485
+          ],
+          [
+            743866883376312,
+            743866883426736
+          ],
+          [
+            743866883375133,
+            743866883415579
+          ]
+        ],
+        "start_record_envelope_span_ns": 52398,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.05974400043487549,
+          "rank_max_ms": 0.06998399645090103,
+          "rank_ms": [
+            0.05974400043487549,
+            0.06998399645090103,
+            0.055424001067876816,
+            0.06620799750089645
+          ]
+        },
+        "pair_attempt_id": 9,
+        "pair_retry_ordinal": 0,
+        "position": 1,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.18531200289726257,
+          "rank_max_ms": 0.28204798698425293,
+          "rank_ms": [
+            0.18531200289726257,
+            0.18300800025463104,
+            0.28204798698425293,
+            0.21104000508785248
+          ]
+        },
+        "sample_index": 9,
+        "scheduled_start_arrival_ns_by_rank": [
+          743866911496680,
+          743866911861889,
+          743866911878918,
+          743866911707378
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          743866916878918,
+          743866916878918,
+          743866916878918,
+          743866916878918
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            743866916880486,
+            743866916924754
+          ],
+          [
+            743866916879854,
+            743866916914621
+          ],
+          [
+            743866916881919,
+            743866916935077
+          ],
+          [
+            743866916879734,
+            743866916918237
+          ]
+        ],
+        "start_record_envelope_span_ns": 55343,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.06508799642324448,
+          "rank_max_ms": 0.07555200159549713,
+          "rank_ms": [
+            0.06508799642324448,
+            0.07555200159549713,
+            0.055743999779224396,
+            0.07462400197982788
+          ]
+        },
+        "pair_attempt_id": 10,
+        "pair_retry_ordinal": 0,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.18111999332904816,
+          "rank_max_ms": 0.3092480003833771,
+          "rank_ms": [
+            0.18111999332904816,
+            0.1807679980993271,
+            0.3092480003833771,
+            0.1695680022239685
+          ]
+        },
+        "sample_index": 10,
+        "scheduled_start_arrival_ns_by_rank": [
+          743866922483294,
+          743866922721654,
+          743866922267900,
+          743866922214906
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          743866927721654,
+          743866927721654,
+          743866927721654,
+          743866927721654
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            743866927722724,
+            743866927769663
+          ],
+          [
+            743866927722564,
+            743866927759886
+          ],
+          [
+            743866927725168,
+            743866927785186
+          ],
+          [
+            743866927722586,
+            743866927759336
+          ]
+        ],
+        "start_record_envelope_span_ns": 62622,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.0589120015501976,
+          "rank_max_ms": 0.06614399701356888,
+          "rank_ms": [
+            0.0589120015501976,
+            0.06614399701356888,
+            0.04982399940490723,
+            0.06560000032186508
+          ]
+        },
+        "pair_attempt_id": 11,
+        "pair_retry_ordinal": 0,
+        "position": 1,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.14892800152301788,
+          "rank_max_ms": 0.2483839988708496,
+          "rank_ms": [
+            0.14892800152301788,
+            0.16252799332141876,
+            0.2483839988708496,
+            0.15199999511241913
+          ]
+        },
+        "sample_index": 11,
+        "scheduled_start_arrival_ns_by_rank": [
+          743866954659488,
+          743866954538915,
+          743866954274902,
+          743866954397961
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          743866959659488,
+          743866959659488,
+          743866959659488,
+          743866959659488
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            743866959660776,
+            743866959698759
+          ],
+          [
+            743866959660278,
+            743866959693618
+          ],
+          [
+            743866959662164,
+            743866959711232
+          ],
+          [
+            743866959660575,
+            743866959691814
+          ]
+        ],
+        "start_record_envelope_span_ns": 50954,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.08057600259780884,
+          "rank_max_ms": 0.08428800106048584,
+          "rank_ms": [
+            0.08057600259780884,
+            0.08428800106048584,
+            0.07257600128650665,
+            0.07974400371313095
+          ]
+        },
+        "pair_attempt_id": 12,
+        "pair_retry_ordinal": 0,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.16867199540138245,
+          "rank_max_ms": 0.2761920094490051,
+          "rank_ms": [
+            0.16867199540138245,
+            0.17660799622535706,
+            0.2761920094490051,
+            0.18963199853897095
+          ]
+        },
+        "sample_index": 12,
+        "scheduled_start_arrival_ns_by_rank": [
+          743866965920590,
+          743866965251043,
+          743866965681349,
+          743866965389564
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          743866970920590,
+          743866970920590,
+          743866970920590,
+          743866970920590
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            743866970921667,
+            743866970958829
+          ],
+          [
+            743866970921383,
+            743866970953661
+          ],
+          [
+            743866970923472,
+            743866970971999
+          ],
+          [
+            743866970922047,
+            743866970959392
+          ]
+        ],
+        "start_record_envelope_span_ns": 50616,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.05923200026154518,
+          "rank_max_ms": 0.06864000111818314,
+          "rank_ms": [
+            0.05923200026154518,
+            0.06531199812889099,
+            0.05238400027155876,
+            0.06864000111818314
+          ]
+        },
+        "pair_attempt_id": 13,
+        "pair_retry_ordinal": 0,
+        "position": 1,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.18163199722766876,
+          "rank_max_ms": 0.2754879891872406,
+          "rank_ms": [
+            0.18163199722766876,
+            0.2173440009355545,
+            0.2754879891872406,
+            0.17558400332927704
+          ]
+        },
+        "sample_index": 13,
+        "scheduled_start_arrival_ns_by_rank": [
+          743867000225585,
+          743867000541389,
+          743867000198853,
+          743867000147516
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          743867005541389,
+          743867005541389,
+          743867005541389,
+          743867005541389
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            743867005542499,
+            743867005590739
+          ],
+          [
+            743867005542726,
+            743867005585981
+          ],
+          [
+            743867005545092,
+            743867005600060
+          ],
+          [
+            743867005542447,
+            743867005580035
+          ]
+        ],
+        "start_record_envelope_span_ns": 57613,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.0634239986538887,
+          "rank_max_ms": 0.0634239986538887,
+          "rank_ms": [
+            0.0634239986538887,
+            0.05766399949789047,
+            0.04435199871659279,
+            0.054207999259233475
+          ]
+        },
+        "pair_attempt_id": 15,
+        "pair_retry_ordinal": 1,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.1252480000257492,
+          "rank_max_ms": 0.2343360036611557,
+          "rank_ms": [
+            0.1252480000257492,
+            0.15401600301265717,
+            0.2343360036611557,
+            0.16089600324630737
+          ]
+        },
+        "sample_index": 14,
+        "scheduled_start_arrival_ns_by_rank": [
+          743867033428495,
+          743867033308656,
+          743867033638726,
+          743867033268627
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          743867038638726,
+          743867038638726,
+          743867038638726,
+          743867038638726
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            743867038639362,
+            743867038667208
+          ],
+          [
+            743867038639631,
+            743867038670739
+          ],
+          [
+            743867038641005,
+            743867038686961
+          ],
+          [
+            743867038640085,
+            743867038673968
+          ]
+        ],
+        "start_record_envelope_span_ns": 47599,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.05660799890756607,
+          "rank_max_ms": 0.07401599735021591,
+          "rank_ms": [
+            0.05660799890756607,
+            0.061216000467538834,
+            0.04761600121855736,
+            0.07401599735021591
+          ]
+        },
+        "pair_attempt_id": 16,
+        "pair_retry_ordinal": 0,
+        "position": 1,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.1432960033416748,
+          "rank_max_ms": 0.23289600014686584,
+          "rank_ms": [
+            0.1432960033416748,
+            0.1552640050649643,
+            0.23289600014686584,
+            0.11823999881744385
+          ]
+        },
+        "sample_index": 15,
+        "scheduled_start_arrival_ns_by_rank": [
+          743867062290861,
+          743867062344122,
+          743867062071609,
+          743867062146693
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          743867067344122,
+          743867067344122,
+          743867067344122,
+          743867067344122
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            743867067345385,
+            743867067381524
+          ],
+          [
+            743867067344856,
+            743867067376754
+          ],
+          [
+            743867067347082,
+            743867067394700
+          ],
+          [
+            743867067344728,
+            743867067363990
+          ]
+        ],
+        "start_record_envelope_span_ns": 49972,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.05539200082421303,
+          "rank_max_ms": 0.06755200028419495,
+          "rank_ms": [
+            0.05539200082421303,
+            0.06095999851822853,
+            0.045024000108242035,
+            0.06755200028419495
+          ]
+        },
+        "pair_attempt_id": 17,
+        "pair_retry_ordinal": 0,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.16262400150299072,
+          "rank_max_ms": 0.23891200125217438,
+          "rank_ms": [
+            0.16262400150299072,
+            0.1573760062456131,
+            0.23891200125217438,
+            0.13740800321102142
+          ]
+        },
+        "sample_index": 16,
+        "scheduled_start_arrival_ns_by_rank": [
+          743867071641449,
+          743867071860186,
+          743867071742527,
+          743867071428332
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          743867076860186,
+          743867076860186,
+          743867076860186,
+          743867076860186
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            743867076861857,
+            743867076896990
+          ],
+          [
+            743867076861001,
+            743867076890449
+          ],
+          [
+            743867076864181,
+            743867076908545
+          ],
+          [
+            743867076860715,
+            743867076884001
+          ]
+        ],
+        "start_record_envelope_span_ns": 47830,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.0759039968252182,
+          "rank_max_ms": 0.0814720019698143,
+          "rank_ms": [
+            0.0759039968252182,
+            0.06943999975919724,
+            0.053727999329566956,
+            0.0814720019698143
+          ]
+        },
+        "pair_attempt_id": 18,
+        "pair_retry_ordinal": 0,
+        "position": 1,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.13020800054073334,
+          "rank_max_ms": 0.2592320144176483,
+          "rank_ms": [
+            0.13020800054073334,
+            0.16976000368595123,
+            0.2592320144176483,
+            0.1345919966697693
+          ]
+        },
+        "sample_index": 17,
+        "scheduled_start_arrival_ns_by_rank": [
+          743867101288398,
+          743867101423079,
+          743867101346372,
+          743867100852797
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          743867106423079,
+          743867106423079,
+          743867106423079,
+          743867106423079
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            743867106423682,
+            743867106452525
+          ],
+          [
+            743867106423976,
+            743867106459300
+          ],
+          [
+            743867106426278,
+            743867106478856
+          ],
+          [
+            743867106423626,
+            743867106447346
+          ]
+        ],
+        "start_record_envelope_span_ns": 55230,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.04390399903059006,
+          "rank_max_ms": 0.04390399903059006,
+          "rank_ms": [
+            0.04390399903059006,
+            0.04118400067090988,
+            0.036768000572919846,
+            0.043776001781225204
+          ]
+        },
+        "pair_attempt_id": 19,
+        "pair_retry_ordinal": 0,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.12800000607967377,
+          "rank_max_ms": 0.1998080015182495,
+          "rank_ms": [
+            0.12800000607967377,
+            0.14771200716495514,
+            0.1998080015182495,
+            0.1438719928264618
+          ]
+        },
+        "sample_index": 18,
+        "scheduled_start_arrival_ns_by_rank": [
+          743867111188921,
+          743867111470273,
+          743867111371151,
+          743867111105854
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          743867116470273,
+          743867116470273,
+          743867116470273,
+          743867116470273
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            743867116470954,
+            743867116503002
+          ],
+          [
+            743867116471012,
+            743867116503691
+          ],
+          [
+            743867116471322,
+            743867116510572
+          ],
+          [
+            743867116470991,
+            743867116502471
+          ]
+        ],
+        "start_record_envelope_span_ns": 39618,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.0729919970035553,
+          "rank_max_ms": 0.0729919970035553,
+          "rank_ms": [
+            0.0729919970035553,
+            0.07011199742555618,
+            0.04972799867391586,
+            0.07215999811887741
+          ]
+        },
+        "pair_attempt_id": 20,
+        "pair_retry_ordinal": 0,
+        "position": 1,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.12380799651145935,
+          "rank_max_ms": 0.27001601457595825,
+          "rank_ms": [
+            0.12380799651145935,
+            0.15839999914169312,
+            0.27001601457595825,
+            0.14934399724006653
+          ]
+        },
+        "sample_index": 19,
+        "scheduled_start_arrival_ns_by_rank": [
+          743867139526841,
+          743867139682113,
+          743867139741578,
+          743867139543049
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          743867144741578,
+          743867144741578,
+          743867144741578,
+          743867144741578
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            743867144742202,
+            743867144768487
+          ],
+          [
+            743867144742474,
+            743867144773107
+          ],
+          [
+            743867144744730,
+            743867144795071
+          ],
+          [
+            743867144742487,
+            743867144770476
+          ]
+        ],
+        "start_record_envelope_span_ns": 52869,
+        "variant": 0
+      }
+    ],
+    "warmup_order": [
+      [
+        "reference",
+        "candidate"
+      ],
+      [
+        "candidate",
+        "reference"
+      ],
+      [
+        "reference",
+        "candidate"
+      ]
+    ],
+    "warmup_variants": [
+      1,
+      0,
+      1
+    ]
+  },
+  "readiness_probe": {
+    "dtype": "torch.bfloat16",
+    "full_tensor_consumer": "preallocated BF16 negation output",
+    "full_tensor_validation": "exact on every warmup and measured sample",
+    "num_elements": 60,
+    "positions": [
+      [
+        0,
+        0
+      ],
+      [
+        0,
+        1
+      ],
+      [
+        0,
+        2
+      ],
+      [
+        0,
+        3
+      ],
+      [
+        0,
+        2048
+      ],
+      [
+        0,
+        3072
+      ],
+      [
+        0,
+        6140
+      ],
+      [
+        0,
+        6141
+      ],
+      [
+        0,
+        6142
+      ],
+      [
+        0,
+        6143
+      ],
+      [
+        1,
+        0
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        1,
+        3
+      ],
+      [
+        1,
+        2048
+      ],
+      [
+        1,
+        3072
+      ],
+      [
+        1,
+        6140
+      ],
+      [
+        1,
+        6141
+      ],
+      [
+        1,
+        6142
+      ],
+      [
+        1,
+        6143
+      ],
+      [
+        5,
+        0
+      ],
+      [
+        5,
+        1
+      ],
+      [
+        5,
+        2
+      ],
+      [
+        5,
+        3
+      ],
+      [
+        5,
+        2048
+      ],
+      [
+        5,
+        3072
+      ],
+      [
+        5,
+        6140
+      ],
+      [
+        5,
+        6141
+      ],
+      [
+        5,
+        6142
+      ],
+      [
+        5,
+        6143
+      ],
+      [
+        8,
+        0
+      ],
+      [
+        8,
+        1
+      ],
+      [
+        8,
+        2
+      ],
+      [
+        8,
+        3
+      ],
+      [
+        8,
+        2048
+      ],
+      [
+        8,
+        3072
+      ],
+      [
+        8,
+        6140
+      ],
+      [
+        8,
+        6141
+      ],
+      [
+        8,
+        6142
+      ],
+      [
+        8,
+        6143
+      ],
+      [
+        14,
+        0
+      ],
+      [
+        14,
+        1
+      ],
+      [
+        14,
+        2
+      ],
+      [
+        14,
+        3
+      ],
+      [
+        14,
+        2048
+      ],
+      [
+        14,
+        3072
+      ],
+      [
+        14,
+        6140
+      ],
+      [
+        14,
+        6141
+      ],
+      [
+        14,
+        6142
+      ],
+      [
+        14,
+        6143
+      ],
+      [
+        15,
+        0
+      ],
+      [
+        15,
+        1
+      ],
+      [
+        15,
+        2
+      ],
+      [
+        15,
+        3
+      ],
+      [
+        15,
+        2048
+      ],
+      [
+        15,
+        3072
+      ],
+      [
+        15,
+        6140
+      ],
+      [
+        15,
+        6141
+      ],
+      [
+        15,
+        6142
+      ],
+      [
+        15,
+        6143
+      ]
+    ],
+    "validation": "exact on every warmup and measured sample"
+  },
+  "reference": {
+    "collective_only": {
+      "median_ms": 0.06910400092601776,
+      "min_ms": 0.04390399903059006,
+      "p95_ms": 0.2062080055475235
+    },
+    "gate_metric": "ready_region.rank_max_ms",
+    "readiness_probe_overhead_median_ms": 0.18000000715255737,
+    "ready_region": {
+      "median_ms": 0.26017600297927856,
+      "min_ms": 0.1998080015182495,
+      "p95_ms": 0.3092480003833771
+    }
+  },
+  "reference_policy": "SGLANG_GLM52_OPT=0 production GroupCoordinator path",
+  "result_path": "/tmp/tp_allreduce_graph_reset_probe_20260722T191541Z.json",
+  "schema_version": 2,
+  "scope": "tp4_allreduce_diagnostic_only",
+  "timing_contract": {
+    "alignment_retry_admission": "scheduled arrivals, common targets, and start-record brackets only; collective and ready-region latency are excluded",
+    "collective_only": "start event through event recorded immediately after run()",
+    "gate_metric": "ready_region rank-max paired p50",
+    "rank_start_alignment": "selected stream synchronized after restoration; TP CPU-group all-gather selects a common same-host monotonic deadline 5 ms after latest arrival; ranks busy-wait; host timestamps bracket every start-event record call; a host-only 500 us envelope predicate allows at most 10 physical attempts for the whole logical A/B pair; the exact input variant alternates on every physical pair",
+    "ready_region": "start event through full-tensor same-stream negation and position-sensitive gather",
+    "restoration": "variant source-to-local copy and consumer/probe poison occur before every start event"
+  },
+  "workload": {
+    "distributed": true,
+    "family": "allreduce",
+    "name": "tp4_allreduce_decode_m16",
+    "notes": "TP4/DP4 decode bucket: local M=16; sum reduction. Standalone diagnostic; production caller/ABI not yet proven.",
+    "params": {
+      "dtype": "bfloat16",
+      "hidden": 6144,
+      "local_tokens": 16
+    },
+    "phase": "decode",
+    "source_symbol": "sglang.srt.distributed.parallel_state.GroupCoordinator.all_reduce",
+    "world_size": 4
+  }
+}

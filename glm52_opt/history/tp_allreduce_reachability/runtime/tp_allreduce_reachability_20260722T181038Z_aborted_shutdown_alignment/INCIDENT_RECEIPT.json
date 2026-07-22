@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "classification": "contemporaneous_operator_observation",
+  "campaign_root": "/tmp/tp_allreduce_reachability_20260722T181038Z",
+  "candidate_step": "paired/m16_c10d_inplace",
+  "candidate_started_utc": "2026-07-22T18:24:29.855928812Z",
+  "payload_mtime_utc": "2026-07-22T18:24:46.749405158Z",
+  "payload_bytes": 333183,
+  "observation": {
+    "observed_utc_approx": "2026-07-22T18:31:04Z",
+    "timestamp_basis": "candidate start plus ps elapsed time; this was observed live but not emitted by the campaign",
+    "timeout_pid": 1267206,
+    "timeout_elapsed": "00:06:35",
+    "torchrun_pid": 1267213,
+    "worker_processes": [
+      {
+        "pid": 1267673,
+        "elapsed": "00:06:32",
+        "state": "Ssl",
+        "wait_channel": "futex_wait_queue"
+      },
+      {
+        "pid": 1267676,
+        "elapsed": "00:06:32",
+        "state": "Ssl",
+        "wait_channel": "futex_wait_queue"
+      },
+      {
+        "pid": 1267677,
+        "elapsed": "00:06:32",
+        "state": "Ssl",
+        "wait_channel": "futex_wait_queue"
+      },
+      {
+        "pid": 1267678,
+        "elapsed": "00:06:32",
+        "state": "Ssl",
+        "wait_channel": "futex_wait_queue"
+      }
+    ],
+    "last_log_event": "barrier() device-context warning immediately after the serialized JSON payload",
+    "source_control_flow": "At recorded Harness SHA 46ba026, successful run_task persistence is followed by close_best_effort(failed=False), GenericRuntime.close(), and its NCCL device_group barrier. CPU-group result acknowledgement is inferred from reaching that later barrier."
+  },
+  "termination": {
+    "reason": "release all four scheduler locks after a post-persistence shutdown stall",
+    "verified_process_group_id": 1164137,
+    "signal_command": "kill -TERM -- -1164137",
+    "root_process_absent_within_seconds": 5,
+    "wrapper_session_exit_code": 1
+  },
+  "limitations": [
+    "This receipt was written after termination from the live process/status observations; it is not an automatically generated campaign artifact.",
+    "The payload is mathematically complete but has no outer status.tsv row, exit code, or finish timestamp and is not accepted as performance evidence."
+  ]
+}
