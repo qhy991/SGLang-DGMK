@@ -43,6 +43,11 @@ from sglang.srt.layers.attention.dsa.utils import (
     is_dsa_enable_prefill_cp,
     pad_dsa_cache_seqlens,
 )
+from sglang.srt.layers.attention.dsa.dsa_aiter_sparse_mla import (
+    aiter_sparse_mla_fwd,
+    should_route_aiter_sparse_mla,
+    should_use_aiter_sparse_mla,
+)
 from sglang.srt.layers.attention.utils import (
     concat_mla_absorb_q_general,
     mla_quantize_and_rope_for_fp8,
@@ -101,6 +106,29 @@ global_workspace_buffer = None
 # Control whether to use fused metadata copy kernel for cuda graph replay (default: enabled)
 # Set SGLANG_USE_FUSED_METADATA_COPY=0 or false to disable
 _USE_FUSED_METADATA_COPY = envs.SGLANG_USE_FUSED_METADATA_COPY.get() and not _is_hip
+
+# Opt-in decode instrumentation. Gated by SGLANG_DSA_DECODE_INSTR (env). Zero
+# overhead when disabled: the module-level flag is captured once at import.
+_DSA_DECODE_INSTR_ENABLED = envs.SGLANG_DSA_DECODE_INSTR.get()
+_DSA_DECODE_INSTR_VERBOSE_STEPS = 5  # first N per-bs steps emit full snapshot
+_DSA_DECODE_INSTR_SAMPLE_EVERY = 32  # afterward, sample every K steps
+_DSA_DECODE_INSTR_STEP_COUNTER: Dict[int, int] = {}  # per-bs Python-side counter
+_DSA_DECODE_INSTR_CAPTURE_LOGGED: Dict[int, bool] = {}  # per-bs one-shot capture snapshot
+
+
+def _dsa_decode_instr_should_emit(bs: int) -> bool:
+    n = _DSA_DECODE_INSTR_STEP_COUNTER.get(bs, 0)
+    _DSA_DECODE_INSTR_STEP_COUNTER[bs] = n + 1
+    if n < _DSA_DECODE_INSTR_VERBOSE_STEPS:
+        return True
+    return (n % _DSA_DECODE_INSTR_SAMPLE_EVERY) == 0
+
+
+def _dsa_decode_instr_log(tag: str, **fields) -> None:
+    import sys
+
+    parts = " ".join(f"{k}={v}" for k, v in fields.items())
+    print(f"[DECODE_INSTR][{tag}] {parts}", file=sys.stderr, flush=True)
 
 
 @dataclass(frozen=True)
@@ -1062,6 +1090,53 @@ class DeepseekSparseAttnBackend(
             )
             metadata.dsa_cache_seqlens_int32.copy_(dsa_cache_seqlens)
             seqlens_expanded = cache_seqlens
+            if _DSA_DECODE_INSTR_ENABLED and _dsa_decode_instr_should_emit(bs):
+                seq_lens_cpu_i32 = seq_lens_cpu.to(torch.int32)
+                _dsa_decode_instr_log(
+                    "apply_cuda_graph_meta_decode",
+                    bs=bs,
+                    step=_DSA_DECODE_INSTR_STEP_COUNTER[bs] - 1,
+                    max_seq_len_k=max_len,
+                    seqlens_min=int(seq_lens_cpu_i32.min().item()),
+                    seqlens_max=int(seq_lens_cpu_i32.max().item()),
+                    seqlens_median=int(
+                        seq_lens_cpu_i32.median().item()
+                        if seq_lens_cpu_i32.numel() > 0
+                        else 0
+                    ),
+                    page_table_shape=tuple(metadata.page_table_1.shape),
+                    page_table_dptr=metadata.page_table_1.data_ptr(),
+                    req_to_token_dptr=self.req_to_token.data_ptr(),
+                    dsa_index_topk=self.dsa_index_topk,
+                    dsa_cache_seqlens_max=int(dsa_cache_seqlens.max().item()),
+                )
+                # Page-table content fingerprint (R2 t2b). Directly tests H4:
+                # if physical-page indices differ between baseline and hybrid at
+                # the same step, sparse extend perturbed the allocator free
+                # list. Gated on capture (BL-20260707-cuda-graph-capture-gating)
+                # to keep the reductions out of any captured graph.
+                if not torch.cuda.is_current_stream_capturing():
+                    pt_row0 = metadata.page_table_1[0, :max_len].to(torch.int32)
+                    first64_cpu = pt_row0[:64].cpu().tolist()
+                    if len(first64_cpu) >= 2:
+                        strides = [
+                            first64_cpu[i + 1] - first64_cpu[i]
+                            for i in range(len(first64_cpu) - 1)
+                        ]
+                        s_mean = sum(strides) / len(strides)
+                        stride_var = sum((s - s_mean) ** 2 for s in strides) / len(strides)
+                    else:
+                        stride_var = 0.0
+                    _dsa_decode_instr_log(
+                        "page_table_fingerprint",
+                        bs=bs,
+                        step=_DSA_DECODE_INSTR_STEP_COUNTER[bs] - 1,
+                        max_len=max_len,
+                        first64=first64_cpu,
+                        sum64=sum(first64_cpu),
+                        sum_valid=int(pt_row0.sum().item()),
+                        stride_var=round(stride_var, 2),
+                    )
         elif forward_mode.is_target_verify():
             max_seqlen_k = int(
                 seq_lens_cpu.max().item() + self.speculative_num_draft_tokens
@@ -1973,6 +2048,82 @@ class DeepseekSparseAttnBackend(
             d_v=v_head_dim,
         )
 
+    def _run_aiter_mla_decode_fwd(
+        self,
+        q_kernel: torch.Tensor,
+        kv_cache: torch.Tensor,
+        page_table_1: torch.Tensor,
+        layer: RadixAttention,
+        metadata: DSAMetadata,
+        bs: int,
+    ) -> torch.Tensor:
+        """HIP short-KV path: aiter mla_decode_fwd with sparse top-k page table."""
+        num_tokens = q_kernel.shape[0]
+        if _DSA_DECODE_INSTR_ENABLED and layer.layer_id == 0:
+            capturing = bool(torch.cuda.is_current_stream_capturing())
+            key = (bs, capturing)
+            if not _DSA_DECODE_INSTR_CAPTURE_LOGGED.get(key, False):
+                _DSA_DECODE_INSTR_CAPTURE_LOGGED[key] = True
+                fields = dict(
+                    bs=bs,
+                    layer_id=layer.layer_id,
+                    capturing=int(capturing),
+                    num_tokens=num_tokens,
+                    q_kernel_shape=tuple(q_kernel.shape),
+                    page_table_shape=tuple(page_table_1.shape),
+                    page_table_dptr=page_table_1.data_ptr(),
+                    kv_indptr_dptr=self.kv_indptr.data_ptr(),
+                    kv_indices_dptr=self.kv_indices.data_ptr(),
+                    need_pad_heads=int(self.need_pad_heads),
+                    head_repeat_factor=self.head_repeat_factor,
+                    tp_q_head_num=layer.tp_q_head_num,
+                    max_seq_len_q=metadata.max_seq_len_q,
+                    max_seq_len_k=metadata.max_seq_len_k,
+                )
+                if not capturing:
+                    # Only sample tensor stats when we're NOT capturing a
+                    # CUDA graph — otherwise these reductions would be
+                    # recorded into the graph and run on every replay.
+                    non_minus1_dbg = (page_table_1 != -1).sum(dim=1)
+                    fields["non_minus1_min"] = int(non_minus1_dbg.min().item())
+                    fields["non_minus1_max"] = int(non_minus1_dbg.max().item())
+                    fields["non_minus1_median"] = int(non_minus1_dbg.median().item())
+                _dsa_decode_instr_log("run_aiter_mla_decode_fwd_enter", **fields)
+        if self.need_pad_heads:
+            q_kernel = q_kernel.repeat_interleave(self.head_repeat_factor, dim=1)
+            o_kernel = q_kernel.new_empty(
+                num_tokens,
+                layer.tp_q_head_num * self.head_repeat_factor,
+                layer.v_head_dim,
+            )
+        else:
+            o_kernel = q_kernel.new_empty(
+                num_tokens, q_kernel.shape[1], layer.v_head_dim
+            )
+
+        kv_indptr = self.kv_indptr
+        non_minus1_mask = page_table_1 != -1
+        non_minus1_counts = non_minus1_mask.sum(dim=1)
+        kv_indptr[1 : bs + 1] = torch.cumsum(non_minus1_counts, dim=0)
+        get_valid_kv_indices(page_table_1, kv_indptr, self.kv_indices, bs)
+
+        mla_decode_fwd(
+            q_kernel,
+            kv_cache.view(-1, 1, 1, layer.head_dim),
+            o_kernel,
+            metadata.cu_seqlens_q,
+            kv_indptr,
+            self.kv_indices,
+            metadata.cu_seqlens_q,
+            metadata.max_seq_len_q,
+            sm_scale=layer.scaling,
+            logit_cap=layer.logit_cap,
+        )
+
+        if self.need_pad_heads:
+            o_kernel = o_kernel[:, :: self.head_repeat_factor, :]
+        return o_kernel
+
     def _forward_aiter(
         self,
         q_all: torch.Tensor,
@@ -1983,53 +2134,17 @@ class DeepseekSparseAttnBackend(
         bs: int,
     ) -> torch.Tensor:
         q = q_all.reshape(-1, layer.tp_q_head_num * layer.head_dim)
+        q_kernel_3d = q.view(-1, layer.tp_q_head_num, layer.head_dim)
 
-        if layer.head_dim != layer.v_head_dim:
-            o = q.new_empty((q.shape[0], layer.tp_q_head_num * layer.v_head_dim))
-        else:
-            o = torch.empty_like(q)
-
-        if self.need_pad_heads:
-            q_kernel = q.view(
-                -1, layer.tp_q_head_num, layer.head_dim
-            ).repeat_interleave(self.head_repeat_factor, dim=1)
-            o_kernel = q.new_empty(
-                (
-                    q.shape[0],
-                    layer.tp_q_head_num * self.head_repeat_factor,
-                    layer.v_head_dim,
-                )
-            )
-        else:
-            q_kernel = q.view(-1, layer.tp_q_head_num, layer.head_dim)
-            o_kernel = o.view(-1, layer.tp_q_head_num, layer.v_head_dim)
-
-        kv_indptr = self.kv_indptr
-
-        non_minus1_mask = page_table_1 != -1
-        non_minus1_counts = non_minus1_mask.sum(dim=1)
-        kv_indptr[1 : bs + 1] = torch.cumsum(non_minus1_counts, dim=0)
-
-        kv_indices = self.kv_indices
-        get_valid_kv_indices(page_table_1, kv_indptr, kv_indices, bs)
-
-        mla_decode_fwd(
-            q_kernel,
-            kv_cache.view(-1, 1, 1, layer.head_dim),
-            o_kernel,
-            metadata.cu_seqlens_q,
-            kv_indptr,
-            kv_indices,
-            metadata.cu_seqlens_q,
-            metadata.max_seq_len_q,
-            sm_scale=layer.scaling,
-            logit_cap=layer.logit_cap,
+        o_kernel = self._run_aiter_mla_decode_fwd(
+            q_kernel=q_kernel_3d,
+            kv_cache=kv_cache,
+            page_table_1=page_table_1,
+            layer=layer,
+            metadata=metadata,
+            bs=bs,
         )
-
-        if self.need_pad_heads:
-            o = o_kernel[:, :: self.head_repeat_factor, :]
-
-        return o
+        return o_kernel.reshape(q.shape[0], -1)
 
     def _forward_aiter_extend(
         self,
@@ -2038,8 +2153,39 @@ class DeepseekSparseAttnBackend(
         page_table_1: torch.Tensor,
         layer: RadixAttention,
     ) -> torch.Tensor:
+        metadata = self.forward_metadata
+        assert metadata is not None
         num_tokens = q_all.shape[0]
         q = q_all.reshape(-1, layer.tp_q_head_num * layer.head_dim)
+
+        if self.need_pad_heads:
+            q_kernel = q.view(
+                -1, layer.tp_q_head_num, layer.head_dim
+            ).repeat_interleave(self.head_repeat_factor, dim=1)
+        else:
+            q_kernel = q.view(-1, layer.tp_q_head_num, layer.head_dim)
+
+        # Sparse MLA fast path: aiter_sparse_mla_fwd allocates its own output
+        # tensor. Return early *before* the o / o_kernel scaffolding below —
+        # sparse used to allocate & discard those every layer. Non-sparse path
+        # below is byte-equivalent to the pre-hoist version (extend runs in
+        # eager mode, so there is no cuda-graph capture ordering to preserve).
+        if should_route_aiter_sparse_mla(metadata.max_seq_len_k):
+            o_kernel = aiter_sparse_mla_fwd(
+                q=q_kernel,
+                kv_cache=kv_cache,
+                topk_indices=page_table_1,
+                sm_scale=layer.scaling,
+                v_head_dim=layer.v_head_dim,
+                cu_seqlens_q=metadata.dsa_cu_seqlens_q,
+                max_seqlen_q=metadata.dsa_max_seqlen_q,
+                seq_lens=metadata.cache_seqlens_int32,
+                max_seqlen_k=metadata.max_seq_len_k,
+                block_size=1,
+            )
+            if self.need_pad_heads:
+                o_kernel = o_kernel[:, :: self.head_repeat_factor, :]
+            return o_kernel.reshape(q.shape[0], -1)
 
         if layer.head_dim != layer.v_head_dim:
             o = q.new_empty((num_tokens, layer.tp_q_head_num * layer.v_head_dim))
@@ -2047,9 +2193,6 @@ class DeepseekSparseAttnBackend(
             o = torch.empty_like(q)
 
         if self.need_pad_heads:
-            q_kernel = q.view(
-                -1, layer.tp_q_head_num, layer.head_dim
-            ).repeat_interleave(self.head_repeat_factor, dim=1)
             o_kernel = q.new_empty(
                 (
                     num_tokens,
@@ -2058,7 +2201,6 @@ class DeepseekSparseAttnBackend(
                 )
             )
         else:
-            q_kernel = q.view(-1, layer.tp_q_head_num, layer.head_dim)
             o_kernel = o.view(-1, layer.tp_q_head_num, layer.v_head_dim)
 
         non_minus1_mask = page_table_1 != -1
@@ -2067,20 +2209,15 @@ class DeepseekSparseAttnBackend(
         kv_indptr = torch.zeros(num_tokens + 1, dtype=torch.int32, device=self.device)
         kv_indptr[1:] = torch.cumsum(non_minus1_counts, dim=0)
 
-        # Allocate kv_indices with upper-bound size (num_tokens * topk)
         topk = page_table_1.shape[1]
         kv_indices = torch.zeros(
             num_tokens * topk, dtype=torch.int32, device=self.device
         )
-
-        # Use get_valid_kv_indices kernel to extract valid indices
         get_valid_kv_indices(page_table_1, kv_indptr, kv_indices, num_tokens)
 
-        # Build cu_seqlens_q for extend: each token is treated as seq_len_q=1
         cu_seqlens_q = torch.arange(
             0, num_tokens + 1, dtype=torch.int32, device=self.device
         )
-        # TODO support more forward_mode
         mla_decode_fwd(
             q_kernel,
             kv_cache.view(-1, 1, 1, layer.head_dim),
@@ -2089,15 +2226,14 @@ class DeepseekSparseAttnBackend(
             kv_indptr,
             kv_indices,
             cu_seqlens_q,
-            1,  # max_seq_len_q = 1 for per-token attention
+            1,
             sm_scale=layer.scaling,
             logit_cap=layer.logit_cap,
         )
 
         if self.need_pad_heads:
-            o = o_kernel[:, :: self.head_repeat_factor, :]
-
-        return o
+            o_kernel = o_kernel[:, :: self.head_repeat_factor, :]
+        return o_kernel.reshape(q.shape[0], -1)
 
     def _forward_trtllm(
         self,

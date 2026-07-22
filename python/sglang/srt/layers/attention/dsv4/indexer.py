@@ -138,6 +138,9 @@ def _aiter_fp8_paged_mqa_logits(
         dtype=torch.float32,
         device=q_fp8.device,
     )
+    from sglang.srt.layers.attention.dsa.utils import aiter_paged_mqa_logits_tuning
+
+    chunk_k, wave_per_eu = aiter_paged_mqa_logits_tuning(kv_block_size)
     deepgemm_fp8_paged_mqa_logits(
         q_fp8,
         kvcache_fp8,
@@ -148,6 +151,8 @@ def _aiter_fp8_paged_mqa_logits(
         max_seq_len,
         KVBlockSize=kv_block_size,
         Preshuffle=True,
+        ChunkK=chunk_k,
+        WavePerEU=wave_per_eu,
     )
     return logits
 

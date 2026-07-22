@@ -56,6 +56,23 @@ def aiter_can_use_preshuffle_paged_mqa() -> bool:
         return False
 
 
+def aiter_paged_mqa_logits_tuning(kv_block_size: int) -> Tuple[int, int]:
+    """Return (ChunkK, WavePerEU) for ``deepgemm_fp8_paged_mqa_logits``.
+
+  Tuned on MI300X (gfx942) for GLM-5 DSA index_score workloads. SGLang's
+  preshuffle path uses ``page_size=64``; execbench sweeps used 16/32 for
+  decode/prefill micro-shapes — we map by ``KVBlockSize`` accordingly.
+  Legacy ``KVBlockSize=1`` keeps aiter defaults (256, 2).
+    """
+    if kv_block_size <= 1:
+        return 256, 2
+    if kv_block_size <= 16:
+        return 256, 5
+    if kv_block_size <= 32:
+        return 256, 4
+    return 256, 4
+
+
 if TYPE_CHECKING:
     from sglang.srt.model_executor.forward_batch_info import ForwardBatch
 

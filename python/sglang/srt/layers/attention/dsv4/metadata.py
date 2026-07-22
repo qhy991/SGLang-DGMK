@@ -107,6 +107,7 @@ class PagedIndexerMetadata:
         if (
             envs.SGLANG_FP8_PAGED_MQA_LOGITS_TORCH.get()
             or envs.SGLANG_OPT_USE_AITER_INDEXER.get()
+            or is_hip()
         ):
             self.deep_gemm_metadata = None
         else:

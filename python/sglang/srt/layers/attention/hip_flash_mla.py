@@ -12,7 +12,15 @@ def flash_mla_with_kvcache_entrypoint(backend: str, **kwargs):
     if is_hip():
         import os
 
-        backend = os.environ.get("SGLANG_HACK_FLASHMLA_BACKEND", "tilelang")
+        from sglang.srt.layers.attention.dsa.tilelang_kernel import (
+            _is_gfx95_supported,
+        )
+
+        if _is_gfx95_supported:
+            default_backend = "tilelang"
+        else:
+            default_backend = "torch_gfx942"
+        backend = os.environ.get("SGLANG_HACK_FLASHMLA_BACKEND", default_backend)
     else:
         import sgl_kernel.flash_mla as flash_mla
 
@@ -30,6 +38,13 @@ def flash_mla_with_kvcache_entrypoint(backend: str, **kwargs):
 
     if backend == "torch":
         return flash_mla_with_kvcache_torch(**kwargs)
+
+    if backend == "torch_gfx942":
+        from sglang.srt.layers.attention.dsa.dsv4_attn_gfx942 import (
+            dsv4_fp8_attention_fwd_torch,
+        )
+
+        return dsv4_fp8_attention_fwd_torch(**kwargs)
 
     if backend == "tilelang":
         from sglang.srt.layers.attention.dsa.tilelang_kernel import (

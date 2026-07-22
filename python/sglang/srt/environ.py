@@ -575,6 +575,24 @@ class Envs:
     SGLANG_DSA_HIP_DISABLE_PRESHUFFLE = EnvBoolWithAlias(
         False, deprecated_name="SGLANG_NSA_HIP_DISABLE_PRESHUFFLE"
     )
+    SGLANG_DSA_USE_AITER_SPARSE_MLA = EnvBool(False)
+    # Min KV length before routing decode/prefill-sparse to the optimized
+    # unified_attention_sparse_mla kernel. Below this, mla_decode_fwd is faster.
+    #
+    # Default 2048 is currently unchanged pending an evidence-backed sweep.
+    # See problems/e2e_v2/min_kv_routing/handoff.md in the glm5-flops-amd
+    # campaign: two rounds of an intended kv ∈ {1024, 2048, 4096, 8192}
+    # sweep on GLM-5.2-FP8 / MI300X / TP=8 could not produce clean own-run
+    # REPEATS>=3 hybrid data at kv=2048/4096/8192 (multi-worktree GPU
+    # contention + NCCL rank death on hybrid warmup). Codex verdict on the
+    # partial evidence: `recommended_min_kv_len: null` (confidence: low).
+    # Do not change this value without completing the sweep in isolation.
+    SGLANG_DSA_AITER_SPARSE_MLA_MIN_KV_LEN = EnvInt(2048)
+    # Opt-in per-step decode instrumentation for the HIP aiter path
+    # (dsa_backend._apply_cuda_graph_metadata / _run_aiter_mla_decode_fwd).
+    # Emits lines prefixed with `[DECODE_INSTR]` to stderr. Default off; zero
+    # overhead when disabled.
+    SGLANG_DSA_DECODE_INSTR = EnvBool(False)
     SGLANG_DSA_MQA_LOGITS_FREE_MEM_FRACTION = EnvFloat(0.2)
     SGLANG_USE_FUSED_METADATA_COPY = EnvBool(True)
     SGLANG_DSA_TOPK_BROADCAST = EnvBool(False)

@@ -53,6 +53,7 @@ from sglang.srt.layers.quantization.fp8_kernel import (
     scaled_fp8_quant,
 )
 from sglang.srt.layers.quantization.fp8_utils import (
+    _use_aiter_bpreshuffle_gfx942,
     _use_aiter_bpreshuffle_gfx95,
     apply_fp8_linear,
     can_auto_enable_marlin_fp8,
@@ -574,6 +575,16 @@ class Fp8LinearMethod(LinearMethodBase):
                 t = shuffle_weight(layer.weight, (16, 16))
                 layer.weight.copy_(t)
                 del t
+        elif (
+            _use_aiter_bpreshuffle_gfx942
+            and self.w8a8_block_fp8_linear is aiter_w8a8_block_fp8_linear
+        ):
+            layer.weight_original = Parameter(
+                layer.weight.data.clone(), requires_grad=False
+            )
+            t = shuffle_weight(layer.weight, (16, 16))
+            layer.weight.copy_(t)
+            del t
 
     def _process_mxfp8_linear_weight_scale(self, layer: Module) -> None:
         if not self.use_mxfp8:
@@ -800,6 +811,11 @@ class Fp8LinearMethod(LinearMethodBase):
                     True,  # is_vnni
                 )
 
+            gfx942_kwargs = {}
+            weight_original = getattr(layer, "weight_original", None)
+            if weight_original is not None:
+                gfx942_kwargs["weight_original"] = weight_original
+
             if isinstance(x, tuple):
                 return self.w8a8_block_fp8_linear(
                     input=x[0],
@@ -808,6 +824,7 @@ class Fp8LinearMethod(LinearMethodBase):
                     weight_scale=layer.weight_scale_inv,
                     input_scale=x[1],
                     bias=bias,
+                    **gfx942_kwargs,
                 )
 
             return self.w8a8_block_fp8_linear(
@@ -817,6 +834,7 @@ class Fp8LinearMethod(LinearMethodBase):
                 weight_scale=layer.weight_scale_inv,
                 input_scale=None,
                 bias=bias,
+                **gfx942_kwargs,
             )
 
         return apply_fp8_linear(
@@ -1250,6 +1268,11 @@ class Fp8MoEMethod(FusedMoEMethodBase):
 
         # If ROCm, normalize the weights and scales to e4m3fnuz
         if _is_fp8_fnuz:
+            if self.is_fp4_expert:
+                raise RuntimeError(
+                    "FP4/MXFP4 routed experts on ROCm require AITER. "
+                    "Please set the environment variable SGLANG_USE_AITER=1."
+                )
             # activation_scheme: dynamic
             w13_weight, w13_weight_scale, _ = normalize_e4m3fn_to_e4m3fnuz(
                 weight=layer.w13_weight,

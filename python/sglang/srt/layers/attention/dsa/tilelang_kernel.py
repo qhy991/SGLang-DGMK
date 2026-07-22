@@ -1346,6 +1346,12 @@ def tilelang_sparse_fwd(
 
     if _is_hip:
         is_fp8_kv = kv.dtype in (torch.float8_e4m3fn, torch.float8_e4m3fnuz)
+        if not is_fp8_kv and not _is_gfx95_supported:
+            from sglang.srt.layers.attention.triton_sparse_mla_fwd import (
+                sparse_mla_fwd,
+            )
+
+            return sparse_mla_fwd(q, kv, indices, sm_scale, d_v)
         if is_fp8_kv:
             if q.dtype != kv.dtype:
                 q = q.to(kv.dtype)

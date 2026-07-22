@@ -19,6 +19,7 @@ from sglang.srt.compilation.piecewise_context_manager import (
 from sglang.srt.environ import envs
 from sglang.srt.layers.attention.dsa.utils import (
     aiter_can_use_preshuffle_paged_mqa,
+    aiter_paged_mqa_logits_tuning,
     is_dsa_enable_prefill_cp,
     is_dsa_prefill_cp_in_seq_split,
 )
@@ -656,6 +657,7 @@ class Indexer(MultiPlatformOp):
                 device=q_fp8.device,
                 dtype=torch.float32,
             )
+            chunk_k, wave_per_eu = aiter_paged_mqa_logits_tuning(block_kv)
             deepgemm_fp8_paged_mqa_logits(
                 q_fp8,
                 kv_cache_fp8,
@@ -666,6 +668,8 @@ class Indexer(MultiPlatformOp):
                 max_seq_len,
                 Preshuffle=_use_aiter_preshuffle,
                 KVBlockSize=block_kv,
+                ChunkK=chunk_k,
+                WavePerEU=wave_per_eu,
             )
         elif use_dg_native:
             # block_tables[::next_n] de-expands dsa_backend's repeat_interleave
@@ -760,6 +764,131 @@ class Indexer(MultiPlatformOp):
         need_chunk = logits_bytes > logits_budget_bytes
         return need_chunk, logits_budget_bytes
 
+    def _get_topk_paged_extend(
+        self,
+        forward_batch: ForwardBatch,
+        layer_id: int,
+        q_fp8: torch.Tensor,
+        weights: torch.Tensor,
+        metadata: BaseIndexerMetadata,
+        topk_result: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """Extend prefill index_score via paged ``deepgemm_fp8_paged_mqa_logits``.
+
+        Each extend token is treated as its own batch row with causal
+        ``context_lens`` and the page table of its parent request. This avoids
+        the ragged KV gather + ``fp8_mqa_logits`` path and unlocks the preshuffle
+        paged-MQA kernel tuned for MI300X.
+        """
+        if TYPE_CHECKING:
+            assert isinstance(get_token_to_kv_pool(), DSATokenToKVPool)
+
+        page_size = get_token_to_kv_pool().page_size
+        block_tables = metadata.get_page_table_64()
+        max_seq_len = int(torch.max(metadata.get_indexer_seq_len_cpu()).item())
+
+        kv_cache_fp8 = get_token_to_kv_pool().get_index_k_with_scale_buffer(
+            layer_id=layer_id
+        )
+        kv_cache_fp8 = kv_cache_fp8.view(-1, page_size, 1, 132)
+
+        weights = weights.squeeze(-1)
+        ks, ke = metadata.get_indexer_kvcache_range()
+        seq_lens_expanded = metadata.get_seqlens_expanded()
+        token_to_batch_idx = metadata.get_token_to_batch_idx()
+
+        token_nums, _, _ = q_fp8.shape
+        device = q_fp8.device
+        device_index = device.index
+        assert device_index is not None
+
+        if topk_result is None:
+            topk_result = torch.full(
+                (token_nums, self.index_topk), -1, device=device, dtype=torch.int32
+            )
+
+        q_offset = ks.shape[0]
+        if q_offset == 0:
+            return topk_result
+
+        context_lens = (ke - ks).to(torch.int32)
+        per_token_block_tables = block_tables.index_select(0, token_to_batch_idx)
+
+        need_chunk, logits_budget_bytes = self._should_chunk_mqa_logits(
+            q_offset, max_seq_len, device_index
+        )
+        chunk_k, wave_per_eu = aiter_paged_mqa_logits_tuning(page_size)
+        cu_seqlens_q_ones = torch.ones(q_offset, dtype=torch.int32, device=device)
+
+        from aiter.ops.triton.pa_mqa_logits import deepgemm_fp8_paged_mqa_logits
+
+        def _run_paged_mqa(q_slice, w_slice, ctx_lens, blk_tables, out_logits):
+            q_in = q_slice.unsqueeze(1)
+            with self._with_real_sm_count():
+                deepgemm_fp8_paged_mqa_logits(
+                    q_in,
+                    kv_cache_fp8,
+                    w_slice,
+                    out_logits,
+                    ctx_lens,
+                    blk_tables,
+                    max_seq_len,
+                    Preshuffle=True,
+                    KVBlockSize=page_size,
+                    ChunkK=chunk_k,
+                    WavePerEU=wave_per_eu,
+                )
+
+        if not need_chunk:
+            logits = torch.empty(
+                (q_offset, max_seq_len), dtype=torch.float32, device=device
+            )
+            _run_paged_mqa(
+                q_fp8[:q_offset],
+                weights[:q_offset],
+                context_lens,
+                per_token_block_tables,
+                logits,
+            )
+            raw_topk = metadata.topk_transform(
+                logits,
+                self.index_topk,
+                cu_seqlens_q=cu_seqlens_q_ones,
+                ke_offset=seq_lens_expanded,
+                batch_idx_list=token_to_batch_idx,
+            )
+            topk_result[:q_offset] = raw_topk
+            return topk_result
+
+        bytes_per_row = max_seq_len * self._MQA_LOGITS_BYTES_PER_ELEM
+        max_rows = max(1, int(logits_budget_bytes // max(bytes_per_row, 1)))
+        max_rows = min(max_rows, q_offset)
+
+        start = 0
+        while start < q_offset:
+            end = min(start + max_rows, q_offset)
+            logits_chunk = torch.empty(
+                (end - start, max_seq_len), dtype=torch.float32, device=device
+            )
+            _run_paged_mqa(
+                q_fp8[start:end],
+                weights[start:end],
+                context_lens[start:end],
+                per_token_block_tables[start:end],
+                logits_chunk,
+            )
+            raw_topk_chunk = metadata.topk_transform(
+                logits_chunk,
+                self.index_topk,
+                cu_seqlens_q=cu_seqlens_q_ones[start:end],
+                ke_offset=seq_lens_expanded[start:end],
+                batch_idx_list=token_to_batch_idx[start:end],
+            )
+            topk_result[start:end] = raw_topk_chunk
+            start = end
+
+        return topk_result
+
     def _get_topk_ragged(
         self,
         enable_dual_stream: bool,
@@ -774,6 +903,16 @@ class Indexer(MultiPlatformOp):
             assert isinstance(get_token_to_kv_pool(), DSATokenToKVPool)
 
         assert forward_batch.forward_mode.is_extend_without_speculative()
+
+        if _is_hip and _use_aiter_preshuffle:
+            return self._get_topk_paged_extend(
+                forward_batch,
+                layer_id,
+                q_fp8,
+                weights,
+                metadata,
+                topk_result=topk_result,
+            )
 
         page_size = get_token_to_kv_pool().page_size
         if _is_hip:

@@ -2235,18 +2235,39 @@ class AiterAttnBackend(AttentionBackend):
                     else:
                         o = torch.empty_like(q)
 
-                    mla_prefill_fwd(
-                        q.view(-1, layer.tp_q_head_num, layer.qk_head_dim),
-                        K_Buffer.view(-1, 1, 1, layer.qk_head_dim),
-                        o.view(-1, layer.tp_q_head_num, layer.v_head_dim),
-                        qo_indptr,
-                        kv_indptr,
-                        kv_indices,
-                        self.forward_metadata.kv_last_page_len,
-                        self.forward_metadata.max_q_len,
-                        layer.scaling,
-                        layer.logit_cap,
-                    )
+                    q_view = q.view(-1, layer.tp_q_head_num, layer.qk_head_dim)
+                    kv_view = K_Buffer.view(-1, 1, 1, layer.qk_head_dim)
+                    o_view = o.view(-1, layer.tp_q_head_num, layer.v_head_dim)
+                    if is_gfx95_supported():
+                        mla_prefill_fwd(
+                            q_view,
+                            kv_view,
+                            o_view,
+                            qo_indptr,
+                            kv_indptr,
+                            kv_indices,
+                            self.forward_metadata.kv_last_page_len,
+                            self.forward_metadata.max_q_len,
+                            layer.scaling,
+                            layer.logit_cap,
+                        )
+                    else:
+                        from sglang.srt.layers.attention.aiter_mla_prefill_split import (
+                            mla_prefill_split_fwd,
+                        )
+
+                        mla_prefill_split_fwd(
+                            q_view,
+                            kv_view,
+                            o_view,
+                            qo_indptr,
+                            kv_indptr,
+                            kv_indices,
+                            self.forward_metadata.kv_last_page_len,
+                            max_seqlen_q=self.forward_metadata.max_q_len,
+                            sm_scale=layer.scaling,
+                            logit_cap=layer.logit_cap,
+                        )
                     K_Buffer = K_Buffer.view(-1, layer.tp_k_head_num, layer.qk_head_dim)
                     return o
             elif forward_batch.forward_mode.is_target_verify():

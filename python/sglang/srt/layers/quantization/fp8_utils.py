@@ -66,6 +66,26 @@ _use_aiter_gfx95 = _use_aiter and _is_gfx95_supported
 _use_aiter_bpreshuffle_gfx95 = _use_aiter_gfx95 and get_hip_version() >= (7, 2, 0)
 
 
+def _is_gfx942() -> bool:
+    if torch.version.hip:
+        try:
+            return "gfx942" in torch.cuda.get_device_properties(0).gcnArchName
+        except Exception:
+            return False
+    return False
+
+
+_use_aiter_bpreshuffle_gfx942 = (
+    _use_aiter
+    and not _is_gfx95_supported
+    and _is_gfx942()
+    and not get_bool_env_var("SGLANG_DISABLE_GFX942_BPRESHUFFLE")
+)
+_GFX942_M_THRESHOLD = 4096
+# (K, N) shapes where ASM speedup < 1.5x at prefill M — use CK instead
+_GFX942_CK_EXCEPTION_SHAPES = {(2048, 4096)}
+
+
 def use_aiter_triton_gemm_w8a8_tuned_gfx950(n: int, k: int) -> bool:
     return (n, k) in [
         (1024, 8192),
@@ -92,6 +112,10 @@ if _use_aiter:
         gemm_a8w8_blockscale_bpreshuffle,
         gemm_a8w8_bpreshuffle,
         get_hip_quant,
+    )
+    from aiter.ops.gemm_op_a8w8 import (
+        gemm_a8w8_blockscale_bpreshuffle_asm,
+        gemm_a8w8_blockscale_bpreshuffle_ck,
     )
     from aiter.ops.triton.gemm_a8w8_blockscale import (
         gemm_a8w8_blockscale as triton_gemm_a8w8_blockscale,
@@ -768,12 +792,60 @@ def aiter_w8a8_block_fp8_linear(
     weight_scale: torch.Tensor,
     input_scale: Optional[torch.Tensor] = None,
     bias: Optional[torch.Tensor] = None,
+    weight_original: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     # assert input_scale is None
     input_2d = input.view(-1, input.shape[-1])
     output_shape = [*input.shape[:-1], weight.shape[0]]
 
     n, k = weight.shape
+
+    if _use_aiter_bpreshuffle_gfx942:
+        m = input_2d.shape[0]
+        out_dtype = torch.bfloat16 if input_scale is not None else input.dtype
+
+        if m >= _GFX942_M_THRESHOLD and (k, n) not in _GFX942_CK_EXCEPTION_SHAPES:
+            # Prefill: bpreshuffle path (weight is already shuffled)
+            if input_scale is not None:
+                q_input = input_2d
+                x_scale = input_scale.transpose(0, 1).contiguous().view(
+                    *input_scale.shape
+                )
+            else:
+                q_input, x_scale = aiter_per1x128_quant(
+                    input_2d,
+                    quant_dtype=aiter.dtypes.fp8,
+                    transpose_scale=True,
+                )
+
+            out = torch.empty(m, n, dtype=out_dtype, device=input_2d.device)
+            if n % 128 == 0 and k >= 1024:
+                output = gemm_a8w8_blockscale_bpreshuffle_asm(
+                    q_input, weight, out, x_scale, weight_scale
+                )
+            else:
+                output = gemm_a8w8_blockscale_bpreshuffle_ck(
+                    q_input, weight, x_scale, weight_scale, out
+                )
+        else:
+            # Decode or exception shape: CK non-bpreshuffle
+            w = weight_original if weight_original is not None else weight
+            if input_scale is not None:
+                q_input = input_2d
+                x_scale = input_scale
+            else:
+                q_input, x_scale = aiter_per1x128_quant(
+                    input_2d,
+                    quant_dtype=aiter.dtypes.fp8,
+                    transpose_scale=False,
+                )
+            output = ck_gemm_a8w8_blockscale(
+                q_input, w, x_scale, weight_scale, dtype=out_dtype
+            )
+
+        if bias is not None:
+            output += bias
+        return output.to(dtype=out_dtype).view(*output_shape)
 
     if _use_aiter_bpreshuffle_gfx95:
         use_triton = use_aiter_triton_gemm_w8a8_tuned_gfx950(n, k)
