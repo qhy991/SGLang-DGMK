@@ -916,6 +916,9 @@ class Analyzer:
                 expected_env = {
                     "CUDA_VISIBLE_DEVICES": "0,1,2,3",
                     "SGLANG_GLM52_OPT": "0",
+                    "SGLANG_OPT_USE_CUSTOM_ALL_REDUCE_V2": None,
+                    "NCCL_ALGO": None,
+                    "NCCL_PROTO": None,
                 }
                 for key, expected in expected_env.items():
                     if env.get(key) != expected:

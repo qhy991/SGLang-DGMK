@@ -32,6 +32,11 @@ The single lock acquisition runs, in order:
 9. final NVLink counters, clocks, power, compute-process snapshot, and per-step
    exit status.
 
+The campaign fixes `SGLANG_GLM52_OPT=0` and explicitly unsets
+`SGLANG_OPT_USE_CUSTOM_ALL_REDUCE_V2`, `NCCL_ALGO`, and `NCCL_PROTO`. The
+analyzer rejects a result that inherited any of those dispatch/protocol
+overrides.
+
 `SGLANG_ALL_REDUCE_TRACE` is import-time gated and appears only in the short
 reachability runs. The benchmark marks those timings ineligible. Python can see
 eager dispatch or CUDA Graph capture, but not replay; the Nsight reports use the

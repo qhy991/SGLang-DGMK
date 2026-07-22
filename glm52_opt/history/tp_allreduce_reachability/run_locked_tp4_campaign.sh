@@ -107,7 +107,11 @@ export SGLANG_ROOT="$SGLANG"
 export KERNEL_HARNESS_PYTHON="$HARNESS/.venv/bin/python"
 export PYTHONPATH="$SGLANG/python:$HARNESS:${PYTHONPATH:-}"
 export SGLANG_GLM52_OPT=0
-unset SGLANG_ALL_REDUCE_TRACE
+unset \
+  SGLANG_ALL_REDUCE_TRACE \
+  SGLANG_OPT_USE_CUSTOM_ALL_REDUCE_V2 \
+  NCCL_ALGO \
+  NCCL_PROTO
 
 run_step required environment/lock_receipt \
   bash -c '
