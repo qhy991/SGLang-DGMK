@@ -21,6 +21,17 @@ limitations under the License.
 #include "api/sparse_fwd.h"
 #include "sgl_kernel_ops.h"
 
+#ifndef SGL_FLASHMLA_TORCH_LIBRARY
+#define SGL_FLASHMLA_TORCH_LIBRARY sgl_kernel
+#endif
+
+#ifndef SGL_FLASHMLA_EXTENSION_NAME
+#define SGL_FLASHMLA_EXTENSION_NAME flashmla_ops
+#endif
+
+#define SGL_FLASHMLA_TORCH_LIBRARY_FRAGMENT(NAME, MODULE) \
+  TORCH_LIBRARY_FRAGMENT(NAME, MODULE)
+
 static std::tuple<at::Tensor, at::Tensor, std::optional<at::Tensor>, std::optional<at::Tensor>> sgl_sparse_decode_fwd(
     const at::Tensor& q,
     const at::Tensor& kv,
@@ -71,7 +82,7 @@ static std::tuple<at::Tensor, at::Tensor, std::optional<at::Tensor>, std::option
       num_splits);
 }
 
-TORCH_LIBRARY_FRAGMENT(sgl_kernel, m) {
+SGL_FLASHMLA_TORCH_LIBRARY_FRAGMENT(SGL_FLASHMLA_TORCH_LIBRARY, m) {
   /*
    * From FlashMLA
    */
@@ -124,4 +135,4 @@ TORCH_LIBRARY_FRAGMENT(sgl_kernel, m) {
   m.impl("fwd_kvcache_mla_fp8", torch::kCUDA, &fwd_kvcache_mla_fp8);
 }
 
-REGISTER_EXTENSION(flashmla_ops)
+REGISTER_EXTENSION(SGL_FLASHMLA_EXTENSION_NAME)
