@@ -1,0 +1,8 @@
+started_utc=2026-07-22T17:43:40.692802499Z
+command= bash -c $'\n    set -euo pipefail\n    printf "CUDA_VISIBLE_DEVICES=%s\\n" "${CUDA_VISIBLE_DEVICES:-}"\n    [[ "${CUDA_VISIBLE_DEVICES:-}" == "0,1,2,3" ]]\n    for pair in 9:gpu0.lock 10:gpu1.lock 11:gpu2.lock 12:gpu3.lock; do\n      fd="${pair%%:*}"\n      lock_name="${pair#*:}"\n      actual="$(readlink "/proc/$$/fd/$fd")"\n      printf "fd=%s expected=%s/%s actual=%s\\n" \\\n        "$fd" "$1" "$lock_name" "$actual"\n      [[ "$actual" == "$1/$lock_name" ]]\n    done\n  ' _ /home/qinhaiyan/glm52-goal-runs/locks
+timeout_seconds=1800
+CUDA_VISIBLE_DEVICES=0,1,2,3
+fd=9 expected=/home/qinhaiyan/glm52-goal-runs/locks/gpu0.lock actual=/home/qinhaiyan/glm52-goal-runs/locks/gpu0.lock
+fd=10 expected=/home/qinhaiyan/glm52-goal-runs/locks/gpu1.lock actual=/home/qinhaiyan/glm52-goal-runs/locks/gpu1.lock
+fd=11 expected=/home/qinhaiyan/glm52-goal-runs/locks/gpu2.lock actual=/home/qinhaiyan/glm52-goal-runs/locks/gpu2.lock
+fd=12 expected=/home/qinhaiyan/glm52-goal-runs/locks/gpu3.lock actual=/home/qinhaiyan/glm52-goal-runs/locks/gpu3.lock

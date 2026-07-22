@@ -1,0 +1,13 @@
+started_utc=2026-07-22T17:43:40.781936386Z
+command= /home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/.venv/bin/python /home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/testbench/bin/check_env.py
+timeout_seconds=1800
+python:      /home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/.venv/bin/python
+venv:        /home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/.venv
+cuda home:   /usr/local/cuda
+sglang:      checkout /home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/sglang (e2ce8e099)
+gpu:         NVIDIA B200 sm_100
+visible gpus:4  CUDA_VISIBLE_DEVICES=0,1,2,3
+torch/cuda:  2.11.0+cu130 / 13.0
+M3 kernels:  present in SGLANG_DIR
+
+Environment check passed.

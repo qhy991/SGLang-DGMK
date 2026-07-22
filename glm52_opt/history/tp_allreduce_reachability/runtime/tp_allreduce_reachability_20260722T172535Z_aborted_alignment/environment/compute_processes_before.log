@@ -1,0 +1,4 @@
+started_utc=2026-07-22T17:43:40.770881165Z
+command= bash -c printf\ \"%s\\n\"\ \"\$1\" _ timestamp\,\ gpu_uuid\,\ pid\,\ process_name\,\ used_gpu_memory\ \[MiB\]
+timeout_seconds=1800
+timestamp, gpu_uuid, pid, process_name, used_gpu_memory [MiB]
