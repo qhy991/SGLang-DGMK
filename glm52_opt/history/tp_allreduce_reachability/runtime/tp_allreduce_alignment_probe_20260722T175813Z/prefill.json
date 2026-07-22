@@ -1,0 +1,3838 @@
+{
+  "all_reduce_trace": {
+    "enabled": false,
+    "evidence_valid": null,
+    "failure_counts_by_rank": null,
+    "measurement_instrumented": false,
+    "paths_by_rank": null,
+    "replay_limitation": "Python observes eager dispatch or CUDA graph capture only; CUDA graph replay does not re-enter this hook. Correlate stable kernel names in an Nsight Systems trace to prove replay execution."
+  },
+  "allreduce": {
+    "candidate_capture_context_by_rank": null,
+    "candidate_contract_by_rank": null,
+    "exact_oracle": "hash[row,col]=(37*(row%127)+17*(col%127)+13*(row%127)*(col%127))%127; base_variant=((hash+shift)%127)-63 for shifts [0,31]; source=base+2*rank-(world_size-1); expected=world_size*base",
+    "message_bytes": 100663296,
+    "reference_contract_by_rank": [
+      {
+        "exact_values": true,
+        "local_poststate": "reduced",
+        "output": {
+          "device": "cuda:0",
+          "dtype": "torch.bfloat16",
+          "shape": [
+            8192,
+            6144
+          ],
+          "stride": [
+            6144,
+            1
+          ]
+        },
+        "output_aliases_local": true,
+        "source_immutable": true
+      },
+      {
+        "exact_values": true,
+        "local_poststate": "reduced",
+        "output": {
+          "device": "cuda:1",
+          "dtype": "torch.bfloat16",
+          "shape": [
+            8192,
+            6144
+          ],
+          "stride": [
+            6144,
+            1
+          ]
+        },
+        "output_aliases_local": true,
+        "source_immutable": true
+      },
+      {
+        "exact_values": true,
+        "local_poststate": "reduced",
+        "output": {
+          "device": "cuda:2",
+          "dtype": "torch.bfloat16",
+          "shape": [
+            8192,
+            6144
+          ],
+          "stride": [
+            6144,
+            1
+          ]
+        },
+        "output_aliases_local": true,
+        "source_immutable": true
+      },
+      {
+        "exact_values": true,
+        "local_poststate": "reduced",
+        "output": {
+          "device": "cuda:3",
+          "dtype": "torch.bfloat16",
+          "shape": [
+            8192,
+            6144
+          ],
+          "stride": [
+            6144,
+            1
+          ]
+        },
+        "output_aliases_local": true,
+        "source_immutable": true
+      }
+    ],
+    "reference_dispatch_by_rank": [
+      {
+        "communicators": {
+          "custom": {
+            "algorithm": "TWO_SHOT_PULL",
+            "class": "sglang.srt.distributed.device_communicators.custom_all_reduce_v2.CustomAllReduceV2",
+            "fields": {
+              "config": "ModeConfig(one_shot_push_threshold=2097152, one_shot_pull_threshold=2097152)",
+              "disabled": "False",
+              "max_size": "16777216",
+              "override_algo": "None",
+              "rank": "0",
+              "tms_cudagraph": "False",
+              "world_size": "4"
+            },
+            "python_id": 124378105331488,
+            "should_custom_ar": {
+              "value": false
+            }
+          },
+          "pymscclpp": {
+            "should_mscclpp_allreduce": {
+              "value": false
+            }
+          },
+          "pynccl": {
+            "class": "sglang.srt.distributed.device_communicators.pynccl.PyNcclCommunicator",
+            "fields": {
+              "disabled": "True",
+              "rank": "0",
+              "world_size": "4"
+            },
+            "python_id": 124378029074016,
+            "symmetric_pool_enabled": {
+              "value": false
+            }
+          },
+          "quick": {
+            "should_quick_allreduce": {
+              "value": false
+            }
+          },
+          "torch_symmetric_memory": {
+            "should_torch_symm_mem_allreduce": {
+              "value": false
+            }
+          }
+        },
+        "dtype": "torch.bfloat16",
+        "execution_mode": "eager",
+        "group_name": "tp:0",
+        "group_ranks": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "local_size": 0,
+        "message_bytes": 100663296,
+        "phase": "eager",
+        "predicted_reference_algorithm": "SUM",
+        "predicted_reference_backend": "torch_distributed_inplace",
+        "rank": 0,
+        "shape": [
+          8192,
+          6144
+        ],
+        "stream": {
+          "cuda_stream": 94965486518368,
+          "requested": "nondefault"
+        },
+        "stride": [
+          6144,
+          1
+        ],
+        "world_size": 4
+      },
+      {
+        "communicators": {
+          "custom": {
+            "algorithm": "TWO_SHOT_PULL",
+            "class": "sglang.srt.distributed.device_communicators.custom_all_reduce_v2.CustomAllReduceV2",
+            "fields": {
+              "config": "ModeConfig(one_shot_push_threshold=2097152, one_shot_pull_threshold=2097152)",
+              "disabled": "False",
+              "max_size": "16777216",
+              "override_algo": "None",
+              "rank": "1",
+              "tms_cudagraph": "False",
+              "world_size": "4"
+            },
+            "python_id": 138308102460704,
+            "should_custom_ar": {
+              "value": false
+            }
+          },
+          "pymscclpp": {
+            "should_mscclpp_allreduce": {
+              "value": false
+            }
+          },
+          "pynccl": {
+            "class": "sglang.srt.distributed.device_communicators.pynccl.PyNcclCommunicator",
+            "fields": {
+              "disabled": "True",
+              "rank": "1",
+              "world_size": "4"
+            },
+            "python_id": 138308084953552,
+            "symmetric_pool_enabled": {
+              "value": false
+            }
+          },
+          "quick": {
+            "should_quick_allreduce": {
+              "value": false
+            }
+          },
+          "torch_symmetric_memory": {
+            "should_torch_symm_mem_allreduce": {
+              "value": false
+            }
+          }
+        },
+        "dtype": "torch.bfloat16",
+        "execution_mode": "eager",
+        "group_name": "tp:0",
+        "group_ranks": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "local_size": 0,
+        "message_bytes": 100663296,
+        "phase": "eager",
+        "predicted_reference_algorithm": "SUM",
+        "predicted_reference_backend": "torch_distributed_inplace",
+        "rank": 1,
+        "shape": [
+          8192,
+          6144
+        ],
+        "stream": {
+          "cuda_stream": 97412202983712,
+          "requested": "nondefault"
+        },
+        "stride": [
+          6144,
+          1
+        ],
+        "world_size": 4
+      },
+      {
+        "communicators": {
+          "custom": {
+            "algorithm": "TWO_SHOT_PULL",
+            "class": "sglang.srt.distributed.device_communicators.custom_all_reduce_v2.CustomAllReduceV2",
+            "fields": {
+              "config": "ModeConfig(one_shot_push_threshold=2097152, one_shot_pull_threshold=2097152)",
+              "disabled": "False",
+              "max_size": "16777216",
+              "override_algo": "None",
+              "rank": "2",
+              "tms_cudagraph": "False",
+              "world_size": "4"
+            },
+            "python_id": 132671813840400,
+            "should_custom_ar": {
+              "value": false
+            }
+          },
+          "pymscclpp": {
+            "should_mscclpp_allreduce": {
+              "value": false
+            }
+          },
+          "pynccl": {
+            "class": "sglang.srt.distributed.device_communicators.pynccl.PyNcclCommunicator",
+            "fields": {
+              "disabled": "True",
+              "rank": "2",
+              "world_size": "4"
+            },
+            "python_id": 132671813832720,
+            "symmetric_pool_enabled": {
+              "value": false
+            }
+          },
+          "quick": {
+            "should_quick_allreduce": {
+              "value": false
+            }
+          },
+          "torch_symmetric_memory": {
+            "should_torch_symm_mem_allreduce": {
+              "value": false
+            }
+          }
+        },
+        "dtype": "torch.bfloat16",
+        "execution_mode": "eager",
+        "group_name": "tp:0",
+        "group_ranks": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "local_size": 0,
+        "message_bytes": 100663296,
+        "phase": "eager",
+        "predicted_reference_algorithm": "SUM",
+        "predicted_reference_backend": "torch_distributed_inplace",
+        "rank": 2,
+        "shape": [
+          8192,
+          6144
+        ],
+        "stream": {
+          "cuda_stream": 111336690437136,
+          "requested": "nondefault"
+        },
+        "stride": [
+          6144,
+          1
+        ],
+        "world_size": 4
+      },
+      {
+        "communicators": {
+          "custom": {
+            "algorithm": "TWO_SHOT_PULL",
+            "class": "sglang.srt.distributed.device_communicators.custom_all_reduce_v2.CustomAllReduceV2",
+            "fields": {
+              "config": "ModeConfig(one_shot_push_threshold=2097152, one_shot_pull_threshold=2097152)",
+              "disabled": "False",
+              "max_size": "16777216",
+              "override_algo": "None",
+              "rank": "3",
+              "tms_cudagraph": "False",
+              "world_size": "4"
+            },
+            "python_id": 138414907915296,
+            "should_custom_ar": {
+              "value": false
+            }
+          },
+          "pymscclpp": {
+            "should_mscclpp_allreduce": {
+              "value": false
+            }
+          },
+          "pynccl": {
+            "class": "sglang.srt.distributed.device_communicators.pynccl.PyNcclCommunicator",
+            "fields": {
+              "disabled": "True",
+              "rank": "3",
+              "world_size": "4"
+            },
+            "python_id": 138414909899504,
+            "symmetric_pool_enabled": {
+              "value": false
+            }
+          },
+          "quick": {
+            "should_quick_allreduce": {
+              "value": false
+            }
+          },
+          "torch_symmetric_memory": {
+            "should_torch_symm_mem_allreduce": {
+              "value": false
+            }
+          }
+        },
+        "dtype": "torch.bfloat16",
+        "execution_mode": "eager",
+        "group_name": "tp:0",
+        "group_ranks": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "local_size": 0,
+        "message_bytes": 100663296,
+        "phase": "eager",
+        "predicted_reference_algorithm": "SUM",
+        "predicted_reference_backend": "torch_distributed_inplace",
+        "rank": 3,
+        "shape": [
+          8192,
+          6144
+        ],
+        "stream": {
+          "cuda_stream": 108273335402752,
+          "requested": "nondefault"
+        },
+        "stride": [
+          6144,
+          1
+        ],
+        "world_size": 4
+      }
+    ]
+  },
+  "candidate": null,
+  "correctness": {
+    "alternating_input_variants": 2,
+    "candidate_state_guarded": false,
+    "exact_full_checks": "before and after timing",
+    "exact_full_tensor_consumer": "every warmup and measured sample",
+    "exact_position_probe": "every warmup and measured sample",
+    "passed": true,
+    "validation_errors_aggregated_over_tp_cpu_group": true
+  },
+  "disposition": "tp4_reference_characterization_only",
+  "environment": {
+    "device": {
+      "capability": [
+        10,
+        0
+      ],
+      "name": "NVIDIA B200",
+      "rank": 0,
+      "total_memory": 191490555904
+    },
+    "device_by_rank": [
+      {
+        "capability": [
+          10,
+          0
+        ],
+        "name": "NVIDIA B200",
+        "rank": 0,
+        "total_memory": 191490555904
+      },
+      {
+        "capability": [
+          10,
+          0
+        ],
+        "name": "NVIDIA B200",
+        "rank": 1,
+        "total_memory": 191490555904
+      },
+      {
+        "capability": [
+          10,
+          0
+        ],
+        "name": "NVIDIA B200",
+        "rank": 2,
+        "total_memory": 191490555904
+      },
+      {
+        "capability": [
+          10,
+          0
+        ],
+        "name": "NVIDIA B200",
+        "rank": 3,
+        "total_memory": 191490555904
+      }
+    ],
+    "env": {
+      "CUDA_VISIBLE_DEVICES": "0,1,2,3",
+      "NCCL_ALGO": null,
+      "NCCL_PROTO": null,
+      "SGLANG_ALL_REDUCE_TRACE": null,
+      "SGLANG_GLM52_OPT": "0",
+      "SGLANG_OPT_USE_CUSTOM_ALL_REDUCE_V2": null,
+      "SGLANG_ROOT": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/sglang"
+    },
+    "kernel_harness_git": {
+      "branch": "goal/glm52-prod-24-tp_allreduce_reachability",
+      "dirty": false,
+      "root": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness",
+      "sha": "46ba02607b54f62cdef5a43c99e558b12b545aa6",
+      "status": []
+    },
+    "packages": {
+      "flashinfer": {
+        "path": "/mnt/OS-oKqEXySb/home/qinhaiyan/miniconda3/envs/sglang/lib/python3.12/site-packages/flashinfer/__init__.py",
+        "version": "0.6.12"
+      },
+      "sgl_kernel": {
+        "path": "/mnt/OS-oKqEXySb/home/qinhaiyan/miniconda3/envs/sglang/lib/python3.12/site-packages/sgl_kernel/__init__.py",
+        "version": "0.4.4"
+      },
+      "sglang": {
+        "path": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/sglang/python/sglang/__init__.py",
+        "version": "0.5.15"
+      },
+      "torch": {
+        "cuda": "13.0",
+        "nccl": [
+          2,
+          28,
+          9
+        ],
+        "path": "/mnt/OS-oKqEXySb/home/qinhaiyan/miniconda3/envs/sglang/lib/python3.12/site-packages/torch/__init__.py",
+        "version": "2.11.0+cu130"
+      },
+      "triton": {
+        "path": "/mnt/OS-oKqEXySb/home/qinhaiyan/miniconda3/envs/sglang/lib/python3.12/site-packages/triton/__init__.py",
+        "version": "3.6.0"
+      }
+    },
+    "python": "/home/qinhaiyan/miniconda3/envs/sglang/bin/python",
+    "python_version": "3.12.13 | packaged by Anaconda, Inc. | (main, Jul  9 2026, 14:38:16) [GCC 14.3.0]",
+    "sglang_git": {
+      "branch": "goal/glm52-prod-24-tp_allreduce_reachability",
+      "dirty": false,
+      "root": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/sglang",
+      "sha": "ccf6d059350afbc56c39f8722df0b90871e8bdd4",
+      "status": []
+    }
+  },
+  "execution": {
+    "cuda_stream": 94965486518368,
+    "default_to_execution_waits_outside_timing": 3,
+    "mode": "eager",
+    "nvtx_measurement_range": "serving_native/tp4_allreduce_prefill/eager/nondefault/reference",
+    "nvtx_rank_synchronization": "rank 0 push after a TP CPU-group barrier; all ranks wait at a second barrier before measurement and before rank 0 pop",
+    "stream": "nondefault"
+  },
+  "gate": {
+    "candidate_present": false,
+    "metric": "paired ready-region rank-max p50 speedup",
+    "minimum_speedup": 1.03,
+    "passed": null,
+    "performance_eligible": true,
+    "stock_fallback_active": true
+  },
+  "production_acceptance": "This direct TP4 callable is not proof of the GLM serving caller/ABI and cannot be relabeled as TP8 evidence.",
+  "raw_samples": {
+    "candidate": null,
+    "measured_order": [
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ]
+    ],
+    "rank_order": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "reference": [
+      {
+        "collective_only": {
+          "local_ms": 0.4684799909591675,
+          "rank_max_ms": 0.833791971206665,
+          "rank_ms": [
+            0.4684799909591675,
+            0.616864025592804,
+            0.833791971206665,
+            0.5351999998092651
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.5083839893341064,
+          "rank_max_ms": 0.8747199773788452,
+          "rank_ms": [
+            0.5083839893341064,
+            0.6557440161705017,
+            0.8747199773788452,
+            0.5751360058784485
+          ]
+        },
+        "sample_index": 0,
+        "scheduled_start_arrival_ns_by_rank": [
+          739764934545651,
+          739764934748818,
+          739764935154365,
+          739764934775046
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739764940154365,
+          739764940154365,
+          739764940154365,
+          739764940154365
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739764940697062,
+            739764940721705
+          ],
+          [
+            739764940521574,
+            739764940572583
+          ],
+          [
+            739764940293903,
+            739764940348870
+          ],
+          [
+            739764940578844,
+            739764940651593
+          ]
+        ],
+        "start_record_envelope_span_ns": 427802,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.5648319721221924,
+          "rank_max_ms": 0.5648319721221924,
+          "rank_ms": [
+            0.5648319721221924,
+            0.5369920134544373,
+            0.539903998374939,
+            0.544160008430481
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.6047999858856201,
+          "rank_max_ms": 0.6047999858856201,
+          "rank_ms": [
+            0.6047999858856201,
+            0.5769280195236206,
+            0.5808960199356079,
+            0.5850239992141724
+          ]
+        },
+        "sample_index": 1,
+        "scheduled_start_arrival_ns_by_rank": [
+          739764946330618,
+          739764946826162,
+          739764946822606,
+          739764946656389
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739764951826162,
+          739764951826162,
+          739764951826162,
+          739764951826162
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739764951826696,
+            739764951853548
+          ],
+          [
+            739764951827399,
+            739764951883495
+          ],
+          [
+            739764951827454,
+            739764951881000
+          ],
+          [
+            739764951827161,
+            739764951871614
+          ]
+        ],
+        "start_record_envelope_span_ns": 56799,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.5470399856567383,
+          "rank_max_ms": 0.5470399856567383,
+          "rank_ms": [
+            0.5470399856567383,
+            0.5278400182723999,
+            0.5192319750785828,
+            0.5288959741592407
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.587007999420166,
+          "rank_max_ms": 0.587007999420166,
+          "rank_ms": [
+            0.587007999420166,
+            0.5666880011558533,
+            0.5601599812507629,
+            0.5689600110054016
+          ]
+        },
+        "sample_index": 2,
+        "scheduled_start_arrival_ns_by_rank": [
+          739764956278886,
+          739764956788881,
+          739764956796401,
+          739764956533025
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739764961796401,
+          739764961796401,
+          739764961796401,
+          739764961796401
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739764961796956,
+            739764961820967
+          ],
+          [
+            739764961797377,
+            739764961844239
+          ],
+          [
+            739764961797728,
+            739764961853044
+          ],
+          [
+            739764961797673,
+            739764961843378
+          ]
+        ],
+        "start_record_envelope_span_ns": 56088,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.5355200171470642,
+          "rank_max_ms": 0.5355200171470642,
+          "rank_ms": [
+            0.5355200171470642,
+            0.517952024936676,
+            0.5019840002059937,
+            0.5213760137557983
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.5754560232162476,
+          "rank_max_ms": 0.5754560232162476,
+          "rank_ms": [
+            0.5754560232162476,
+            0.5569279789924622,
+            0.5427200198173523,
+            0.5603839755058289
+          ]
+        },
+        "sample_index": 3,
+        "scheduled_start_arrival_ns_by_rank": [
+          739764968294424,
+          739764967937379,
+          739764968625477,
+          739764968473750
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739764973625477,
+          739764973625477,
+          739764973625477,
+          739764973625477
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739764973626119,
+            739764973652395
+          ],
+          [
+            739764973626480,
+            739764973676864
+          ],
+          [
+            739764973626891,
+            739764973680859
+          ],
+          [
+            739764973626614,
+            739764973671613
+          ]
+        ],
+        "start_record_envelope_span_ns": 54740,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.5489280223846436,
+          "rank_max_ms": 0.5489280223846436,
+          "rank_ms": [
+            0.5489280223846436,
+            0.5192000269889832,
+            0.5219519734382629,
+            0.5348160266876221
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.589024007320404,
+          "rank_max_ms": 0.589024007320404,
+          "rank_ms": [
+            0.589024007320404,
+            0.5599039793014526,
+            0.5609279870986938,
+            0.5748159885406494
+          ]
+        },
+        "sample_index": 4,
+        "scheduled_start_arrival_ns_by_rank": [
+          739764978852940,
+          739764979174064,
+          739764979305542,
+          739764979101259
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739764984305542,
+          739764984305542,
+          739764984305542,
+          739764984305542
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739764984306030,
+            739764984330303
+          ],
+          [
+            739764984306545,
+            739764984359254
+          ],
+          [
+            739764984306863,
+            739764984358525
+          ],
+          [
+            739764984306510,
+            739764984350521
+          ]
+        ],
+        "start_record_envelope_span_ns": 53224,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.5282880067825317,
+          "rank_max_ms": 0.5282880067825317,
+          "rank_ms": [
+            0.5282880067825317,
+            0.4970560073852539,
+            0.5044800043106079,
+            0.5176960229873657
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.5681920051574707,
+          "rank_max_ms": 0.5681920051574707,
+          "rank_ms": [
+            0.5681920051574707,
+            0.5372160077095032,
+            0.5454080104827881,
+            0.5576639771461487
+          ]
+        },
+        "sample_index": 5,
+        "scheduled_start_arrival_ns_by_rank": [
+          739764990031141,
+          739764990515049,
+          739764990527320,
+          739764990023765
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739764995527320,
+          739764995527320,
+          739764995527320,
+          739764995527320
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739764995527767,
+            739764995549530
+          ],
+          [
+            739764995528170,
+            739764995579223
+          ],
+          [
+            739764995528651,
+            739764995578168
+          ],
+          [
+            739764995528301,
+            739764995567711
+          ]
+        ],
+        "start_record_envelope_span_ns": 51456,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.7784320116043091,
+          "rank_max_ms": 0.7784320116043091,
+          "rank_ms": [
+            0.7784320116043091,
+            0.7523519992828369,
+            0.5039680004119873,
+            0.7657600045204163
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.8183680176734924,
+          "rank_max_ms": 0.8183680176734924,
+          "rank_ms": [
+            0.8183680176734924,
+            0.7910400032997131,
+            0.5448639988899231,
+            0.8058879971504211
+          ]
+        },
+        "sample_index": 6,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765001883144,
+          739765002351713,
+          739765002106533,
+          739765001834804
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765007351713,
+          739765007351713,
+          739765007351713,
+          739765007351713
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765007352222,
+            739765007376681
+          ],
+          [
+            739765007352929,
+            739765007410594
+          ],
+          [
+            739765007573670,
+            739765007657740
+          ],
+          [
+            739765007352576,
+            739765007396767
+          ]
+        ],
+        "start_record_envelope_span_ns": 305518,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.5236799716949463,
+          "rank_max_ms": 0.5236799716949463,
+          "rank_ms": [
+            0.5236799716949463,
+            0.5037760138511658,
+            0.49561598896980286,
+            0.5093759894371033
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.5636159777641296,
+          "rank_max_ms": 0.5636159777641296,
+          "rank_ms": [
+            0.5636159777641296,
+            0.5418879985809326,
+            0.5365440249443054,
+            0.5504000186920166
+          ]
+        },
+        "sample_index": 7,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765013758738,
+          739765014090899,
+          739765014127517,
+          739765014109472
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765019127517,
+          739765019127517,
+          739765019127517,
+          739765019127517
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765019128088,
+            739765019153207
+          ],
+          [
+            739765019128776,
+            739765019177593
+          ],
+          [
+            739765019129185,
+            739765019184279
+          ],
+          [
+            739765019128602,
+            739765019174378
+          ]
+        ],
+        "start_record_envelope_span_ns": 56191,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.4918079972267151,
+          "rank_max_ms": 0.4918079972267151,
+          "rank_ms": [
+            0.4918079972267151,
+            0.4604800045490265,
+            0.4628799855709076,
+            0.47593599557876587
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.5317760109901428,
+          "rank_max_ms": 0.5317760109901428,
+          "rank_ms": [
+            0.5317760109901428,
+            0.4991360008716583,
+            0.5038400292396545,
+            0.5156800150871277
+          ]
+        },
+        "sample_index": 8,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765024691639,
+          739765024489294,
+          739765024983832,
+          739765024967247
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765029983832,
+          739765029983832,
+          739765029983832,
+          739765029983832
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765029984322,
+            739765030017043
+          ],
+          [
+            739765029984731,
+            739765030050365
+          ],
+          [
+            739765029984865,
+            739765030055291
+          ],
+          [
+            739765029984981,
+            739765030038025
+          ]
+        ],
+        "start_record_envelope_span_ns": 70969,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.5240640044212341,
+          "rank_max_ms": 0.5240640044212341,
+          "rank_ms": [
+            0.5240640044212341,
+            0.5009920001029968,
+            0.5048320293426514,
+            0.5096960067749023
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.5639039874076843,
+          "rank_max_ms": 0.5639039874076843,
+          "rank_ms": [
+            0.5639039874076843,
+            0.5409600138664246,
+            0.543936014175415,
+            0.5506560206413269
+          ]
+        },
+        "sample_index": 9,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765035692106,
+          739765036097182,
+          739765036106349,
+          739765035912972
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765041106349,
+          739765041106349,
+          739765041106349,
+          739765041106349
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765041107062,
+            739765041136428
+          ],
+          [
+            739765041107497,
+            739765041157352
+          ],
+          [
+            739765041107777,
+            739765041160803
+          ],
+          [
+            739765041107343,
+            739765041163594
+          ]
+        ],
+        "start_record_envelope_span_ns": 56532,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.5502079725265503,
+          "rank_max_ms": 0.5502079725265503,
+          "rank_ms": [
+            0.5502079725265503,
+            0.5360320210456848,
+            0.5235520005226135,
+            0.5398079752922058
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.590399980545044,
+          "rank_max_ms": 0.590399980545044,
+          "rank_ms": [
+            0.590399980545044,
+            0.5759360194206238,
+            0.5645120143890381,
+            0.5807679891586304
+          ]
+        },
+        "sample_index": 10,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765046252456,
+          739765046523808,
+          739765046667602,
+          739765046656073
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765051667602,
+          739765051667602,
+          739765051667602,
+          739765051667602
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765051668156,
+            739765051693766
+          ],
+          [
+            739765051668819,
+            739765051715994
+          ],
+          [
+            739765051668935,
+            739765051731534
+          ],
+          [
+            739765051668478,
+            739765051710572
+          ]
+        ],
+        "start_record_envelope_span_ns": 63378,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.528544008731842,
+          "rank_max_ms": 0.528544008731842,
+          "rank_ms": [
+            0.528544008731842,
+            0.5015680193901062,
+            0.5067520141601562,
+            0.5172160267829895
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.5684159994125366,
+          "rank_max_ms": 0.5684159994125366,
+          "rank_ms": [
+            0.5684159994125366,
+            0.5402560234069824,
+            0.5457919836044312,
+            0.5571839809417725
+          ]
+        },
+        "sample_index": 11,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765056537732,
+          739765056933803,
+          739765056619068,
+          739765056864618
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765061933803,
+          739765061933803,
+          739765061933803,
+          739765061933803
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765061934352,
+            739765061957243
+          ],
+          [
+            739765061934985,
+            739765061978143
+          ],
+          [
+            739765061935033,
+            739765061981056
+          ],
+          [
+            739765061934936,
+            739765061976663
+          ]
+        ],
+        "start_record_envelope_span_ns": 46704,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.5443840026855469,
+          "rank_max_ms": 0.5443840026855469,
+          "rank_ms": [
+            0.5443840026855469,
+            0.4886719882488251,
+            0.4943679869174957,
+            0.5320000052452087
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.5843520164489746,
+          "rank_max_ms": 0.5843520164489746,
+          "rank_ms": [
+            0.5843520164489746,
+            0.5284479856491089,
+            0.5353279709815979,
+            0.5719680190086365
+          ]
+        },
+        "sample_index": 12,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765068222804,
+          739765068534852,
+          739765068494785,
+          739765068239448
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765073534852,
+          739765073534852,
+          739765073534852,
+          739765073534852
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765073535350,
+            739765073561052
+          ],
+          [
+            739765073536013,
+            739765073614681
+          ],
+          [
+            739765073535949,
+            739765073615387
+          ],
+          [
+            739765073536072,
+            739765073601654
+          ]
+        ],
+        "start_record_envelope_span_ns": 80037,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.6139519810676575,
+          "rank_max_ms": 0.6139519810676575,
+          "rank_ms": [
+            0.6139519810676575,
+            0.5810559988021851,
+            0.5870720148086548,
+            0.5353599786758423
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.653823971748352,
+          "rank_max_ms": 0.653823971748352,
+          "rank_ms": [
+            0.653823971748352,
+            0.619871973991394,
+            0.6258559823036194,
+            0.5762879848480225
+          ]
+        },
+        "sample_index": 13,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765079332611,
+          739765079574732,
+          739765079748556,
+          739765079570366
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765084748556,
+          739765084748556,
+          739765084748556,
+          739765084748556
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765084749044,
+            739765084774010
+          ],
+          [
+            739765084750141,
+            739765084801968
+          ],
+          [
+            739765084749818,
+            739765084804147
+          ],
+          [
+            739765084813752,
+            739765084858065
+          ]
+        ],
+        "start_record_envelope_span_ns": 109021,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.5187839865684509,
+          "rank_max_ms": 0.5187839865684509,
+          "rank_ms": [
+            0.5187839865684509,
+            0.49561598896980286,
+            0.5031039714813232,
+            0.506496012210846
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.5587520003318787,
+          "rank_max_ms": 0.5587520003318787,
+          "rank_ms": [
+            0.5587520003318787,
+            0.5355839729309082,
+            0.5421760082244873,
+            0.5465919971466064
+          ]
+        },
+        "sample_index": 14,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765090540913,
+          739765091108429,
+          739765090972443,
+          739765090679993
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765096108429,
+          739765096108429,
+          739765096108429,
+          739765096108429
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765096109022,
+            739765096136159
+          ],
+          [
+            739765096109812,
+            739765096161090
+          ],
+          [
+            739765096109862,
+            739765096164892
+          ],
+          [
+            739765096109328,
+            739765096152995
+          ]
+        ],
+        "start_record_envelope_span_ns": 55870,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.5560320019721985,
+          "rank_max_ms": 0.5560320019721985,
+          "rank_ms": [
+            0.5560320019721985,
+            0.536575973033905,
+            0.5411520004272461,
+            0.5446400046348572
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.5959039926528931,
+          "rank_max_ms": 0.5959039926528931,
+          "rank_ms": [
+            0.5959039926528931,
+            0.5764480233192444,
+            0.5820800065994263,
+            0.5847039818763733
+          ]
+        },
+        "sample_index": 15,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765102492609,
+          739765102985557,
+          739765103378982,
+          739765102970713
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765108378982,
+          739765108378982,
+          739765108378982,
+          739765108378982
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765108379572,
+            739765108406449
+          ],
+          [
+            739765108379957,
+            739765108429394
+          ],
+          [
+            739765108379914,
+            739765108432874
+          ],
+          [
+            739765108379585,
+            739765108424156
+          ]
+        ],
+        "start_record_envelope_span_ns": 53302,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.5258880257606506,
+          "rank_max_ms": 0.5258880257606506,
+          "rank_ms": [
+            0.5258880257606506,
+            0.4933440089225769,
+            0.49801599979400635,
+            0.5080959796905518
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.5659199953079224,
+          "rank_max_ms": 0.5659199953079224,
+          "rank_ms": [
+            0.5659199953079224,
+            0.5323519706726074,
+            0.5370879769325256,
+            0.5480319857597351
+          ]
+        },
+        "sample_index": 16,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765112513986,
+          739765112913591,
+          739765113180989,
+          739765113107283
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765118180989,
+          739765118180989,
+          739765118180989,
+          739765118180989
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765118181471,
+            739765118206386
+          ],
+          [
+            739765118182154,
+            739765118233488
+          ],
+          [
+            739765118181931,
+            739765118236879
+          ],
+          [
+            739765118181839,
+            739765118227244
+          ]
+        ],
+        "start_record_envelope_span_ns": 55408,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.5193920135498047,
+          "rank_max_ms": 0.5193920135498047,
+          "rank_ms": [
+            0.5193920135498047,
+            0.5012159943580627,
+            0.5002560019493103,
+            0.5044479966163635
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.5594559907913208,
+          "rank_max_ms": 0.5594559907913208,
+          "rank_ms": [
+            0.5594559907913208,
+            0.5401920080184937,
+            0.5411840081214905,
+            0.5453760027885437
+          ]
+        },
+        "sample_index": 17,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765123106669,
+          739765123346099,
+          739765123344805,
+          739765123658344
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765128658344,
+          739765128658344,
+          739765128658344,
+          739765128658344
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765128658874,
+            739765128683752
+          ],
+          [
+            739765128659581,
+            739765128707678
+          ],
+          [
+            739765128660039,
+            739765128715620
+          ],
+          [
+            739765128659408,
+            739765128703789
+          ]
+        ],
+        "start_record_envelope_span_ns": 56746,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.5348799824714661,
+          "rank_max_ms": 0.5348799824714661,
+          "rank_ms": [
+            0.5348799824714661,
+            0.5074880123138428,
+            0.5117440223693848,
+            0.5241919755935669
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.5748479962348938,
+          "rank_max_ms": 0.5748479962348938,
+          "rank_ms": [
+            0.5748479962348938,
+            0.5464000105857849,
+            0.5527039766311646,
+            0.5641279816627502
+          ]
+        },
+        "sample_index": 18,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765133853748,
+          739765133712007,
+          739765133534153,
+          739765133700640
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765138853748,
+          739765138853748,
+          739765138853748,
+          739765138853748
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765138854283,
+            739765138877668
+          ],
+          [
+            739765138854821,
+            739765138901413
+          ],
+          [
+            739765138855032,
+            739765138905449
+          ],
+          [
+            739765138854738,
+            739765138899502
+          ]
+        ],
+        "start_record_envelope_span_ns": 51166,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.5517439842224121,
+          "rank_max_ms": 0.5517439842224121,
+          "rank_ms": [
+            0.5517439842224121,
+            0.5270400047302246,
+            0.5271360278129578,
+            0.5386239886283875
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.5916799902915955,
+          "rank_max_ms": 0.5916799902915955,
+          "rank_ms": [
+            0.5916799902915955,
+            0.5660160183906555,
+            0.5680320262908936,
+            0.5796160101890564
+          ]
+        },
+        "sample_index": 19,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765144523389,
+          739765144283109,
+          739765144379897,
+          739765144319751
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765149523389,
+          739765149523389,
+          739765149523389,
+          739765149523389
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765149523901,
+            739765149548698
+          ],
+          [
+            739765149524324,
+            739765149574899
+          ],
+          [
+            739765149524437,
+            739765149576953
+          ],
+          [
+            739765149524072,
+            739765149566347
+          ]
+        ],
+        "start_record_envelope_span_ns": 53052,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.5454720258712769,
+          "rank_max_ms": 0.5454720258712769,
+          "rank_ms": [
+            0.5454720258712769,
+            0.5232639908790588,
+            0.5264319777488708,
+            0.5309759974479675
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.5853760242462158,
+          "rank_max_ms": 0.5853760242462158,
+          "rank_ms": [
+            0.5853760242462158,
+            0.5633280277252197,
+            0.567359983921051,
+            0.571071982383728
+          ]
+        },
+        "sample_index": 20,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765154342330,
+          739765154730463,
+          739765154819968,
+          739765154686179
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765159819968,
+          739765159819968,
+          739765159819968,
+          739765159819968
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765159820569,
+            739765159844602
+          ],
+          [
+            739765159820950,
+            739765159868571
+          ],
+          [
+            739765159821289,
+            739765159875859
+          ],
+          [
+            739765159820857,
+            739765159865493
+          ]
+        ],
+        "start_record_envelope_span_ns": 55290,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.9139519929885864,
+          "rank_max_ms": 0.9139519929885864,
+          "rank_ms": [
+            0.9139519929885864,
+            0.887391984462738,
+            0.49372801184654236,
+            0.9049919843673706
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.9541119933128357,
+          "rank_max_ms": 0.9541119933128357,
+          "rank_ms": [
+            0.9541119933128357,
+            0.9273279905319214,
+            0.5346559882164001,
+            0.9456959962844849
+          ]
+        },
+        "sample_index": 21,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765165785621,
+          739765166154163,
+          739765166260838,
+          739765166146312
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765171260838,
+          739765171260838,
+          739765171260838,
+          739765171260838
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765171261431,
+            739765171289206
+          ],
+          [
+            739765171268236,
+            739765171320902
+          ],
+          [
+            739765171652662,
+            739765171707279
+          ],
+          [
+            739765171261486,
+            739765171304179
+          ]
+        ],
+        "start_record_envelope_span_ns": 445848,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.573855996131897,
+          "rank_max_ms": 0.573855996131897,
+          "rank_ms": [
+            0.573855996131897,
+            0.5505599975585938,
+            0.5441280007362366,
+            0.5549759864807129
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.6137599945068359,
+          "rank_max_ms": 0.6137599945068359,
+          "rank_ms": [
+            0.6137599945068359,
+            0.5894399881362915,
+            0.5850560069084167,
+            0.5950400233268738
+          ]
+        },
+        "sample_index": 22,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765177651691,
+          739765178149865,
+          739765178294289,
+          739765178167223
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765183294289,
+          739765183294289,
+          739765183294289,
+          739765183294289
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765183294833,
+            739765183317912
+          ],
+          [
+            739765183295341,
+            739765183346528
+          ],
+          [
+            739765183295630,
+            739765183350898
+          ],
+          [
+            739765183300072,
+            739765183343819
+          ]
+        ],
+        "start_record_envelope_span_ns": 56065,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.49644801020622253,
+          "rank_max_ms": 0.49644801020622253,
+          "rank_ms": [
+            0.49644801020622253,
+            0.4751040041446686,
+            0.48089599609375,
+            0.4838719964027405
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.5361279845237732,
+          "rank_max_ms": 0.5361279845237732,
+          "rank_ms": [
+            0.5361279845237732,
+            0.5137280225753784,
+            0.5219200253486633,
+            0.5238720178604126
+          ]
+        },
+        "sample_index": 23,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765188504266,
+          739765188743885,
+          739765189034567,
+          739765188917844
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765194034567,
+          739765194034567,
+          739765194034567,
+          739765194034567
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765194035066,
+            739765194057421
+          ],
+          [
+            739765194035953,
+            739765194083414
+          ],
+          [
+            739765194036260,
+            739765194086595
+          ],
+          [
+            739765194035366,
+            739765194076491
+          ]
+        ],
+        "start_record_envelope_span_ns": 51529,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.4829759895801544,
+          "rank_max_ms": 0.4829759895801544,
+          "rank_ms": [
+            0.4829759895801544,
+            0.4652160108089447,
+            0.4668799936771393,
+            0.470335990190506
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.5229439735412598,
+          "rank_max_ms": 0.5229439735412598,
+          "rank_ms": [
+            0.5229439735412598,
+            0.5041279792785645,
+            0.5058879852294922,
+            0.5103039741516113
+          ]
+        },
+        "sample_index": 24,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765198751068,
+          739765198689966,
+          739765199281037,
+          739765198944439
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765204281037,
+          739765204281037,
+          739765204281037,
+          739765204281037
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765204281569,
+            739765204303560
+          ],
+          [
+            739765204282141,
+            739765204325523
+          ],
+          [
+            739765204282251,
+            739765204327515
+          ],
+          [
+            739765204281832,
+            739765204319847
+          ]
+        ],
+        "start_record_envelope_span_ns": 45946,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.5594879984855652,
+          "rank_max_ms": 0.5594879984855652,
+          "rank_ms": [
+            0.5594879984855652,
+            0.5279679894447327,
+            0.5272319912910461,
+            0.5415999889373779
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.5993919968605042,
+          "rank_max_ms": 0.5993919968605042,
+          "rank_ms": [
+            0.5993919968605042,
+            0.5668799877166748,
+            0.5682240128517151,
+            0.5825279951095581
+          ]
+        },
+        "sample_index": 25,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765209259767,
+          739765209928401,
+          739765210340031,
+          739765209726806
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765215340031,
+          739765215340031,
+          739765215340031,
+          739765215340031
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765215340569,
+            739765215364731
+          ],
+          [
+            739765215341475,
+            739765215393306
+          ],
+          [
+            739765215341545,
+            739765215393285
+          ],
+          [
+            739765215341395,
+            739765215388587
+          ]
+        ],
+        "start_record_envelope_span_ns": 52737,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.5793280005455017,
+          "rank_max_ms": 0.5793280005455017,
+          "rank_ms": [
+            0.5793280005455017,
+            0.548799991607666,
+            0.5517439842224121,
+            0.516543984413147
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.6192319989204407,
+          "rank_max_ms": 0.6192319989204407,
+          "rank_ms": [
+            0.6192319989204407,
+            0.5887359976768494,
+            0.5906879901885986,
+            0.5572479963302612
+          ]
+        },
+        "sample_index": 26,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765220869215,
+          739765220992961,
+          739765221384992,
+          739765221084878
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765226384992,
+          739765226384992,
+          739765226384992,
+          739765226384992
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765226385613,
+            739765226407496
+          ],
+          [
+            739765226385860,
+            739765226431600
+          ],
+          [
+            739765226385917,
+            739765226434526
+          ],
+          [
+            739765226433982,
+            739765226474596
+          ]
+        ],
+        "start_record_envelope_span_ns": 88983,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.5602880120277405,
+          "rank_max_ms": 0.5602880120277405,
+          "rank_ms": [
+            0.5602880120277405,
+            0.5311679840087891,
+            0.534496009349823,
+            0.541920006275177
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.6001600027084351,
+          "rank_max_ms": 0.6001600027084351,
+          "rank_ms": [
+            0.6001600027084351,
+            0.5720959901809692,
+            0.5754240155220032,
+            0.5820159912109375
+          ]
+        },
+        "sample_index": 27,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765231309118,
+          739765231570204,
+          739765231779911,
+          739765231744492
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765236779911,
+          739765236779911,
+          739765236779911,
+          739765236779911
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765236780463,
+            739765236805859
+          ],
+          [
+            739765236781043,
+            739765236828314
+          ],
+          [
+            739765236781586,
+            739765236833803
+          ],
+          [
+            739765236781317,
+            739765236827907
+          ]
+        ],
+        "start_record_envelope_span_ns": 53340,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.535647988319397,
+          "rank_max_ms": 0.535647988319397,
+          "rank_ms": [
+            0.535647988319397,
+            0.5135040283203125,
+            0.5055040121078491,
+            0.5184640288352966
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.5757120251655579,
+          "rank_max_ms": 0.5757120251655579,
+          "rank_ms": [
+            0.5757120251655579,
+            0.5524160265922546,
+            0.5465279817581177,
+            0.559391975402832
+          ]
+        },
+        "sample_index": 28,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765242665455,
+          739765242936160,
+          739765242652998,
+          739765242984277
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765247984277,
+          739765247984277,
+          739765247984277,
+          739765247984277
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765247984795,
+            739765248019102
+          ],
+          [
+            739765247985262,
+            739765248042819
+          ],
+          [
+            739765247985582,
+            739765248053702
+          ],
+          [
+            739765247985327,
+            739765248042804
+          ]
+        ],
+        "start_record_envelope_span_ns": 68907,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.5277439951896667,
+          "rank_max_ms": 0.5277439951896667,
+          "rank_ms": [
+            0.5277439951896667,
+            0.4943679869174957,
+            0.5054399967193604,
+            0.5038719773292542
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.5676800012588501,
+          "rank_max_ms": 0.5676800012588501,
+          "rank_ms": [
+            0.5676800012588501,
+            0.5342720150947571,
+            0.5443519949913025,
+            0.5431039929389954
+          ]
+        },
+        "sample_index": 29,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765253217802,
+          739765253332146,
+          739765253502878,
+          739765253994954
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765258994954,
+          739765258994954,
+          739765258994954,
+          739765258994954
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765258995561,
+            739765259034086
+          ],
+          [
+            739765258996211,
+            739765259062491
+          ],
+          [
+            739765258995830,
+            739765259055508
+          ],
+          [
+            739765258996007,
+            739765259061204
+          ]
+        ],
+        "start_record_envelope_span_ns": 66930,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.5557760000228882,
+          "rank_max_ms": 0.5557760000228882,
+          "rank_ms": [
+            0.5557760000228882,
+            0.5275520086288452,
+            0.5291200280189514,
+            0.5395839810371399
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.5957440137863159,
+          "rank_max_ms": 0.5957440137863159,
+          "rank_ms": [
+            0.5957440137863159,
+            0.568448007106781,
+            0.5700799822807312,
+            0.5805119872093201
+          ]
+        },
+        "sample_index": 30,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765265249883,
+          739765265515486,
+          739765265346251,
+          739765265855131
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765270855131,
+          739765270855131,
+          739765270855131,
+          739765270855131
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765270855578,
+            739765270881504
+          ],
+          [
+            739765270855858,
+            739765270902940
+          ],
+          [
+            739765270856160,
+            739765270908676
+          ],
+          [
+            739765270856088,
+            739765270901978
+          ]
+        ],
+        "start_record_envelope_span_ns": 53098,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.5498560070991516,
+          "rank_max_ms": 0.5498560070991516,
+          "rank_ms": [
+            0.5498560070991516,
+            0.5291200280189514,
+            0.5216959714889526,
+            0.5302079916000366
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.589792013168335,
+          "rank_max_ms": 0.589792013168335,
+          "rank_ms": [
+            0.589792013168335,
+            0.56905597448349,
+            0.5626559853553772,
+            0.5711359977722168
+          ]
+        },
+        "sample_index": 31,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765276898509,
+          739765277238401,
+          739765277126044,
+          739765277485657
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765282485657,
+          739765282485657,
+          739765282485657,
+          739765282485657
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765282486175,
+            739765282511027
+          ],
+          [
+            739765282486864,
+            739765282537904
+          ],
+          [
+            739765282487375,
+            739765282542088
+          ],
+          [
+            739765282486790,
+            739765282532353
+          ]
+        ],
+        "start_record_envelope_span_ns": 55913,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.5386880040168762,
+          "rank_max_ms": 0.5386880040168762,
+          "rank_ms": [
+            0.5386880040168762,
+            0.510208010673523,
+            0.5139200091362,
+            0.523904025554657
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.5784000158309937,
+          "rank_max_ms": 0.5784000158309937,
+          "rank_ms": [
+            0.5784000158309937,
+            0.5491840243339539,
+            0.5531520247459412,
+            0.5648639798164368
+          ]
+        },
+        "sample_index": 32,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765287787891,
+          739765288246372,
+          739765287965088,
+          739765288255250
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765293255250,
+          739765293255250,
+          739765293255250,
+          739765293255250
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765293255691,
+            739765293281441
+          ],
+          [
+            739765293256293,
+            739765293311179
+          ],
+          [
+            739765293256623,
+            739765293313794
+          ],
+          [
+            739765293256561,
+            739765293306096
+          ]
+        ],
+        "start_record_envelope_span_ns": 58103,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.5255680084228516,
+          "rank_max_ms": 0.5255680084228516,
+          "rank_ms": [
+            0.5255680084228516,
+            0.4984639883041382,
+            0.49532800912857056,
+            0.5139840245246887
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.5656639933586121,
+          "rank_max_ms": 0.5656639933586121,
+          "rank_ms": [
+            0.5656639933586121,
+            0.53711998462677,
+            0.5361599922180176,
+            0.5548800230026245
+          ]
+        },
+        "sample_index": 33,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765297984792,
+          739765298638049,
+          739765298365110,
+          739765298612176
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765303638049,
+          739765303638049,
+          739765303638049,
+          739765303638049
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765303638516,
+            739765303662943
+          ],
+          [
+            739765303639461,
+            739765303689203
+          ],
+          [
+            739765303639631,
+            739765303690574
+          ],
+          [
+            739765303638818,
+            739765303683866
+          ]
+        ],
+        "start_record_envelope_span_ns": 52058,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.5544319748878479,
+          "rank_max_ms": 0.5544319748878479,
+          "rank_ms": [
+            0.5544319748878479,
+            0.5353919863700867,
+            0.5390719771385193,
+            0.5432639718055725
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.5943359732627869,
+          "rank_max_ms": 0.5943359732627869,
+          "rank_ms": [
+            0.5943359732627869,
+            0.5743359923362732,
+            0.5799999833106995,
+            0.5842880010604858
+          ]
+        },
+        "sample_index": 34,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765309095587,
+          739765309419391,
+          739765309419227,
+          739765309461569
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765314461569,
+          739765314461569,
+          739765314461569,
+          739765314461569
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765314462138,
+            739765314489236
+          ],
+          [
+            739765314462604,
+            739765314513031
+          ],
+          [
+            739765314462750,
+            739765314517209
+          ],
+          [
+            739765314462605,
+            739765314506107
+          ]
+        ],
+        "start_record_envelope_span_ns": 55071,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.5286719799041748,
+          "rank_max_ms": 0.5286719799041748,
+          "rank_ms": [
+            0.5286719799041748,
+            0.50108802318573,
+            0.4983679950237274,
+            0.5154560208320618
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.5686720013618469,
+          "rank_max_ms": 0.5686720013618469,
+          "rank_ms": [
+            0.5686720013618469,
+            0.540992021560669,
+            0.5390080213546753,
+            0.5553920269012451
+          ]
+        },
+        "sample_index": 35,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765319886745,
+          739765320149762,
+          739765320254338,
+          739765320059707
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765325254338,
+          739765325254338,
+          739765325254338,
+          739765325254338
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765325254844,
+            739765325281301
+          ],
+          [
+            739765325255500,
+            739765325302180
+          ],
+          [
+            739765325256014,
+            739765325307220
+          ],
+          [
+            739765325255314,
+            739765325300222
+          ]
+        ],
+        "start_record_envelope_span_ns": 52376,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.5356159806251526,
+          "rank_max_ms": 0.5356159806251526,
+          "rank_ms": [
+            0.5356159806251526,
+            0.5058559775352478,
+            0.5113599896430969,
+            0.5164480209350586
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.5755199790000916,
+          "rank_max_ms": 0.5755199790000916,
+          "rank_ms": [
+            0.5755199790000916,
+            0.5457919836044312,
+            0.550495982170105,
+            0.5564159750938416
+          ]
+        },
+        "sample_index": 36,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765329795911,
+          739765330215733,
+          739765330263661,
+          739765330238560
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765335263661,
+          739765335263661,
+          739765335263661,
+          739765335263661
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765335264135,
+            739765335287139
+          ],
+          [
+            739765335264725,
+            739765335316092
+          ],
+          [
+            739765335264819,
+            739765335317334
+          ],
+          [
+            739765335265268,
+            739765335312967
+          ]
+        ],
+        "start_record_envelope_span_ns": 53199,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.5224000215530396,
+          "rank_max_ms": 0.5224000215530396,
+          "rank_ms": [
+            0.5224000215530396,
+            0.4955199956893921,
+            0.5017600059509277,
+            0.5115839838981628
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.5623360276222229,
+          "rank_max_ms": 0.5623360276222229,
+          "rank_ms": [
+            0.5623360276222229,
+            0.5344319939613342,
+            0.5407999753952026,
+            0.5516160130500793
+          ]
+        },
+        "sample_index": 37,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765340287867,
+          739765340661772,
+          739765340680508,
+          739765340646912
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765345680508,
+          739765345680508,
+          739765345680508,
+          739765345680508
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765345681200,
+            739765345712634
+          ],
+          [
+            739765345681741,
+            739765345734000
+          ],
+          [
+            739765345681964,
+            739765345733146
+          ],
+          [
+            739765345681277,
+            739765345724796
+          ]
+        ],
+        "start_record_envelope_span_ns": 52800,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.5265600085258484,
+          "rank_max_ms": 0.5265600085258484,
+          "rank_ms": [
+            0.5265600085258484,
+            0.5086719989776611,
+            0.5053759813308716,
+            0.5087680220603943
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.5664960145950317,
+          "rank_max_ms": 0.5664960145950317,
+          "rank_ms": [
+            0.5664960145950317,
+            0.5486080050468445,
+            0.544160008430481,
+            0.5496640205383301
+          ]
+        },
+        "sample_index": 38,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765350394885,
+          739765350643998,
+          739765350651837,
+          739765350682939
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765355682939,
+          739765355682939,
+          739765355682939,
+          739765355682939
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765355683413,
+            739765355708324
+          ],
+          [
+            739765355684025,
+            739765355731248
+          ],
+          [
+            739765355684152,
+            739765355739271
+          ],
+          [
+            739765355683989,
+            739765355729139
+          ]
+        ],
+        "start_record_envelope_span_ns": 55858,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.4888319969177246,
+          "rank_max_ms": 0.4888319969177246,
+          "rank_ms": [
+            0.4888319969177246,
+            0.4623680114746094,
+            0.46963199973106384,
+            0.47388800978660583
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.5288320183753967,
+          "rank_max_ms": 0.5288320183753967,
+          "rank_ms": [
+            0.5288320183753967,
+            0.500544011592865,
+            0.5086399912834167,
+            0.5137919783592224
+          ]
+        },
+        "sample_index": 39,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765360819886,
+          739765361139353,
+          739765361159831,
+          739765361107671
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765366159831,
+          739765366159831,
+          739765366159831,
+          739765366159831
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765366160368,
+            739765366183390
+          ],
+          [
+            739765366161120,
+            739765366203250
+          ],
+          [
+            739765366160797,
+            739765366202569
+          ],
+          [
+            739765366160594,
+            739765366198193
+          ]
+        ],
+        "start_record_envelope_span_ns": 42882,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.47724801301956177,
+          "rank_max_ms": 0.47724801301956177,
+          "rank_ms": [
+            0.47724801301956177,
+            0.46992000937461853,
+            0.4681600034236908,
+            0.47206398844718933
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.5173119902610779,
+          "rank_max_ms": 0.5173119902610779,
+          "rank_ms": [
+            0.5173119902610779,
+            0.5098559856414795,
+            0.5072640180587769,
+            0.5119680166244507
+          ]
+        },
+        "sample_index": 40,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765370295949,
+          739765370570486,
+          739765370396540,
+          739765370607889
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765375607889,
+          739765375607889,
+          739765375607889,
+          739765375607889
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765375608547,
+            739765375635527
+          ],
+          [
+            739765375609155,
+            739765375650234
+          ],
+          [
+            739765375609332,
+            739765375654753
+          ],
+          [
+            739765375608672,
+            739765375644538
+          ]
+        ],
+        "start_record_envelope_span_ns": 46206,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.49689599871635437,
+          "rank_max_ms": 0.49689599871635437,
+          "rank_ms": [
+            0.49689599871635437,
+            0.4747200012207031,
+            0.47519999742507935,
+            0.49030399322509766
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.536736011505127,
+          "rank_max_ms": 0.536736011505127,
+          "rank_ms": [
+            0.536736011505127,
+            0.5147839784622192,
+            0.5141760110855103,
+            0.5312319993972778
+          ]
+        },
+        "sample_index": 41,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765379824860,
+          739765379740185,
+          739765379996816,
+          739765380094196
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765385094196,
+          739765385094196,
+          739765385094196,
+          739765385094196
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765385094746,
+            739765385115801
+          ],
+          [
+            739765385095079,
+            739765385129680
+          ],
+          [
+            739765385095214,
+            739765385133371
+          ],
+          [
+            739765385095236,
+            739765385131443
+          ]
+        ],
+        "start_record_envelope_span_ns": 38625,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.5394240021705627,
+          "rank_max_ms": 0.5394240021705627,
+          "rank_ms": [
+            0.5394240021705627,
+            0.5124480128288269,
+            0.5252479910850525,
+            0.5247039794921875
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.5803840160369873,
+          "rank_max_ms": 0.5803840160369873,
+          "rank_ms": [
+            0.5803840160369873,
+            0.5524160265922546,
+            0.5644479990005493,
+            0.5648319721221924
+          ]
+        },
+        "sample_index": 42,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765389308093,
+          739765389492766,
+          739765389081825,
+          739765389427015
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765394492766,
+          739765394492766,
+          739765394492766,
+          739765394492766
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765394493273,
+            739765394515367
+          ],
+          [
+            739765394493837,
+            739765394536785
+          ],
+          [
+            739765394493408,
+            739765394529707
+          ],
+          [
+            739765394493628,
+            739765394533017
+          ]
+        ],
+        "start_record_envelope_span_ns": 43512,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.5353919863700867,
+          "rank_max_ms": 0.5353919863700867,
+          "rank_ms": [
+            0.5353919863700867,
+            0.4970239996910095,
+            0.5054720044136047,
+            0.5185279846191406
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.5754879713058472,
+          "rank_max_ms": 0.5754879713058472,
+          "rank_ms": [
+            0.5754879713058472,
+            0.5368319749832153,
+            0.5444160103797913,
+            0.5596479773521423
+          ]
+        },
+        "sample_index": 43,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765399662291,
+          739765399439644,
+          739765399473268,
+          739765400027722
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765405027722,
+          739765405027722,
+          739765405027722,
+          739765405027722
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765405028292,
+            739765405055226
+          ],
+          [
+            739765405029528,
+            739765405087117
+          ],
+          [
+            739765405028665,
+            739765405076930
+          ],
+          [
+            739765405029008,
+            739765405073628
+          ]
+        ],
+        "start_record_envelope_span_ns": 58825,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.49456000328063965,
+          "rank_max_ms": 0.49456000328063965,
+          "rank_ms": [
+            0.49456000328063965,
+            0.47382399439811707,
+            0.4798400104045868,
+            0.4851840138435364
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.534496009349823,
+          "rank_max_ms": 0.534496009349823,
+          "rank_ms": [
+            0.534496009349823,
+            0.5138239860534668,
+            0.5189120173454285,
+            0.5251200199127197
+          ]
+        },
+        "sample_index": 44,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765409435211,
+          739765409611409,
+          739765409278390,
+          739765409648026
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765414648026,
+          739765414648026,
+          739765414648026,
+          739765414648026
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765414648523,
+            739765414675831
+          ],
+          [
+            739765414649140,
+            739765414691277
+          ],
+          [
+            739765414648542,
+            739765414685044
+          ],
+          [
+            739765414648887,
+            739765414687720
+          ]
+        ],
+        "start_record_envelope_span_ns": 42754,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.5213119983673096,
+          "rank_max_ms": 0.5213119983673096,
+          "rank_ms": [
+            0.5213119983673096,
+            0.4809280037879944,
+            0.4880639910697937,
+            0.5066559910774231
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.5622400045394897,
+          "rank_max_ms": 0.5622400045394897,
+          "rank_ms": [
+            0.5622400045394897,
+            0.5198400020599365,
+            0.5290240049362183,
+            0.5476160049438477
+          ]
+        },
+        "sample_index": 45,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765419557777,
+          739765419379367,
+          739765419518167,
+          739765419956539
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765424956539,
+          739765424956539,
+          739765424956539,
+          739765424956539
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765424957126,
+            739765424979879
+          ],
+          [
+            739765424957506,
+            739765425014103
+          ],
+          [
+            739765424957287,
+            739765425014911
+          ],
+          [
+            739765424957652,
+            739765425008745
+          ]
+        ],
+        "start_record_envelope_span_ns": 57785,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.5681920051574707,
+          "rank_max_ms": 0.5681920051574707,
+          "rank_ms": [
+            0.5681920051574707,
+            0.5347520112991333,
+            0.5294079780578613,
+            0.5419840216636658
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.608128011226654,
+          "rank_max_ms": 0.608128011226654,
+          "rank_ms": [
+            0.608128011226654,
+            0.5748159885406494,
+            0.5683199763298035,
+            0.5808640122413635
+          ]
+        },
+        "sample_index": 46,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765429989075,
+          739765430368027,
+          739765430210179,
+          739765430262651
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765435368027,
+          739765435368027,
+          739765435368027,
+          739765435368027
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765435368584,
+            739765435394942
+          ],
+          [
+            739765435369477,
+            739765435419443
+          ],
+          [
+            739765435369303,
+            739765435431589
+          ],
+          [
+            739765435369549,
+            739765435423890
+          ]
+        ],
+        "start_record_envelope_span_ns": 63005,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.5092160105705261,
+          "rank_max_ms": 0.5092160105705261,
+          "rank_ms": [
+            0.5092160105705261,
+            0.4955520033836365,
+            0.48895999789237976,
+            0.5033280253410339
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.5492159724235535,
+          "rank_max_ms": 0.5492159724235535,
+          "rank_ms": [
+            0.5492159724235535,
+            0.5345280170440674,
+            0.5299199819564819,
+            0.5423039793968201
+          ]
+        },
+        "sample_index": 47,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765440738714,
+          739765440756354,
+          739765441134054,
+          739765440988670
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765446134054,
+          739765446134054,
+          739765446134054,
+          739765446134054
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765446134619,
+            739765446161509
+          ],
+          [
+            739765446134788,
+            739765446180969
+          ],
+          [
+            739765446135392,
+            739765446187301
+          ],
+          [
+            739765446135013,
+            739765446177829
+          ]
+        ],
+        "start_record_envelope_span_ns": 52682,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.540224015712738,
+          "rank_max_ms": 0.540224015712738,
+          "rank_ms": [
+            0.540224015712738,
+            0.5090879797935486,
+            0.514240026473999,
+            0.5177599787712097
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.5802559852600098,
+          "rank_max_ms": 0.5802559852600098,
+          "rank_ms": [
+            0.5802559852600098,
+            0.5500479936599731,
+            0.5551999807357788,
+            0.5587199926376343
+          ]
+        },
+        "sample_index": 48,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765450782905,
+          739765451124866,
+          739765451179205,
+          739765451180479
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765456180479,
+          739765456180479,
+          739765456180479,
+          739765456180479
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765456180930,
+            739765456208792
+          ],
+          [
+            739765456181815,
+            739765456233830
+          ],
+          [
+            739765456181552,
+            739765456232153
+          ],
+          [
+            739765456181401,
+            739765456225853
+          ]
+        ],
+        "start_record_envelope_span_ns": 52900,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.5064640045166016,
+          "rank_max_ms": 0.5064640045166016,
+          "rank_ms": [
+            0.5064640045166016,
+            0.4814079999923706,
+            0.48364800214767456,
+            0.4912320077419281
+          ]
+        },
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.5463680028915405,
+          "rank_max_ms": 0.5463680028915405,
+          "rank_ms": [
+            0.5463680028915405,
+            0.5214080214500427,
+            0.5226240158081055,
+            0.5321919918060303
+          ]
+        },
+        "sample_index": 49,
+        "scheduled_start_arrival_ns_by_rank": [
+          739765460877784,
+          739765461266162,
+          739765461262300,
+          739765461215608
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          739765466266162,
+          739765466266162,
+          739765466266162,
+          739765466266162
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            739765466266701,
+            739765466289404
+          ],
+          [
+            739765466267314,
+            739765466312717
+          ],
+          [
+            739765466267098,
+            739765466316242
+          ],
+          [
+            739765466267288,
+            739765466308756
+          ]
+        ],
+        "start_record_envelope_span_ns": 49541,
+        "variant": 1
+      }
+    ],
+    "warmup_order": [
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ]
+    ]
+  },
+  "readiness_probe": {
+    "dtype": "torch.bfloat16",
+    "full_tensor_consumer": "preallocated BF16 negation output",
+    "full_tensor_validation": "exact on every warmup and measured sample",
+    "num_elements": 60,
+    "positions": [
+      [
+        0,
+        0
+      ],
+      [
+        0,
+        1
+      ],
+      [
+        0,
+        2
+      ],
+      [
+        0,
+        3
+      ],
+      [
+        0,
+        2048
+      ],
+      [
+        0,
+        3072
+      ],
+      [
+        0,
+        6140
+      ],
+      [
+        0,
+        6141
+      ],
+      [
+        0,
+        6142
+      ],
+      [
+        0,
+        6143
+      ],
+      [
+        1,
+        0
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        1,
+        3
+      ],
+      [
+        1,
+        2048
+      ],
+      [
+        1,
+        3072
+      ],
+      [
+        1,
+        6140
+      ],
+      [
+        1,
+        6141
+      ],
+      [
+        1,
+        6142
+      ],
+      [
+        1,
+        6143
+      ],
+      [
+        2730,
+        0
+      ],
+      [
+        2730,
+        1
+      ],
+      [
+        2730,
+        2
+      ],
+      [
+        2730,
+        3
+      ],
+      [
+        2730,
+        2048
+      ],
+      [
+        2730,
+        3072
+      ],
+      [
+        2730,
+        6140
+      ],
+      [
+        2730,
+        6141
+      ],
+      [
+        2730,
+        6142
+      ],
+      [
+        2730,
+        6143
+      ],
+      [
+        4096,
+        0
+      ],
+      [
+        4096,
+        1
+      ],
+      [
+        4096,
+        2
+      ],
+      [
+        4096,
+        3
+      ],
+      [
+        4096,
+        2048
+      ],
+      [
+        4096,
+        3072
+      ],
+      [
+        4096,
+        6140
+      ],
+      [
+        4096,
+        6141
+      ],
+      [
+        4096,
+        6142
+      ],
+      [
+        4096,
+        6143
+      ],
+      [
+        8190,
+        0
+      ],
+      [
+        8190,
+        1
+      ],
+      [
+        8190,
+        2
+      ],
+      [
+        8190,
+        3
+      ],
+      [
+        8190,
+        2048
+      ],
+      [
+        8190,
+        3072
+      ],
+      [
+        8190,
+        6140
+      ],
+      [
+        8190,
+        6141
+      ],
+      [
+        8190,
+        6142
+      ],
+      [
+        8190,
+        6143
+      ],
+      [
+        8191,
+        0
+      ],
+      [
+        8191,
+        1
+      ],
+      [
+        8191,
+        2
+      ],
+      [
+        8191,
+        3
+      ],
+      [
+        8191,
+        2048
+      ],
+      [
+        8191,
+        3072
+      ],
+      [
+        8191,
+        6140
+      ],
+      [
+        8191,
+        6141
+      ],
+      [
+        8191,
+        6142
+      ],
+      [
+        8191,
+        6143
+      ]
+    ],
+    "validation": "exact on every warmup and measured sample"
+  },
+  "reference": {
+    "collective_only": {
+      "median_ms": 0.5355679988861084,
+      "min_ms": 0.47724801301956177,
+      "p95_ms": 0.6139519810676575
+    },
+    "gate_metric": "ready_region.rank_max_ms",
+    "readiness_probe_overhead_median_ms": 0.03993600606918335,
+    "ready_region": {
+      "median_ms": 0.5755039751529694,
+      "min_ms": 0.5173119902610779,
+      "p95_ms": 0.653823971748352
+    }
+  },
+  "reference_policy": "SGLANG_GLM52_OPT=0 production GroupCoordinator path",
+  "result_path": "/tmp/tp_allreduce_alignment_probe_20260722T175813Z/prefill.json",
+  "schema_version": 2,
+  "scope": "tp4_allreduce_diagnostic_only",
+  "timing_contract": {
+    "collective_only": "start event through event recorded immediately after run()",
+    "gate_metric": "ready_region rank-max paired p50",
+    "rank_start_alignment": "selected stream synchronized after restoration; TP CPU-group all-gather selects a common same-host monotonic deadline 5 ms after latest arrival; ranks busy-wait; host timestamps bracket every start-event record call",
+    "ready_region": "start event through full-tensor same-stream negation and position-sensitive gather",
+    "restoration": "variant source-to-local copy and consumer/probe poison occur before every start event"
+  },
+  "workload": {
+    "distributed": true,
+    "family": "allreduce",
+    "name": "tp4_allreduce_prefill",
+    "notes": "Standalone TP4/DP4 balanced 32768-token diagnostic; production caller/ABI not yet proven.",
+    "params": {
+      "dtype": "bfloat16",
+      "hidden": 6144,
+      "local_tokens": 8192
+    },
+    "phase": "prefill",
+    "source_symbol": "sglang.srt.distributed.parallel_state.GroupCoordinator.all_reduce",
+    "world_size": 4
+  }
+}

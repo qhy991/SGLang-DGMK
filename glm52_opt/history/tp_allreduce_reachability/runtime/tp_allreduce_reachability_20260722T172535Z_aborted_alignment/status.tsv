@@ -1,0 +1,17 @@
+requirement	step	exit_code	started_utc	finished_utc	log
+required	environment/lock_receipt	0	2026-07-22T17:43:40.692802499Z	2026-07-22T17:43:40.708224689Z	/tmp/tp_allreduce_reachability_20260722T172535Z/environment/lock_receipt.log
+required	environment/source_identity	0	2026-07-22T17:43:40.710929380Z	2026-07-22T17:43:40.768595165Z	/tmp/tp_allreduce_reachability_20260722T172535Z/environment/source_identity.log
+required	environment/compute_processes_before	0	2026-07-22T17:43:40.770881165Z	2026-07-22T17:43:40.779591394Z	/tmp/tp_allreduce_reachability_20260722T172535Z/environment/compute_processes_before.log
+required	environment/check_env	0	2026-07-22T17:43:40.781936386Z	2026-07-22T17:43:49.336267425Z	/tmp/tp_allreduce_reachability_20260722T172535Z/environment/check_env.log
+required	environment/nvidia_smi	0	2026-07-22T17:43:49.338776773Z	2026-07-22T17:43:49.450658959Z	/tmp/tp_allreduce_reachability_20260722T172535Z/environment/nvidia_smi.log
+required	environment/topology	0	2026-07-22T17:43:49.453404151Z	2026-07-22T17:43:49.706561699Z	/tmp/tp_allreduce_reachability_20260722T172535Z/environment/topology.log
+required	environment/p2p_capability	0	2026-07-22T17:43:49.709119361Z	2026-07-22T17:43:49.962565493Z	/tmp/tp_allreduce_reachability_20260722T172535Z/environment/p2p_capability.log
+required	environment/nvlink_status	0	2026-07-22T17:43:49.964761930Z	2026-07-22T17:43:50.127017826Z	/tmp/tp_allreduce_reachability_20260722T172535Z/environment/nvlink_status.log
+required	environment/nvlink_throughput_before	0	2026-07-22T17:43:50.129706269Z	2026-07-22T17:43:50.419273318Z	/tmp/tp_allreduce_reachability_20260722T172535Z/environment/nvlink_throughput_before.log
+required	reachability/m16	0	2026-07-22T17:43:50.421834319Z	2026-07-22T17:44:07.806919481Z	/tmp/tp_allreduce_reachability_20260722T172535Z/reachability/m16.log
+required	reachability/m32	0	2026-07-22T17:44:07.809229434Z	2026-07-22T17:44:24.984296300Z	/tmp/tp_allreduce_reachability_20260722T172535Z/reachability/m32.log
+required	reachability/prefill	0	2026-07-22T17:44:24.986303696Z	2026-07-22T17:44:42.445909471Z	/tmp/tp_allreduce_reachability_20260722T172535Z/reachability/prefill.log
+required	semantics/tp4_allreduce_decode_m16.eager.default	0	2026-07-22T17:44:42.448599733Z	2026-07-22T17:44:59.813052573Z	/tmp/tp_allreduce_reachability_20260722T172535Z/semantics/tp4_allreduce_decode_m16.eager.default.log
+required	semantics/tp4_allreduce_decode_m16.eager.nondefault	0	2026-07-22T17:44:59.816440281Z	2026-07-22T17:45:18.213213750Z	/tmp/tp_allreduce_reachability_20260722T172535Z/semantics/tp4_allreduce_decode_m16.eager.nondefault.log
+required	semantics/tp4_allreduce_decode_m16.cuda_graph.nondefault	120	2026-07-22T17:45:18.215984979Z	2026-07-22T17:45:36.030801403Z	/tmp/tp_allreduce_reachability_20260722T172535Z/semantics/tp4_allreduce_decode_m16.cuda_graph.nondefault.log
+required	semantics/tp4_allreduce_decode_m32.eager.default	120	2026-07-22T17:45:36.033695654Z	2026-07-22T17:45:53.492769972Z	/tmp/tp_allreduce_reachability_20260722T172535Z/semantics/tp4_allreduce_decode_m32.eager.default.log

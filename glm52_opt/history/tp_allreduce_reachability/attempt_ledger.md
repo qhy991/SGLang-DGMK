@@ -43,6 +43,67 @@ timing:
 Failed and ABI-incompatible attempts are evidence. Keep them; do not rewrite
 them as absent or successful.
 
+## Infrastructure attempt P-1: CPU-barrier start alignment
+
+- Status: **REJECTED AND ABORTED BEFORE BASELINES** on 2026-07-22.
+- Identity: Harness `4c58357c2d7142f2160dd6674e8dde002ddc64e0`,
+  SGLang `e2ce8e099e7a279e30e6d72fd4e2fe056299204a`, TP4 BF16 direct
+  coordinator diagnostics on four B200s. Immutable partial artifacts and
+  manifest: [runtime/tp_allreduce_reachability_20260722T172535Z_aborted_alignment](runtime/tp_allreduce_reachability_20260722T172535Z_aborted_alignment/).
+- Hypothesis: synchronizing each selected stream and then entering a blocking
+  TP CPU-group barrier would align the four CUDA start-event records closely
+  enough for rank-max collective timing.
+- Exact delta: no backend/candidate delta; this tested the then-current timing
+  infrastructure with stock `SGLANG_GLM52_OPT=0`.
+- Correctness/reachability: the three trace runs and two completed M16 semantic
+  runs passed exact values, alias/poststate, source immutability, stream
+  readiness, and trace-hook checks. Decode capture selected custom AllReduce V2
+  `ONE_SHOT_PUSH`; prefill selected c10d `SUM` because the 96 MiB message was
+  outside custom-AR eligibility.
+- Failure evidence: 10 of 23 persisted samples exceeded the unchanged 500,000
+  ns rank-start-envelope gate. M16 graph trace was 366,165 ns; M32 graph trace
+  448,246 ns; prefill eager trace 690,673 ns; M16 eager/default failed 7/10
+  (max 874,754 ns); M16 eager/nondefault failed 2/10 (max 616,768 ns).
+  Individual host brackets were only 48--108 us, so the excess was inter-rank
+  enqueue skew rather than `start.record` call duration. Two later required
+  steps have exit 120 because the campaign was deliberately terminated.
+- Performance/profiler: ineligible and not cited. No baseline, paired, backend,
+  producer, or Nsight result was allowed to proceed.
+- Risk/decision/rollback: a 0.55--0.87 ms rank launch skew can dominate decode
+  latency and invalidate rank-max comparison. The run was stopped and stock
+  remained active. Rollback point is Harness `4c58357`; the replacement timing
+  mechanism was required to retain the strict evidence gate.
+
+## Infrastructure attempt P0: common scheduled-start deadline
+
+- Status: **VALIDATED FOR CAMPAIGN USE; NOT A BACKEND PERFORMANCE RESULT** on
+  2026-07-22.
+- Identity: Harness `46ba02607b54f62cdef5a43c99e558b12b545aa6`, SGLang
+  `ccf6d059350afbc56c39f8722df0b90871e8bdd4`, TP4 BF16; raw results and
+  manifest: [runtime/tp_allreduce_alignment_probe_20260722T175813Z](runtime/tp_allreduce_alignment_probe_20260722T175813Z/).
+- Hypothesis: after restoration and selected-stream synchronization, gathering
+  same-host monotonic arrival timestamps, choosing `max(arrivals)+5 ms`, and
+  busy-waiting to that common target will remove CPU barrier-return skew while
+  keeping all synchronization outside CUDA-event timing.
+- Exact delta: Harness commit `46ba026` persists four arrivals, four identical
+  targets, and four host record brackets per sample. Analyzer commit `ccf6d059`
+  rederives the target, forbids pre-target records, rederives the envelope, and
+  retains the 500,000 ns cap. The deliberate wait remains inside the outer
+  profiler NVTX range and must be labeled, not attributed to a backend.
+- Correctness/contracts: exact correctness passed for 50 M16 graph/nondefault,
+  50 M32 graph/nondefault, and 50 prefill eager/nondefault stock samples.
+  Every recorded target equaled `max(arrivals)+5,000,000 ns`; no pre-target
+  start was observed.
+- Alignment distribution: zero of 150 samples exceeded 500,000 ns. Median/max
+  envelopes were 46,636/300,981 ns for M16, 54,577/447,884 ns for M32, and
+  55,290/445,848 ns for prefill.
+- Performance/profiler: reference-only probe latencies are deliberately not a
+  baseline or speedup claim; no Nsight profile was collected.
+- Risk/decision/rollback: ordinary scheduler preemption can still miss a target,
+  so every full-campaign sample remains fail-closed on its actual envelope. The
+  mechanism is accepted only as measurement infrastructure for the next clean
+  campaign; it does not alter SGLang backend dispatch or stock fallback.
+
 ## Planned attempt A0: stock reachability and reference characterization
 
 - Status: PENDING
