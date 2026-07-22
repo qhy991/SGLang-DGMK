@@ -56,8 +56,17 @@ COMPUTE_QUERY=(
   --query-compute-apps=timestamp,gpu_uuid,pid,process_name,used_gpu_memory
   --format=csv
 )
-if ! compute_snapshot="$("${COMPUTE_QUERY[@]}")"; then
+if ! compute_snapshot="$(
+  timeout --signal=TERM --kill-after=5s 30s "${COMPUTE_QUERY[@]}"
+)"; then
   echo "failed to query physical GPU compute processes" >&2
+  exit 3
+fi
+EXPECTED_COMPUTE_HEADER='timestamp, gpu_uuid, pid, process_name, used_gpu_memory [MiB]'
+compute_header="$(printf '%s\n' "$compute_snapshot" | sed -n '1p')"
+if [[ "$compute_header" != "$EXPECTED_COMPUTE_HEADER" ]]; then
+  printf '%s\n' "$compute_snapshot" >&2
+  echo "unexpected nvidia-smi compute-process schema" >&2
   exit 3
 fi
 compute_rows="$(
@@ -130,11 +139,8 @@ export SGLANG_ROOT="$SGLANG"
 export KERNEL_HARNESS_PYTHON="$HARNESS/.venv/bin/python"
 export PYTHONPATH="$SGLANG/python:$HARNESS:${PYTHONPATH:-}"
 export SGLANG_GLM52_OPT=0
-# Production model_runner sets LOCAL_SIZE explicitly.  torchrun only supplies
-# LOCAL_WORLD_SIZE, so freeze the production selector metadata for this direct
-# coordinator diagnostic instead of accepting GroupCoordinator's zero default.
-export LOCAL_SIZE=4
 unset \
+  LOCAL_SIZE \
   SGLANG_ALL_REDUCE_TRACE \
   SGLANG_OPT_USE_CUSTOM_ALL_REDUCE_V2 \
   NCCL_ALGO \
@@ -158,18 +164,7 @@ run_step required environment/source_identity \
   bash -c 'git -C "$1" status --short; git -C "$1" rev-parse HEAD; git -C "$2" status --short; git -C "$2" rev-parse HEAD' \
   _ "$HARNESS" "$SGLANG"
 run_step required environment/compute_processes_before \
-  bash -c '
-    set -euo pipefail
-    snapshot="$(nvidia-smi \
-      --query-compute-apps=timestamp,gpu_uuid,pid,process_name,used_gpu_memory \
-      --format=csv)"
-    printf "%s\n" "$snapshot"
-    [[ -z "$(printf "%s\n" "$snapshot" | tail -n +2 | sed "/^[[:space:]]*$/d")" ]]
-  '
-if [[ "$REQUIRED_FAILED" -ne 0 ]]; then
-  echo "physical GPUs became busy during the locked preflight" >&2
-  exit 75
-fi
+  bash -c 'printf "%s\n" "$1"' _ "$compute_snapshot"
 run_step required environment/check_env \
   "$HARNESS/.venv/bin/python" "$HARNESS/testbench/bin/check_env.py"
 run_step required environment/nvidia_smi \

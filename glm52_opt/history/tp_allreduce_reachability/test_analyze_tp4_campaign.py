@@ -28,13 +28,13 @@ def _sample(index: int, position: int) -> dict:
         "sample_index": index,
         "position": position,
         "variant": index % 2,
-        "launch_timestamp_ns_by_rank": [
-            1_000_000_000,
-            1_000_000_100,
-            1_000_000_200,
-            1_000_000_300,
+        "start_record_bracket_ns_by_rank": [
+            [1_000_000_000, 1_000_000_010],
+            [1_000_000_100, 1_000_000_110],
+            [1_000_000_200, 1_000_000_210],
+            [1_000_000_300, 1_000_000_310],
         ],
-        "launch_timestamp_span_ns": 300,
+        "start_record_envelope_span_ns": 310,
         "readiness_probe_exact": True,
         "collective_only": {
             "local_ms": 1.0,
@@ -124,15 +124,17 @@ class TestCampaignAnalyzer(unittest.TestCase):
         )
 
         misaligned = copy.deepcopy(result)
-        misaligned["raw_samples"]["reference"][0]["launch_timestamp_ns_by_rank"] = [
-            1_000_000_000,
-            1_000_000_100,
-            1_000_000_200,
-            1_000_600_001,
+        misaligned["raw_samples"]["reference"][0][
+            "start_record_bracket_ns_by_rank"
+        ] = [
+            [1_000_000_000, 1_000_000_010],
+            [1_000_000_100, 1_000_000_110],
+            [1_000_000_200, 1_000_000_210],
+            [1_000_600_001, 1_000_600_011],
         ]
         misaligned["raw_samples"]["reference"][0][
-            "launch_timestamp_span_ns"
-        ] = 600_001
+            "start_record_envelope_span_ns"
+        ] = 600_011
         with self.assertRaisesRegex(ValueError, "exceeds 500000"):
             ANALYZER.Analyzer._sample_values(
                 misaligned, "reference", "ready_region"
@@ -260,9 +262,31 @@ Legend:\n  OK = Status Ok
                 {error["code"] for error in duplicate_rank.errors},
             )
 
-    def test_campaign_freezes_production_local_size_and_checks_idle_first(self):
+            (environment / "p2p_capability.log").write_text(
+                p2p_text.replace(" GPU0 GPU1 GPU2 GPU3\n", "", 1),
+                encoding="utf-8",
+            )
+            missing_header = ANALYZER.Analyzer(root)
+            missing_header.validate_environment_evidence()
+            self.assertIn(
+                "p2p_capability_header_mismatch",
+                {error["code"] for error in missing_header.errors},
+            )
+
+            (environment / "p2p_capability.log").write_text(
+                p2p_text + f"capability=n\n{matrix}", encoding="utf-8"
+            )
+            duplicate_capability = ANALYZER.Analyzer(root)
+            duplicate_capability.validate_environment_evidence()
+            self.assertIn(
+                "p2p_capability_section_mismatch",
+                {error["code"] for error in duplicate_capability.errors},
+            )
+
+    def test_campaign_freezes_gpu_local_size_default_and_checks_idle_first(self):
         source = (HERE / "run_locked_tp4_campaign.sh").read_text(encoding="utf-8")
-        self.assertIn("export LOCAL_SIZE=4", source)
+        self.assertNotIn("export LOCAL_SIZE", source)
+        self.assertIn("unset \\\n  LOCAL_SIZE", source)
         self.assertIn("physical GPUs are busy despite a valid scheduler lock receipt", source)
         self.assertLess(
             source.index("compute_snapshot="),

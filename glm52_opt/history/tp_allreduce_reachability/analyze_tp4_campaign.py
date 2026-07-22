@@ -466,17 +466,33 @@ class Analyzer:
         try:
             text = p2p_path.read_text(encoding="utf-8", errors="replace")
             text = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text)
+            capability_markers = re.findall(
+                r"^capability=([rwn])\s*$", text, flags=re.MULTILINE
+            )
             sections = re.split(r"^capability=([rwn])\s*$", text, flags=re.MULTILINE)
             observed_sections: dict[str, str] = {}
             for index in range(1, len(sections), 2):
                 observed_sections[sections[index]] = sections[index + 1]
-            if set(observed_sections) != {"r", "w", "n"}:
+            if capability_markers != ["r", "w", "n"]:
                 self.error(
                     "p2p_capability_section_mismatch",
                     "environment/p2p_capability.log",
-                    repr(sorted(observed_sections)),
+                    repr(capability_markers),
                 )
             for capability, section in observed_sections.items():
+                header_count = len(
+                    re.findall(
+                        r"^\s*GPU0\s+GPU1\s+GPU2\s+GPU3\s*$",
+                        section,
+                        flags=re.MULTILINE,
+                    )
+                )
+                if header_count != 1:
+                    self.error(
+                        "p2p_capability_header_mismatch",
+                        "environment/p2p_capability.log",
+                        f"capability={capability}, header_count={header_count}",
+                    )
                 matrix_rows: dict[int, list[str]] = {}
                 for match in re.finditer(
                     r"^\s*GPU([0-3])\s+(.+)$", section, flags=re.MULTILINE
@@ -651,7 +667,9 @@ class Analyzer:
             expected = {
                 "group_ranks": [0, 1, 2, 3],
                 "world_size": 4,
-                "local_size": 4,
+                # GPU production leaves LOCAL_SIZE unset; it is a CPU shared-
+                # memory hint, so GroupCoordinator records its zero default.
+                "local_size": 0,
                 "shape": [case.rows, 6144],
                 "stride": [6144, 1],
                 "dtype": "torch.bfloat16",
@@ -878,8 +896,8 @@ class Analyzer:
             ),
             "rank_start_alignment": (
                 "selected stream synchronized after restoration; blocking TP "
-                "CPU-group barrier; host launch timestamp recorded immediately "
-                "before every start event"
+                "CPU-group barrier; host timestamps bracket every start-event "
+                "record call"
             ),
         }
         if not isinstance(timing, dict):
@@ -1622,34 +1640,42 @@ class Analyzer:
                 raise ValueError(
                     f"raw_samples.{side}[{index}].readiness_probe_exact is not true"
                 )
-            launch_timestamps = sample.get("launch_timestamp_ns_by_rank")
-            launch_span = sample.get("launch_timestamp_span_ns")
+            start_brackets = sample.get("start_record_bracket_ns_by_rank")
+            start_envelope_span = sample.get("start_record_envelope_span_ns")
             if (
-                not isinstance(launch_timestamps, list)
-                or len(launch_timestamps) != 4
+                not isinstance(start_brackets, list)
+                or len(start_brackets) != 4
                 or any(
-                    not isinstance(value, int)
-                    or isinstance(value, bool)
-                    or value <= 0
-                    for value in launch_timestamps
+                    not isinstance(bracket, list)
+                    or len(bracket) != 2
+                    or any(
+                        not isinstance(value, int)
+                        or isinstance(value, bool)
+                        or value <= 0
+                        for value in bracket
+                    )
+                    or bracket[1] < bracket[0]
+                    for bracket in start_brackets
                 )
-                or not isinstance(launch_span, int)
-                or isinstance(launch_span, bool)
-                or launch_span < 0
+                or not isinstance(start_envelope_span, int)
+                or isinstance(start_envelope_span, bool)
+                or start_envelope_span < 0
             ):
                 raise ValueError(
-                    f"raw_samples.{side}[{index}] has invalid host launch timestamps"
+                    f"raw_samples.{side}[{index}] has invalid start-record brackets"
                 )
-            derived_launch_span = max(launch_timestamps) - min(launch_timestamps)
-            if launch_span != derived_launch_span:
+            derived_start_envelope_span = max(
+                bracket[1] for bracket in start_brackets
+            ) - min(bracket[0] for bracket in start_brackets)
+            if start_envelope_span != derived_start_envelope_span:
                 raise ValueError(
-                    f"raw_samples.{side}[{index}].launch_timestamp_span_ns "
-                    f"{launch_span} != {derived_launch_span}"
+                    f"raw_samples.{side}[{index}].start_record_envelope_span_ns "
+                    f"{start_envelope_span} != {derived_start_envelope_span}"
                 )
-            if launch_span > 500_000:
+            if start_envelope_span > 500_000:
                 raise ValueError(
-                    f"raw_samples.{side}[{index}].launch_timestamp_span_ns "
-                    f"{launch_span} exceeds 500000"
+                    f"raw_samples.{side}[{index}].start_record_envelope_span_ns "
+                    f"{start_envelope_span} exceeds 500000"
                 )
             parsed_metrics: dict[str, tuple[float, list[float]]] = {}
             for metric_name in ("collective_only", "ready_region"):
