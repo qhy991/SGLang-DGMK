@@ -467,9 +467,11 @@ class Analyzer:
             text = p2p_path.read_text(encoding="utf-8", errors="replace")
             text = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text)
             capability_markers = re.findall(
-                r"^capability=([rwn])\s*$", text, flags=re.MULTILINE
+                r"^capability=([^\s]+)\s*$", text, flags=re.MULTILINE
             )
-            sections = re.split(r"^capability=([rwn])\s*$", text, flags=re.MULTILINE)
+            sections = re.split(
+                r"^capability=([^\s]+)\s*$", text, flags=re.MULTILINE
+            )
             observed_sections: dict[str, str] = {}
             for index in range(1, len(sections), 2):
                 observed_sections[sections[index]] = sections[index + 1]
@@ -480,12 +482,16 @@ class Analyzer:
                     repr(capability_markers),
                 )
             for capability, section in observed_sections.items():
-                header_count = len(
-                    re.findall(
-                        r"^\s*GPU0\s+GPU1\s+GPU2\s+GPU3\s*$",
-                        section,
-                        flags=re.MULTILINE,
-                    )
+                header_pattern = re.compile(
+                    r"^GPU0\s+GPU1\s+GPU2\s+GPU3$"
+                )
+                gpu_lines = [
+                    line.strip()
+                    for line in section.splitlines()
+                    if line.strip().startswith("GPU")
+                ]
+                header_count = sum(
+                    header_pattern.fullmatch(line) is not None for line in gpu_lines
                 )
                 if header_count != 1:
                     self.error(
@@ -494,22 +500,33 @@ class Analyzer:
                         f"capability={capability}, header_count={header_count}",
                     )
                 matrix_rows: dict[int, list[str]] = {}
-                for match in re.finditer(
-                    r"^\s*GPU([0-3])\s+(.+)$", section, flags=re.MULTILINE
-                ):
+                for line in gpu_lines:
+                    if header_pattern.fullmatch(line) is not None:
+                        continue
+                    match = re.fullmatch(r"GPU([0-3])\s+(.+)", line)
+                    if match is None:
+                        self.error(
+                            "p2p_capability_unexpected_gpu_row",
+                            "environment/p2p_capability.log",
+                            f"capability={capability}, row={line!r}",
+                        )
+                        continue
                     rank = int(match.group(1))
                     fields = match.group(2).split()
-                    # The column header also starts with GPU0 but has only
-                    # three trailing GPU labels.  Accept only exact matrix
-                    # rows and retain rank identity for diagonal validation.
-                    if len(fields) == 4:
-                        if rank in matrix_rows:
-                            self.error(
-                                "p2p_capability_duplicate_rank",
-                                "environment/p2p_capability.log",
-                                f"capability={capability}, rank={rank}",
-                            )
-                        matrix_rows[rank] = fields
+                    if len(fields) != 4:
+                        self.error(
+                            "p2p_capability_malformed_rank_row",
+                            "environment/p2p_capability.log",
+                            f"capability={capability}, row={line!r}",
+                        )
+                        continue
+                    if rank in matrix_rows:
+                        self.error(
+                            "p2p_capability_duplicate_rank",
+                            "environment/p2p_capability.log",
+                            f"capability={capability}, rank={rank}",
+                        )
+                    matrix_rows[rank] = fields
                 ok_count = sum(
                     field == "OK"
                     for fields in matrix_rows.values()

@@ -283,6 +283,29 @@ Legend:\n  OK = Status Ok
                 {error["code"] for error in duplicate_capability.errors},
             )
 
+            (environment / "p2p_capability.log").write_text(
+                p2p_text.replace(
+                    "GPU0 X OK OK OK", "GPU0 X OK OK OK EXTRA", 1
+                ),
+                encoding="utf-8",
+            )
+            malformed_row = ANALYZER.Analyzer(root)
+            malformed_row.validate_environment_evidence()
+            self.assertIn(
+                "p2p_capability_malformed_rank_row",
+                {error["code"] for error in malformed_row.errors},
+            )
+
+            (environment / "p2p_capability.log").write_text(
+                p2p_text + f"capability=x\n{matrix}", encoding="utf-8"
+            )
+            unknown_capability = ANALYZER.Analyzer(root)
+            unknown_capability.validate_environment_evidence()
+            self.assertIn(
+                "p2p_capability_section_mismatch",
+                {error["code"] for error in unknown_capability.errors},
+            )
+
     def test_campaign_freezes_gpu_local_size_default_and_checks_idle_first(self):
         source = (HERE / "run_locked_tp4_campaign.sh").read_text(encoding="utf-8")
         self.assertNotIn("export LOCAL_SIZE", source)
