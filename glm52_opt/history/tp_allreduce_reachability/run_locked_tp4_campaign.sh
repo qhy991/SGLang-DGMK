@@ -109,6 +109,20 @@ export PYTHONPATH="$SGLANG/python:$HARNESS:${PYTHONPATH:-}"
 export SGLANG_GLM52_OPT=0
 unset SGLANG_ALL_REDUCE_TRACE
 
+run_step required environment/lock_receipt \
+  bash -c '
+    set -euo pipefail
+    printf "CUDA_VISIBLE_DEVICES=%s\n" "${CUDA_VISIBLE_DEVICES:-}"
+    [[ "${CUDA_VISIBLE_DEVICES:-}" == "0,1,2,3" ]]
+    for pair in 9:gpu0.lock 10:gpu1.lock 11:gpu2.lock 12:gpu3.lock; do
+      fd="${pair%%:*}"
+      lock_name="${pair#*:}"
+      actual="$(readlink "/proc/$$/fd/$fd")"
+      printf "fd=%s expected=%s/%s actual=%s\n" \
+        "$fd" "$1" "$lock_name" "$actual"
+      [[ "$actual" == "$1/$lock_name" ]]
+    done
+  ' _ "$LOCK_ROOT"
 run_step required environment/source_identity \
   bash -c 'git -C "$1" status --short; git -C "$1" rev-parse HEAD; git -C "$2" status --short; git -C "$2" rev-parse HEAD' \
   _ "$HARNESS" "$SGLANG"
@@ -117,7 +131,19 @@ run_step required environment/check_env \
 run_step required environment/nvidia_smi \
   nvidia-smi --query-gpu=index,uuid,name,pci.bus_id,clocks.current.sm,clocks.current.memory,power.draw,temperature.gpu \
   --format=csv
+run_step required environment/compute_processes_before \
+  nvidia-smi \
+  --query-compute-apps=timestamp,gpu_uuid,pid,process_name,used_gpu_memory \
+  --format=csv
 run_step required environment/topology nvidia-smi topo -m
+run_step required environment/p2p_capability \
+  bash -c '
+    set -euo pipefail
+    for capability in r w n; do
+      printf "capability=%s\n" "$capability"
+      nvidia-smi topo -p2p "$capability"
+    done
+  '
 run_step required environment/nvlink_status nvidia-smi nvlink --status
 run_step required environment/nvlink_throughput_before nvidia-smi nvlink --getthroughput d
 require_phase environment
@@ -319,6 +345,10 @@ require_phase candidate_profile
 run_step required environment/nvlink_throughput_after nvidia-smi nvlink --getthroughput d
 run_step required environment/nvidia_smi_after \
   nvidia-smi --query-gpu=index,uuid,clocks.current.sm,clocks.current.memory,power.draw,temperature.gpu \
+  --format=csv
+run_step required environment/compute_processes_after \
+  nvidia-smi \
+  --query-compute-apps=timestamp,gpu_uuid,pid,process_name,used_gpu_memory \
   --format=csv
 run_step required environment/source_identity_after \
   bash -c 'for repo in "$1" "$2"; do status="$(git -C "$repo" status --porcelain=v1)"; printf "%s\n%s\n" "$repo" "$status"; [[ -z "$status" ]] || exit 1; git -C "$repo" rev-parse HEAD; done' \

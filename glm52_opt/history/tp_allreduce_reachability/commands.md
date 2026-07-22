@@ -18,7 +18,9 @@ artifacts into this history directory only after every measurement completes.
 
 The single lock acquisition runs, in order:
 
-1. repository/stack checks, four B200 identities, topology, and NVLink state;
+1. inherited-lock receipt, repository/stack checks, pre-run compute-process
+   snapshot, four B200 identities, topology, P2P read/write/NVLink capability,
+   and NVLink state;
 2. short M16, M32, and prefill coordinator traces;
 3. eager/default, eager/nondefault, and graph/nondefault exact semantic checks;
 4. three uncontended rank-max baselines per shape;
@@ -26,32 +28,84 @@ The single lock acquisition runs, in order:
 6. the upstream SGLang backend sweep as performance-only scouting;
 7. single-GPU production-ABI O-projection measurements while retaining the lock;
 8. full-lifecycle Nsight Systems captures for all three stock shapes and every
-   ABI-compatible c10d attempt, with a rank-0 process-tree NVTX range spanning
-   synchronized work from all four ranks inside each report; and
-9. final NVLink counters, clocks, power, and per-step exit status.
+   ABI-compatible c10d attempt; and
+9. final NVLink counters, clocks, power, compute-process snapshot, and per-step
+   exit status.
 
 `SGLANG_ALL_REDUCE_TRACE` is import-time gated and appears only in the short
 reachability runs. The benchmark marks those timings ineligible. Python can see
 eager dispatch or CUDA Graph capture, but not replay; the Nsight reports use the
 runner's stable measured-only NVTX range and kernel names to establish replay.
+Only rank 0 owns that NVTX range. CPU-group barriers make it a wall-clock bracket
+around all four ranks' measured work, but it is not a process-scoped NVTX
+enclosure for ranks 1-3. Process-tree CUDA traces and timestamps are therefore
+required when attributing the other ranks.
 
 After the GPU lock is released, generate text profiler tables without CUDA:
 
 ```bash
+set -euo pipefail
 OUT=/tmp/tp_allreduce_reachability_20260722T120000Z
+STATS_STATUS="$OUT/profile/stats_status.tsv"
+printf 'report\texit_code\tlog\n' >"$STATS_STATUS"
+
+for name in m16 m32 prefill; do
+  test -s "$OUT/profile/$name.nsys-rep"
+done
+
 for name in m16 m32 prefill m16_c10d m32_c10d prefill_c10d; do
-  [[ -f "$OUT/profile/$name.nsys-rep" ]] || continue
+  REPORT="$OUT/profile/$name.nsys-rep"
+  LOG="$OUT/profile/$name.stats.log"
+  [[ -s "$REPORT" ]] || continue
+  set +e
   nsys stats --force-export=true \
-    --report cuda_gpu_kern_sum,cuda_api_sum,cuda_kern_exec_sum,nvtx_pushpop_sum \
-    --format csv --output - \
-    "$OUT/profile/$name.nsys-rep" \
-    >"$OUT/profile/$name.stats.log" 2>&1
+    --report cuda_gpu_kern_sum,cuda_api_sum,cuda_kern_exec_sum,nvtx_pushpop_sum,nvtx_kern_sum,nvtx_gpu_proj_sum \
+    --format csv --output - "$REPORT" >"$LOG" 2>&1
+  RC=$?
+  set -e
+  printf '%s\t%s\t%s\n' "$name" "$RC" "$LOG" >>"$STATS_STATUS"
+  test "$RC" -eq 0
+  test -s "$LOG"
 done
 
 python3 \
   /home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/sglang/glm52_opt/history/tp_allreduce_reachability/analyze_tp4_campaign.py \
   "$OUT" --output "$OUT/summary.json" \
   >"$OUT/analyzer.stdout.json"
+cmp "$OUT/summary.json" "$OUT/analyzer.stdout.json"
+```
+
+`nsys stats --force-export=true` may also create SQLite intermediates. They are
+included below so the archive is an exact copy of the analyzed campaign rather
+than an undocumented subset. Archive only after the analyzer exits zero. The
+destination must not already exist; the manifest covers every copied file except
+the manifest itself and is verified before any evidence commit:
+
+```bash
+set -euo pipefail
+OUT=/tmp/tp_allreduce_reachability_20260722T120000Z
+SGLANG=/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/sglang
+CAMPAIGN_ID="$(basename "$OUT")"
+ARCHIVE_PARENT="$SGLANG/glm52_opt/history/tp_allreduce_reachability/runtime"
+ARCHIVE="$ARCHIVE_PARENT/$CAMPAIGN_ID"
+
+[[ "$CAMPAIGN_ID" == tp_allreduce_reachability_* ]]
+test -s "$OUT/summary.json"
+test ! -e "$ARCHIVE"
+mkdir -p "$ARCHIVE_PARENT"
+mkdir "$ARCHIVE"
+cp -a -- "$OUT/." "$ARCHIVE/"
+(
+  cd "$ARCHIVE"
+  find . -type f ! -name SHA256SUMS -print0 \
+    | LC_ALL=C sort -z \
+    | xargs -0 -r sha256sum
+) >"$ARCHIVE/SHA256SUMS"
+(
+  cd "$ARCHIVE"
+  sha256sum --check SHA256SUMS
+)
+git -C "$SGLANG" status --short -- "$ARCHIVE"
 ```
 
 ## Preserved external TP8 production gate

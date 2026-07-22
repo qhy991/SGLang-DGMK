@@ -1,0 +1,222 @@
+#!/usr/bin/env python3
+"""CPU-only corruption tests for the TP4 campaign analyzer."""
+
+from __future__ import annotations
+
+import contextlib
+import copy
+import importlib.util
+import io
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+
+HERE = Path(__file__).resolve().parent
+SPEC = importlib.util.spec_from_file_location(
+    "tp_allreduce_campaign_analyzer", HERE / "analyze_tp4_campaign.py"
+)
+assert SPEC is not None and SPEC.loader is not None
+ANALYZER = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = ANALYZER
+SPEC.loader.exec_module(ANALYZER)
+
+
+def _sample(index: int, position: int) -> dict:
+    return {
+        "sample_index": index,
+        "position": position,
+        "variant": index % 2,
+        "readiness_probe_exact": True,
+        "collective_only": {
+            "local_ms": 1.0,
+            "rank_ms": [1.0, 1.1, 1.2, 1.3],
+            "rank_max_ms": 1.3,
+        },
+        "ready_region": {
+            "local_ms": 1.1,
+            "rank_ms": [1.1, 1.2, 1.3, 1.4],
+            "rank_max_ms": 1.4,
+        },
+    }
+
+
+class TestCampaignAnalyzer(unittest.TestCase):
+    def test_selector_priority_is_replayed_from_predicates(self):
+        predicates = {key: False for key in ANALYZER.TRACE_PREDICATE_KEYS}
+        predicates.update(custom_eligible=True, pynccl_inplace_eligible=True)
+        self.assertEqual(
+            ANALYZER.selected_backend_from_predicates(predicates),
+            "custom_all_reduce_outplace",
+        )
+        predicates["pynccl_symmetric_eligible"] = True
+        self.assertEqual(
+            ANALYZER.selected_backend_from_predicates(predicates),
+            "pynccl_symmetric_inplace",
+        )
+
+    def test_graph_dispatch_comparison_ignores_eager_prewarm(self):
+        graph_case = ANALYZER.CASES[0]
+        eager_case = ANALYZER.CASES[2]
+        self.assertFalse(
+            ANALYZER.trace_record_matches_selected_execution(graph_case, False)
+        )
+        self.assertTrue(
+            ANALYZER.trace_record_matches_selected_execution(graph_case, True)
+        )
+        self.assertTrue(
+            ANALYZER.trace_record_matches_selected_execution(eager_case, False)
+        )
+        self.assertFalse(
+            ANALYZER.trace_record_matches_selected_execution(eager_case, True)
+        )
+
+    def test_rank_max_and_alternating_order_are_rederived(self):
+        result = {
+            "raw_samples": {
+                "rank_order": [0, 1, 2, 3],
+                "measured_order": [
+                    ["reference", "candidate"],
+                    ["candidate", "reference"],
+                ],
+                "reference": [_sample(0, 0), _sample(1, 1)],
+                "candidate": [_sample(0, 1), _sample(1, 0)],
+            }
+        }
+        self.assertEqual(
+            ANALYZER.Analyzer._sample_values(
+                result, "candidate", "collective_only"
+            ),
+            [1.3, 1.3],
+        )
+
+        corrupted = copy.deepcopy(result)
+        corrupted["raw_samples"]["candidate"][0]["ready_region"][
+            "rank_max_ms"
+        ] = 1.3
+        with self.assertRaisesRegex(ValueError, "rank_max_ms"):
+            ANALYZER.Analyzer._sample_values(
+                corrupted, "candidate", "ready_region"
+            )
+
+    def test_single_sided_reference_order_is_accepted(self):
+        result = {
+            "raw_samples": {
+                "rank_order": [0, 1, 2, 3],
+                "measured_order": [["reference"]],
+                "reference": [_sample(0, 0)],
+                "candidate": None,
+            }
+        }
+        self.assertEqual(
+            ANALYZER.Analyzer._sample_values(
+                result, "reference", "ready_region"
+            ),
+            [1.4],
+        )
+
+    def test_reference_alias_contract_must_match_all_ranks(self):
+        case = ANALYZER.CASES[0]
+        contracts = []
+        for rank in range(4):
+            contracts.append(
+                {
+                    "output": {
+                        "shape": [16, 6144],
+                        "stride": [6144, 1],
+                        "dtype": "torch.bfloat16",
+                        "device": f"cuda:{rank}",
+                    },
+                    "output_aliases_local": rank != 3,
+                    "local_poststate": "reduced" if rank != 3 else "source",
+                    "source_immutable": True,
+                    "exact_values": True,
+                }
+            )
+        analyzer = ANALYZER.Analyzer(Path("/tmp/unused-tp-campaign"))
+        analyzer.validate_reference_contracts(
+            {"reference_contract_by_rank": contracts}, case, "fixture"
+        )
+        self.assertIn(
+            "reference_alias_contract_differs_by_rank",
+            {error["code"] for error in analyzer.errors},
+        )
+
+    def test_unknown_profile_candidate_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "profile").mkdir()
+            (root / "profile/c10d_profile_selection.tsv").write_text(
+                "m16\t/tmp/not-a-candidate.py\t/tmp/m16_c10d_inplace.json\n",
+                encoding="utf-8",
+            )
+            analyzer = ANALYZER.Analyzer(root)
+            self.assertEqual(analyzer.load_profile_selection(), {})
+            self.assertIn(
+                "unknown_profile_candidate",
+                {error["code"] for error in analyzer.errors},
+            )
+
+    def test_lock_process_and_p2p_receipts_are_fail_closed(self):
+        matrix = """\
+ GPU0 X OK OK OK
+ GPU1 OK X OK OK
+ GPU2 OK OK X OK
+ GPU3 OK OK OK X
+Legend:\n  OK = Status Ok
+"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            environment = root / "environment"
+            environment.mkdir()
+            lock_lines = ["CUDA_VISIBLE_DEVICES=0,1,2,3"]
+            for rank in range(4):
+                path = f"/home/qinhaiyan/glm52-goal-runs/locks/gpu{rank}.lock"
+                lock_lines.append(
+                    f"fd={9 + rank} expected={path} actual={path}"
+                )
+            (environment / "lock_receipt.log").write_text(
+                "\n".join(lock_lines) + "\n", encoding="utf-8"
+            )
+            process_header = (
+                "timestamp, gpu_uuid, pid, process_name, used_gpu_memory [MiB]\n"
+            )
+            for phase in ("before", "after"):
+                (environment / f"compute_processes_{phase}.log").write_text(
+                    process_header, encoding="utf-8"
+                )
+            (environment / "p2p_capability.log").write_text(
+                "".join(f"capability={capability}\n{matrix}" for capability in "rwn"),
+                encoding="utf-8",
+            )
+            analyzer = ANALYZER.Analyzer(root)
+            summary = analyzer.validate_environment_evidence()
+            self.assertEqual(analyzer.errors, [])
+            self.assertEqual(
+                summary["p2p_full_mesh_directed_ok_edges"],
+                {"r": 12, "w": 12, "n": 12},
+            )
+
+            with (environment / "compute_processes_after.log").open(
+                "a", encoding="utf-8"
+            ) as output:
+                output.write(
+                    "2026/07/22 00:00:00.000, GPU-test, 123, python, 1 MiB\n"
+                )
+            corrupted = ANALYZER.Analyzer(root)
+            corrupted.validate_environment_evidence()
+            self.assertIn(
+                "unexpected_compute_process",
+                {error["code"] for error in corrupted.errors},
+            )
+
+    def test_help_is_successful(self):
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            self.assertEqual(ANALYZER.main(["--help"]), 0)
+        self.assertIn("campaign_root", stdout.getvalue())
+
+
+if __name__ == "__main__":
+    unittest.main()

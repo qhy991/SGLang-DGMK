@@ -6,9 +6,13 @@
   "source_identities": {
     "sglang_worktree": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/sglang",
     "sglang_commit": "f93f8867b4bc124c9809c9110ec7361ed11b6b4a",
+    "sglang_commit_role": "analysis_base",
+    "sglang_trace_instrumentation_head": "0b51106d8138e950add18b5ec9cf6915ab9d321e",
     "kernel_harness_worktree": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness",
     "kernel_harness_commit": "bcd005409e65786af82c86f621507ebef12b2766",
-    "commit_scope": "base commits at analysis start; tracing and exact graph-workload task changes were uncommitted during artifact generation and final evidence must record their landed commits",
+    "kernel_harness_commit_role": "analysis_base",
+    "kernel_harness_implementation_head": "799765caad984ac2a010f762adaa873a7374018d",
+    "commit_scope": "analysis-base commits are retained for source-map provenance; tracing and the exact TP4 graph workload are landed at the recorded implementation heads; later evidence-only analyzer/report commits and the actual final branch heads are recorded by the locked campaign without source drift",
     "target": "NVIDIA B200/SM100"
   },
   "public_architecture_facts": {
@@ -93,9 +97,9 @@
       "sources": [
         "docs_new/src/snippets/configs/zai-org/glm-5.2.jsx:299-319",
         "python/sglang/srt/arg_groups/overrides.py:2047-2051",
-        "python/sglang/srt/distributed/parallel_state.py:2141-2143",
-        "python/sglang/srt/distributed/parallel_state.py:2213-2215",
-        "python/sglang/srt/distributed/parallel_state.py:2244-2249"
+        "python/sglang/srt/distributed/parallel_state.py:2243-2245",
+        "python/sglang/srt/distributed/parallel_state.py:2313-2315",
+        "python/sglang/srt/distributed/parallel_state.py:2348-2353"
       ],
       "reachability": "SUM_LEN dense transitions can reach global-buffer Group AllReduce; MAX_LEN uses AllGather/reduce-scatter; DeepEP sparse regions are A2A"
     },
@@ -413,8 +417,8 @@
   },
   "dispatcher": {
     "symbol": "sglang.srt.distributed.parallel_state.GroupCoordinator.all_reduce",
-    "source": "python/sglang/srt/distributed/parallel_state.py:579-669",
-    "defaults_source": "python/sglang/srt/distributed/parallel_state.py:1814-1831",
+    "source": "python/sglang/srt/distributed/parallel_state.py:585-751",
+    "defaults_source": "python/sglang/srt/distributed/parallel_state.py:1914-1931",
     "default_flags": {
       "custom_all_reduce": true,
       "mscclpp_all_reduce": false,
@@ -432,7 +436,7 @@
         ],
         "output_alias": "input",
         "stream": "current device stream",
-        "source": "python/sglang/srt/distributed/parallel_state.py:622-634"
+        "source": "python/sglang/srt/distributed/parallel_state.py:669-687"
       },
       {
         "order": 2,
@@ -446,7 +450,8 @@
         "output_alias": "runtime-dependent: Custom AR V2 eager push/pull and two-shot alias input storage; graph-captured one-shot pull uses distinct empty_like output; Python object identity may still differ",
         "stream": "current/capture stream",
         "sources": [
-          "python/sglang/srt/distributed/parallel_state.py:637-643",
+          "python/sglang/srt/distributed/parallel_state.py:689-731",
+          "python/sglang/srt/distributed/parallel_state.py:828-853",
           "python/sglang/jit_kernel/csrc/distributed/custom_all_reduce_push.cuh:205-223",
           "python/sglang/jit_kernel/csrc/distributed/custom_all_reduce_pull.cuh:140-155"
         ]
@@ -462,7 +467,7 @@
         "output_alias": "distinct",
         "stream": "current/capture stream",
         "b200_eligibility": "unreachable because quick AR construction is HIP-only",
-        "source": "python/sglang/srt/distributed/parallel_state.py:644-649"
+        "source": "python/sglang/srt/distributed/parallel_state.py:697-731"
       },
       {
         "order": 4,
@@ -511,7 +516,7 @@
         ],
         "output_alias": "distinct",
         "stream": "current device stream",
-        "source": "python/sglang/srt/distributed/parallel_state.py:658-660"
+        "source": "python/sglang/srt/distributed/parallel_state.py:711-731"
       },
       {
         "order": 7,
@@ -523,7 +528,7 @@
         ],
         "output_alias": "input",
         "stream": "current device stream",
-        "source": "python/sglang/srt/distributed/parallel_state.py:773-785"
+        "source": "python/sglang/srt/distributed/parallel_state.py:855-885"
       }
     ],
     "custom_v2": {
@@ -562,7 +567,7 @@
       }
     },
     "graph_capture": {
-      "source": "python/sglang/srt/distributed/parallel_state.py:516-577",
+      "source": "python/sglang/srt/distributed/parallel_state.py:523-583",
       "contracts": [
         "capture stream waits for prior current stream",
         "custom communicator capture context is entered",

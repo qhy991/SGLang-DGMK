@@ -8,16 +8,21 @@ Source identities:
 
 - SGLang isolated worktree: `/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/sglang`
 - SGLang base commit at analysis start: `f93f8867b4bc124c9809c9110ec7361ed11b6b4a`
+- SGLang landed trace/campaign-audit implementation head before later
+  evidence-only hardening: `0b51106d8138e950add18b5ec9cf6915ab9d321e`
 - Kernel-Harness isolated worktree: `/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness`
 - Kernel-Harness base commit at analysis start: `bcd005409e65786af82c86f621507ebef12b2766`
+- Kernel-Harness landed pre-campaign head, including the exact TP4
+  diagnostic runner: `799765caad984ac2a010f762adaa873a7374018d`
 - Production target named by the goal: NVIDIA B200/SM100.
 
 This file records only conclusions supported by files in the two isolated
 repositories, plus the separately labeled public architecture config below.
-The worktrees also contain uncommitted task changes for tracing and exact graph
-workloads at artifact-generation time; final evidence must record the commits
-that land those changes. A public config fact is not used to assert a selected
-runtime backend without a hit counter/trace.
+The tracing, exact graph-workload, and campaign-audit implementation is landed
+at the heads recorded above. Subsequent analyzer/report hardening is
+evidence-only; the locked campaign records the actual final branch heads and
+rejects source drift before or during measurement. A public config fact is not
+used to assert a selected runtime backend without a hit counter/trace.
 
 ## Deployment lanes and process groups
 
@@ -41,19 +46,19 @@ An A2A backend spanning the model-parallel group forces `ep_size=tp_size`
 For the balanced/high-throughput recipe, source arithmetic therefore gives:
 
 - `attn_tp_size = tp_size / attn_cp_size / attn_dp_size = 8 / 1 / 8 = 1`
-  ([parallel_state.py lines 2141-2143](../../../python/sglang/srt/distributed/parallel_state.py#L2141)).
+  ([parallel_state.py lines 2243-2245](../../../python/sglang/srt/distributed/parallel_state.py#L2243)).
 - `moe_ep_size=8`; because it equals TP size, the MoE EP group aliases the TP
-  group ([parallel_state.py lines 2244-2249](../../../python/sglang/srt/distributed/parallel_state.py#L2244)).
+  group ([parallel_state.py lines 2348-2353](../../../python/sglang/srt/distributed/parallel_state.py#L2348)).
 - With repository defaults `moe_dp_size=1`, `moe_tp_size=8/8/1=1`
   ([server_args.py lines 926-932](../../../python/sglang/srt/server_args.py#L926),
-  [parallel_state.py lines 2213-2215](../../../python/sglang/srt/distributed/parallel_state.py#L2213)).
+  [parallel_state.py lines 2313-2315](../../../python/sglang/srt/distributed/parallel_state.py#L2313)).
 
 The full-world TP group is created with the default optional communicators
-([parallel_state.py lines 2077-2099](../../../python/sglang/srt/distributed/parallel_state.py#L2077)).
+([parallel_state.py lines 2177-2199](../../../python/sglang/srt/distributed/parallel_state.py#L2177)).
 A separate attention-TP group explicitly disables custom AR, MSCCL++, and torch
-symmetric-memory AR ([parallel_state.py lines 2179-2211](../../../python/sglang/srt/distributed/parallel_state.py#L2179)).
+symmetric-memory AR ([parallel_state.py lines 2279-2310](../../../python/sglang/srt/distributed/parallel_state.py#L2279)).
 A separate MoE-TP group explicitly disables PyNCCL and custom AR
-([parallel_state.py lines 2272-2298](../../../python/sglang/srt/distributed/parallel_state.py#L2272)).
+([parallel_state.py lines 2372-2398](../../../python/sglang/srt/distributed/parallel_state.py#L2372)).
 
 The model entry class `GlmMoeDsaForCausalLM` inherits the DeepSeek-V2 serving
 implementation ([glm4_moe.py lines 1466-1468](../../../python/sglang/srt/models/glm4_moe.py#L1466)).
@@ -312,9 +317,9 @@ the unfused Group call is reached.
 
 The user-facing coordinator decides in-place versus out-of-place before entering
 a registered custom op
-([parallel_state.py lines 162-180](../../../python/sglang/srt/distributed/parallel_state.py#L162)).
+([parallel_state.py lines 168-186](../../../python/sglang/srt/distributed/parallel_state.py#L168)).
 The exact priority is
-[parallel_state.py lines 579-669](../../../python/sglang/srt/distributed/parallel_state.py#L579):
+[parallel_state.py lines 585-751](../../../python/sglang/srt/distributed/parallel_state.py#L585):
 
 1. world-size-one bypass and non-CUDA platform paths;
 2. early in-place PyNCCL when NCCL symmetric memory is enabled and MSCCL++ did
@@ -327,7 +332,7 @@ The exact priority is
 8. registered in-place fallback.
 
 Concrete implementation symbols are selected at
-[parallel_state.py lines 746-785](../../../python/sglang/srt/distributed/parallel_state.py#L746):
+[parallel_state.py lines 828-885](../../../python/sglang/srt/distributed/parallel_state.py#L828):
 
 | Route | Concrete symbol | Output alias contract | Principal source predicates |
 |---|---|---|---|
@@ -341,7 +346,7 @@ Concrete implementation symbols are selected at
 | c10d | `torch.distributed.all_reduce` | aliases input | final eager fallback |
 
 Defaults are custom enabled, MSCCL++ disabled, and torch symmetric-memory AR
-disabled ([parallel_state.py lines 1814-1831](../../../python/sglang/srt/distributed/parallel_state.py#L1814));
+disabled ([parallel_state.py lines 1914-1931](../../../python/sglang/srt/distributed/parallel_state.py#L1914));
 server arguments set them before group creation
 ([model_runner.py lines 1251-1253](../../../python/sglang/srt/model_executor/model_runner.py#L1251)).
 
@@ -386,7 +391,7 @@ PyNCCL uses the current device stream for both in-place and out-of-place calls
 Graph capture switches to a capture stream only after that stream waits for the
 previous current stream, registers custom-AR capture state, and temporarily
 enables PyNCCL/MSCCL++
-([parallel_state.py lines 516-577](../../../python/sglang/srt/distributed/parallel_state.py#L516)).
+([parallel_state.py lines 523-583](../../../python/sglang/srt/distributed/parallel_state.py#L523)).
 Therefore backend, stream, capture state, and alias behavior are one combined
 ABI; an eager c10d comparison is not automatically the production reference.
 
