@@ -79,6 +79,14 @@ BACKEND_SCOUT_MESSAGE_SIZES = (
 )
 BACKEND_SCOUT_PROVIDERS = ("nccl", "aot", "jit", "fi")
 SCHEDULED_START_LEAD_NS = 5_000_000
+START_RECORD_ENVELOPE_LIMIT_NS = 500_000
+MAX_PAIR_ATTEMPTS = 10
+ALIGNMENT_ADMISSION_FIELDS = (
+    "scheduled_start_arrival_ns_by_rank",
+    "scheduled_start_target_ns_by_rank",
+    "start_record_bracket_ns_by_rank",
+    "start_record_envelope_span_ns",
+)
 BACKEND_SCOUT_HEADER = (
     "message_bytes",
     *(f"{provider}(us)" for provider in BACKEND_SCOUT_PROVIDERS),
@@ -2368,187 +2376,562 @@ class Analyzer:
         return summary
 
     @staticmethod
-    def _sample_values(result: dict[str, Any], side: str, metric: str) -> list[float]:
+    def _attempt_sample_audit(
+        sample: Any,
+        *,
+        side: str,
+        logical_pair_index: int,
+        position: int,
+        attempt_id: int,
+        retry_ordinal: int,
+        input_variant: int,
+    ) -> dict[str, Any]:
+        location = (
+            f"raw_samples.measurement_attempts[{attempt_id}].samples.{side}"
+        )
+        if not isinstance(sample, dict):
+            raise ValueError(f"{location} is not an object")
+        expected_sample_keys = {
+            "sample_index",
+            "position",
+            "variant",
+            "pair_attempt_id",
+            "pair_retry_ordinal",
+            "scheduled_start_arrival_ns_by_rank",
+            "scheduled_start_target_ns_by_rank",
+            "start_record_bracket_ns_by_rank",
+            "start_record_envelope_span_ns",
+            "readiness_probe_exact",
+            "collective_only",
+            "ready_region",
+        }
+        if set(sample) != expected_sample_keys:
+            raise ValueError(f"{location} schema mismatch: {sample!r}")
+        expected_scalars = {
+            "sample_index": logical_pair_index,
+            "position": position,
+            "variant": input_variant,
+            "pair_attempt_id": attempt_id,
+            "pair_retry_ordinal": retry_ordinal,
+        }
+        for key, expected in expected_scalars.items():
+            observed = sample.get(key)
+            if (
+                not isinstance(observed, int)
+                or isinstance(observed, bool)
+                or observed != expected
+            ):
+                raise ValueError(
+                    f"{location}.{key}: expected {expected!r}, got {observed!r}"
+                )
+        if sample.get("readiness_probe_exact") is not True:
+            raise ValueError(f"{location}.readiness_probe_exact is not true")
+
+        scheduled_arrivals = sample.get("scheduled_start_arrival_ns_by_rank")
+        scheduled_targets = sample.get("scheduled_start_target_ns_by_rank")
+        start_brackets = sample.get("start_record_bracket_ns_by_rank")
+        start_envelope_span = sample.get("start_record_envelope_span_ns")
+        if (
+            not isinstance(scheduled_arrivals, list)
+            or len(scheduled_arrivals) != 4
+            or any(
+                not isinstance(value, int)
+                or isinstance(value, bool)
+                or value <= 0
+                for value in scheduled_arrivals
+            )
+            or not isinstance(scheduled_targets, list)
+            or len(scheduled_targets) != 4
+            or any(
+                not isinstance(value, int)
+                or isinstance(value, bool)
+                or value <= 0
+                for value in scheduled_targets
+            )
+            or len(set(scheduled_targets)) != 1
+            or not isinstance(start_brackets, list)
+            or len(start_brackets) != 4
+            or any(
+                not isinstance(bracket, list)
+                or len(bracket) != 2
+                or any(
+                    not isinstance(value, int)
+                    or isinstance(value, bool)
+                    or value <= 0
+                    for value in bracket
+                )
+                or bracket[1] < bracket[0]
+                for bracket in start_brackets
+            )
+            or not isinstance(start_envelope_span, int)
+            or isinstance(start_envelope_span, bool)
+            or start_envelope_span < 0
+        ):
+            raise ValueError(
+                f"{location} has invalid scheduled-start targets or "
+                "start-record brackets"
+            )
+        derived_target = max(scheduled_arrivals) + SCHEDULED_START_LEAD_NS
+        if scheduled_targets[0] != derived_target:
+            raise ValueError(
+                f"{location} scheduled target {scheduled_targets[0]} != max "
+                f"arrival + {SCHEDULED_START_LEAD_NS} ({derived_target})"
+            )
+        if any(
+            bracket[0] < target
+            for bracket, target in zip(start_brackets, scheduled_targets)
+        ):
+            raise ValueError(f"{location} records before its scheduled target")
+        derived_start_envelope_span = max(
+            bracket[1] for bracket in start_brackets
+        ) - min(bracket[0] for bracket in start_brackets)
+        if start_envelope_span != derived_start_envelope_span:
+            raise ValueError(
+                f"{location}.start_record_envelope_span_ns "
+                f"{start_envelope_span} != {derived_start_envelope_span}"
+            )
+
+        parsed_metrics: dict[str, tuple[float, list[float]]] = {}
+        for metric_name in ("collective_only", "ready_region"):
+            metric_record = sample.get(metric_name)
+            if not isinstance(metric_record, dict) or set(metric_record) != {
+                "local_ms",
+                "rank_ms",
+                "rank_max_ms",
+            }:
+                raise ValueError(f"{location}.{metric_name} schema mismatch")
+            rank_values = metric_record.get("rank_ms")
+            if (
+                not isinstance(rank_values, list)
+                or len(rank_values) != 4
+                or any(
+                    not isinstance(value, (int, float))
+                    or isinstance(value, bool)
+                    for value in rank_values
+                )
+                or not isinstance(metric_record.get("local_ms"), (int, float))
+                or isinstance(metric_record.get("local_ms"), bool)
+                or not isinstance(metric_record.get("rank_max_ms"), (int, float))
+                or isinstance(metric_record.get("rank_max_ms"), bool)
+            ):
+                raise ValueError(
+                    f"{location}.{metric_name} values must be numeric with four ranks"
+                )
+            try:
+                rank_ms = [float(value) for value in rank_values]
+                local_ms = float(metric_record["local_ms"])
+                rank_max_ms = float(metric_record["rank_max_ms"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError(f"{location}.{metric_name}: {exc}") from exc
+            if any(not math.isfinite(value) or value <= 0 for value in rank_ms):
+                raise ValueError(
+                    f"{location}.{metric_name}.rank_ms must be finite and > 0"
+                )
+            if not math.isfinite(local_ms) or local_ms <= 0:
+                raise ValueError(
+                    f"{location}.{metric_name}.local_ms must be finite and > 0"
+                )
+            if not math.isclose(
+                local_ms, rank_ms[0], rel_tol=1e-12, abs_tol=1e-12
+            ):
+                raise ValueError(f"{location}.{metric_name}.local_ms != rank_ms[0]")
+            if not math.isclose(
+                rank_max_ms,
+                max(rank_ms),
+                rel_tol=1e-12,
+                abs_tol=1e-12,
+            ):
+                raise ValueError(
+                    f"{location}.{metric_name}.rank_max_ms != max(rank_ms)"
+                )
+            parsed_metrics[metric_name] = (rank_max_ms, rank_ms)
+        collective_rank = parsed_metrics["collective_only"][1]
+        ready_rank = parsed_metrics["ready_region"][1]
+        if any(
+            ready + 1e-9 < collective
+            for collective, ready in zip(collective_rank, ready_rank)
+        ):
+            raise ValueError(f"{location} ready_region precedes collective_only")
+        return {
+            "start_record_envelope_span_ns": derived_start_envelope_span,
+            "collective_only": parsed_metrics["collective_only"][0],
+            "ready_region": parsed_metrics["ready_region"][0],
+        }
+
+    @classmethod
+    def _measurement_attempt_audit(cls, result: dict[str, Any]) -> dict[str, Any]:
         raw = result.get("raw_samples")
-        if not isinstance(raw, dict) or not isinstance(raw.get(side), list):
-            raise ValueError(f"raw_samples.{side} is absent")
+        if not isinstance(raw, dict):
+            raise ValueError("raw_samples is absent")
+        expected_raw_keys = {
+            "rank_order",
+            "warmup_order",
+            "warmup_variants",
+            "measured_order",
+            "reference",
+            "candidate",
+            "alignment_policy",
+            "measurement_attempts",
+        }
+        if set(raw) != expected_raw_keys:
+            raise ValueError(f"raw_samples schema mismatch: {raw!r}")
         if raw.get("rank_order") != [0, 1, 2, 3]:
             raise ValueError(
-                f"raw_samples.rank_order must be [0, 1, 2, 3], got {raw.get('rank_order')!r}"
+                "raw_samples.rank_order must be [0, 1, 2, 3], got "
+                f"{raw.get('rank_order')!r}"
             )
-        measured_order = raw.get("measured_order")
-        if not isinstance(measured_order, list) or len(measured_order) != len(raw[side]):
-            raise ValueError("raw_samples.measured_order length is invalid")
-        paired = isinstance(raw.get("candidate"), list)
-        values: list[float] = []
-        for index, sample in enumerate(raw[side]):
-            if not isinstance(sample, dict):
-                raise ValueError(f"raw_samples.{side}[{index}] is not an object")
-            if sample.get("sample_index") != index:
-                raise ValueError(
-                    f"raw_samples.{side}[{index}].sample_index="
-                    f"{sample.get('sample_index')!r}"
-                )
-            if sample.get("variant") != index % 2:
-                raise ValueError(
-                    f"raw_samples.{side}[{index}].variant={sample.get('variant')!r}"
-                )
-            expected_order = (
-                (
-                    ["reference", "candidate"]
-                    if index % 2 == 0
-                    else ["candidate", "reference"]
-                )
+        reference_projection = raw.get("reference")
+        candidate_projection = raw.get("candidate")
+        if not isinstance(reference_projection, list):
+            raise ValueError("raw_samples.reference is absent")
+        if candidate_projection is not None and not isinstance(
+            candidate_projection, list
+        ):
+            raise ValueError("raw_samples.candidate must be a list or null")
+        paired = isinstance(candidate_projection, list)
+        sides = ("reference", "candidate") if paired else ("reference",)
+
+        warmup_order = raw.get("warmup_order")
+        warmup_variants = raw.get("warmup_variants")
+        if not isinstance(warmup_order, list) or not isinstance(
+            warmup_variants, list
+        ):
+            raise ValueError(
+                "raw_samples warmup_order and warmup_variants must be lists"
+            )
+        expected_warmup_order = [
+            (
+                ["reference", "candidate"]
+                if paired and index % 2 == 0
+                else ["candidate", "reference"]
                 if paired
                 else ["reference"]
             )
-            if measured_order[index] != expected_order:
-                raise ValueError(
-                    f"raw_samples.measured_order[{index}]={measured_order[index]!r}"
-                )
-            expected_position = (
-                (index % 2 if side == "reference" else 1 - (index % 2))
-                if paired
-                else 0
+            for index in range(len(warmup_order))
+        ]
+        expected_warmup_variants = [
+            (1 + index) % 2 for index in range(len(warmup_order))
+        ]
+        if warmup_order != expected_warmup_order:
+            raise ValueError(
+                "raw_samples.warmup_order does not preserve the fixed A/B order"
             )
-            if sample.get("position") != expected_position:
-                raise ValueError(
-                    f"raw_samples.{side}[{index}].position={sample.get('position')!r}"
-                )
-            if sample.get("readiness_probe_exact") is not True:
-                raise ValueError(
-                    f"raw_samples.{side}[{index}].readiness_probe_exact is not true"
-                )
-            start_brackets = sample.get("start_record_bracket_ns_by_rank")
-            start_envelope_span = sample.get("start_record_envelope_span_ns")
-            scheduled_arrivals = sample.get(
-                "scheduled_start_arrival_ns_by_rank"
+        if (
+            any(
+                not isinstance(variant, int) or isinstance(variant, bool)
+                for variant in warmup_variants
             )
-            scheduled_targets = sample.get("scheduled_start_target_ns_by_rank")
+            or warmup_variants != expected_warmup_variants
+        ):
+            raise ValueError(
+                "raw_samples.warmup_variants must alternate from physical variant 1"
+            )
+
+        policy = raw.get("alignment_policy")
+        expected_policy_keys = {
+            "start_record_envelope_limit_ns",
+            "max_pair_attempts",
+            "requested_logical_pairs",
+            "accepted_pair_attempts",
+            "rejected_pair_attempts",
+            "total_pair_attempts",
+            "initial_input_variant",
+            "next_input_variant",
+            "admission_fields",
+            "latency_fields_excluded",
+        }
+        if not isinstance(policy, dict) or set(policy) != expected_policy_keys:
+            raise ValueError(
+                "raw_samples.alignment_policy schema mismatch: "
+                f"{policy!r}"
+            )
+        if (
+            policy.get("start_record_envelope_limit_ns")
+            != START_RECORD_ENVELOPE_LIMIT_NS
+            or policy.get("max_pair_attempts") != MAX_PAIR_ATTEMPTS
+            or policy.get("admission_fields") != list(ALIGNMENT_ADMISSION_FIELDS)
+            or policy.get("latency_fields_excluded") is not True
+        ):
+            raise ValueError(
+                "raw_samples.alignment_policy contract mismatch: "
+                f"{policy!r}"
+            )
+        initial_input_variant = policy.get("initial_input_variant")
+        next_input_variant = policy.get("next_input_variant")
+        expected_initial_input_variant = (1 + len(warmup_order)) % 2
+        if (
+            not isinstance(initial_input_variant, int)
+            or isinstance(initial_input_variant, bool)
+            or initial_input_variant != expected_initial_input_variant
+        ):
+            raise ValueError(
+                "raw_samples.alignment_policy.initial_input_variant: expected "
+                f"{expected_initial_input_variant}, got {initial_input_variant!r}"
+            )
+        if (
+            not isinstance(next_input_variant, int)
+            or isinstance(next_input_variant, bool)
+            or next_input_variant not in (0, 1)
+        ):
+            raise ValueError(
+                "raw_samples.alignment_policy.next_input_variant must be 0 or 1"
+            )
+        count_keys = (
+            "requested_logical_pairs",
+            "accepted_pair_attempts",
+            "rejected_pair_attempts",
+            "total_pair_attempts",
+        )
+        if any(
+            not isinstance(policy.get(key), int)
+            or isinstance(policy.get(key), bool)
+            or policy[key] < 0
+            for key in count_keys
+        ):
+            raise ValueError(
+                "raw_samples.alignment_policy counts must be non-negative integers"
+            )
+        requested = policy["requested_logical_pairs"]
+        if requested <= 0:
+            raise ValueError(
+                "raw_samples.alignment_policy.requested_logical_pairs must be > 0"
+            )
+
+        attempts = raw.get("measurement_attempts")
+        if not isinstance(attempts, list):
+            raise ValueError("raw_samples.measurement_attempts is absent")
+        accepted_attempts: list[dict[str, Any]] = []
+        rejected_attempts = 0
+        expected_logical_pair_index = 0
+        expected_retry_ordinal = 0
+        values = {
+            side: {"collective_only": [], "ready_region": []} for side in sides
+        }
+        expected_attempt_keys = {
+            "attempt_id",
+            "logical_pair_index",
+            "retry_ordinal",
+            "order",
+            "variant",
+            "accepted",
+            "rejection_reasons",
+            "samples",
+        }
+        for attempt_id, attempt in enumerate(attempts):
+            location = f"raw_samples.measurement_attempts[{attempt_id}]"
+            if not isinstance(attempt, dict) or set(attempt) != expected_attempt_keys:
+                raise ValueError(f"{location} schema mismatch: {attempt!r}")
+            recorded_attempt_id = attempt.get("attempt_id")
             if (
-                not isinstance(scheduled_arrivals, list)
-                or len(scheduled_arrivals) != 4
-                or any(
-                    not isinstance(value, int)
-                    or isinstance(value, bool)
-                    or value <= 0
-                    for value in scheduled_arrivals
-                )
-                or not isinstance(scheduled_targets, list)
-                or len(scheduled_targets) != 4
-                or any(
-                    not isinstance(value, int)
-                    or isinstance(value, bool)
-                    or value <= 0
-                    for value in scheduled_targets
-                )
-                or len(set(scheduled_targets)) != 1
-                or not isinstance(start_brackets, list)
-                or len(start_brackets) != 4
-                or any(
-                    not isinstance(bracket, list)
-                    or len(bracket) != 2
-                    or any(
-                        not isinstance(value, int)
-                        or isinstance(value, bool)
-                        or value <= 0
-                        for value in bracket
-                    )
-                    or bracket[1] < bracket[0]
-                    for bracket in start_brackets
-                )
-                or not isinstance(start_envelope_span, int)
-                or isinstance(start_envelope_span, bool)
-                or start_envelope_span < 0
+                not isinstance(recorded_attempt_id, int)
+                or isinstance(recorded_attempt_id, bool)
+                or recorded_attempt_id != attempt_id
             ):
                 raise ValueError(
-                    f"raw_samples.{side}[{index}] has invalid scheduled-start "
-                    "targets or start-record brackets"
+                    f"{location}.attempt_id must be sequential, got "
+                    f"{recorded_attempt_id!r}"
                 )
-            derived_target = max(scheduled_arrivals) + SCHEDULED_START_LEAD_NS
-            if scheduled_targets[0] != derived_target:
-                raise ValueError(
-                    f"raw_samples.{side}[{index}] scheduled target "
-                    f"{scheduled_targets[0]} != max arrival + "
-                    f"{SCHEDULED_START_LEAD_NS} ({derived_target})"
-                )
-            if any(
-                bracket[0] < target
-                for bracket, target in zip(start_brackets, scheduled_targets)
+            logical_pair_index = attempt.get("logical_pair_index")
+            retry_ordinal = attempt.get("retry_ordinal")
+            if (
+                not isinstance(logical_pair_index, int)
+                or isinstance(logical_pair_index, bool)
+                or logical_pair_index != expected_logical_pair_index
             ):
                 raise ValueError(
-                    f"raw_samples.{side}[{index}] records before its scheduled target"
+                    f"{location}.logical_pair_index: expected "
+                    f"{expected_logical_pair_index}, got {logical_pair_index!r}"
                 )
-            derived_start_envelope_span = max(
-                bracket[1] for bracket in start_brackets
-            ) - min(bracket[0] for bracket in start_brackets)
-            if start_envelope_span != derived_start_envelope_span:
-                raise ValueError(
-                    f"raw_samples.{side}[{index}].start_record_envelope_span_ns "
-                    f"{start_envelope_span} != {derived_start_envelope_span}"
-                )
-            if start_envelope_span > 500_000:
-                raise ValueError(
-                    f"raw_samples.{side}[{index}].start_record_envelope_span_ns "
-                    f"{start_envelope_span} exceeds 500000"
-                )
-            parsed_metrics: dict[str, tuple[float, list[float]]] = {}
-            for metric_name in ("collective_only", "ready_region"):
-                metric_record = sample.get(metric_name)
-                if not isinstance(metric_record, dict):
-                    raise ValueError(
-                        f"raw_samples.{side}[{index}].{metric_name} is absent"
-                    )
-                rank_values = metric_record.get("rank_ms")
-                if not isinstance(rank_values, list) or len(rank_values) != 4:
-                    raise ValueError(
-                        f"raw_samples.{side}[{index}].{metric_name}.rank_ms must have four values"
-                    )
-                try:
-                    rank_ms = [float(value) for value in rank_values]
-                    local_ms = float(metric_record["local_ms"])
-                    rank_max_ms = float(metric_record["rank_max_ms"])
-                except (KeyError, TypeError, ValueError) as exc:
-                    raise ValueError(
-                        f"raw_samples.{side}[{index}].{metric_name}: {exc}"
-                    ) from exc
-                if any(not math.isfinite(value) or value <= 0 for value in rank_ms):
-                    raise ValueError(
-                        f"raw_samples.{side}[{index}].{metric_name}.rank_ms must be finite and > 0"
-                    )
-                if not math.isfinite(local_ms) or local_ms <= 0:
-                    raise ValueError(
-                        f"raw_samples.{side}[{index}].{metric_name}.local_ms must be finite and > 0"
-                    )
-                if not math.isclose(local_ms, rank_ms[0], rel_tol=1e-12, abs_tol=1e-12):
-                    raise ValueError(
-                        f"raw_samples.{side}[{index}].{metric_name}.local_ms != rank_ms[0]"
-                    )
-                if not math.isclose(
-                    rank_max_ms,
-                    max(rank_ms),
-                    rel_tol=1e-12,
-                    abs_tol=1e-12,
-                ):
-                    raise ValueError(
-                        f"raw_samples.{side}[{index}].{metric_name}.rank_max_ms != max(rank_ms)"
-                    )
-                parsed_metrics[metric_name] = (rank_max_ms, rank_ms)
-            collective_rank = parsed_metrics["collective_only"][1]
-            ready_rank = parsed_metrics["ready_region"][1]
-            if any(
-                ready + 1e-9 < collective
-                for collective, ready in zip(collective_rank, ready_rank)
+            if (
+                not isinstance(retry_ordinal, int)
+                or isinstance(retry_ordinal, bool)
+                or retry_ordinal != expected_retry_ordinal
             ):
                 raise ValueError(
-                    f"raw_samples.{side}[{index}] ready_region precedes collective_only"
+                    f"{location}.retry_ordinal: expected "
+                    f"{expected_retry_ordinal}, got {retry_ordinal!r}"
                 )
-            try:
-                value = parsed_metrics[metric][0]
-            except KeyError as exc:
-                raise ValueError(f"raw_samples.{side}[{index}].{metric}: {exc}") from exc
-            values.append(value)
-        return values
+            if retry_ordinal >= MAX_PAIR_ATTEMPTS:
+                raise ValueError(
+                    f"{location}.retry_ordinal exceeds the bounded retry policy"
+                )
+            expected_order = (
+                ["reference", "candidate"]
+                if paired and logical_pair_index % 2 == 0
+                else ["candidate", "reference"]
+                if paired
+                else ["reference"]
+            )
+            if attempt.get("order") != expected_order:
+                raise ValueError(
+                    f"{location}.order: expected {expected_order!r}, got "
+                    f"{attempt.get('order')!r}"
+                )
+            variant = attempt.get("variant")
+            expected_variant = (initial_input_variant + attempt_id) % 2
+            if (
+                not isinstance(variant, int)
+                or isinstance(variant, bool)
+                or variant != expected_variant
+            ):
+                raise ValueError(
+                    f"{location}.variant: expected {expected_variant}, got "
+                    f"{variant!r}"
+                )
+            accepted = attempt.get("accepted")
+            reasons = attempt.get("rejection_reasons")
+            samples = attempt.get("samples")
+            if not isinstance(accepted, bool) or not isinstance(reasons, list):
+                raise ValueError(f"{location} has invalid admission fields")
+            if not isinstance(samples, dict) or set(samples) != set(sides):
+                raise ValueError(
+                    f"{location}.samples: expected sides {list(sides)!r}, got "
+                    f"{samples!r}"
+                )
+
+            sample_audits: dict[str, dict[str, Any]] = {}
+            for position, side in enumerate(expected_order):
+                sample_audits[side] = cls._attempt_sample_audit(
+                    samples[side],
+                    side=side,
+                    logical_pair_index=logical_pair_index,
+                    position=position,
+                    attempt_id=attempt_id,
+                    retry_ordinal=retry_ordinal,
+                    input_variant=variant,
+                )
+            expected_reasons = [
+                {
+                    "side": side,
+                    "start_record_envelope_span_ns": sample_audits[side][
+                        "start_record_envelope_span_ns"
+                    ],
+                    "limit_ns": START_RECORD_ENVELOPE_LIMIT_NS,
+                }
+                for side in expected_order
+                if sample_audits[side]["start_record_envelope_span_ns"]
+                > START_RECORD_ENVELOPE_LIMIT_NS
+            ]
+            if reasons != expected_reasons:
+                raise ValueError(
+                    f"{location}.rejection_reasons do not match independently "
+                    f"derived envelopes: expected {expected_reasons!r}, got {reasons!r}"
+                )
+            if accepted:
+                if expected_reasons:
+                    raise ValueError(
+                        f"{location} accepted an over-limit start-record envelope"
+                    )
+                accepted_attempts.append(attempt)
+                for side in sides:
+                    for metric_name in ("collective_only", "ready_region"):
+                        values[side][metric_name].append(
+                            sample_audits[side][metric_name]
+                        )
+                expected_logical_pair_index += 1
+                expected_retry_ordinal = 0
+            else:
+                if not expected_reasons:
+                    raise ValueError(
+                        f"{location} was rejected without an over-limit envelope"
+                    )
+                rejected_attempts += 1
+                expected_retry_ordinal += 1
+                if expected_retry_ordinal >= MAX_PAIR_ATTEMPTS:
+                    raise ValueError(
+                        f"{location} exhausts the bounded retry policy without "
+                        "an accepted logical pair"
+                    )
+
+        if expected_logical_pair_index != requested or expected_retry_ordinal != 0:
+            raise ValueError(
+                "raw_samples.measurement_attempts does not contain exactly one "
+                f"accepted attempt for logical pairs 0..{requested - 1}"
+            )
+        accepted_count = len(accepted_attempts)
+        total_count = len(attempts)
+        expected_counts = {
+            "accepted_pair_attempts": accepted_count,
+            "rejected_pair_attempts": rejected_attempts,
+            "total_pair_attempts": total_count,
+        }
+        for key, expected in expected_counts.items():
+            if policy.get(key) != expected:
+                raise ValueError(
+                    f"raw_samples.alignment_policy.{key}: expected {expected}, "
+                    f"got {policy.get(key)!r}"
+                )
+        if accepted_count != requested or total_count != accepted_count + rejected_attempts:
+            raise ValueError("raw_samples.alignment_policy attempt counts are inconsistent")
+        if total_count > requested * MAX_PAIR_ATTEMPTS:
+            raise ValueError("raw_samples.measurement_attempts exceeds its retry bound")
+        expected_next_input_variant = (initial_input_variant + total_count) % 2
+        if next_input_variant != expected_next_input_variant:
+            raise ValueError(
+                "raw_samples.alignment_policy.next_input_variant: expected "
+                f"{expected_next_input_variant}, got {next_input_variant!r}"
+            )
+
+        measured_order = raw.get("measured_order")
+        expected_measured_order = [attempt["order"] for attempt in accepted_attempts]
+        if measured_order != expected_measured_order:
+            raise ValueError(
+                "raw_samples.measured_order is not the exact accepted-attempt "
+                "projection"
+            )
+        expected_reference = [
+            attempt["samples"]["reference"] for attempt in accepted_attempts
+        ]
+        if reference_projection != expected_reference:
+            raise ValueError(
+                "raw_samples.reference is not the exact accepted-attempt projection"
+            )
+        if paired:
+            expected_candidate = [
+                attempt["samples"]["candidate"] for attempt in accepted_attempts
+            ]
+            if candidate_projection != expected_candidate:
+                raise ValueError(
+                    "raw_samples.candidate is not the exact accepted-attempt projection"
+                )
+
+        return {
+            "requested_logical_pairs": requested,
+            "accepted_pair_attempts": accepted_count,
+            "rejected_pair_attempts": rejected_attempts,
+            "total_pair_attempts": total_count,
+            "total_sample_calls": sum(len(attempt["samples"]) for attempt in attempts),
+            "values": values,
+        }
+
+    @classmethod
+    def _sample_values(
+        cls, result: dict[str, Any], side: str, metric: str
+    ) -> list[float]:
+        audit = cls._measurement_attempt_audit(result)
+        try:
+            return list(audit["values"][side][metric])
+        except KeyError as exc:
+            raise ValueError(f"raw_samples.{side}.{metric} is absent") from exc
+
+    def validate_measurement_attempts(
+        self, result: dict[str, Any], location: str
+    ) -> dict[str, int]:
+        try:
+            audit = self._measurement_attempt_audit(result)
+        except ValueError as exc:
+            self.error("invalid_measurement_attempts", location, str(exc))
+            return {}
+        return {
+            key: int(audit[key])
+            for key in (
+                "requested_logical_pairs",
+                "accepted_pair_attempts",
+                "rejected_pair_attempts",
+                "total_pair_attempts",
+                "total_sample_calls",
+            )
+        }
 
     def validate_sample_count(
         self,
@@ -2617,12 +3000,14 @@ class Analyzer:
                 )
                 values = self.validate_sample_count(result, relative, "reference", 10)
                 self.validate_reported_median(result, relative, "reference", values)
+                attempt_summary = self.validate_measurement_attempts(result, relative)
                 checks.append(
                     {
                         "task": case.task,
                         "mode": mode,
                         "stream": stream,
                         "samples": len(values),
+                        "measurement_attempts": attempt_summary,
                     }
                 )
         return {"checks": checks, "expected_checks": 9}
@@ -2648,6 +3033,7 @@ class Analyzer:
                 if result.get("candidate") is not None:
                     self.error("unexpected_baseline_candidate", relative, "candidate is present")
                 values = self.validate_sample_count(result, relative, "reference", 100)
+                attempt_summary = self.validate_measurement_attempts(result, relative)
                 median = self.validate_reported_median(
                     result, relative, "reference", values
                 )
@@ -2697,6 +3083,7 @@ class Analyzer:
                         "collective_only_rank_max_median_ms": collective_median,
                         "readiness_probe_overhead_median_ms": derived_overhead,
                         "samples": len(values),
+                        "measurement_attempts": attempt_summary,
                     }
                 )
             output[case.short_name] = {
@@ -2742,6 +3129,7 @@ class Analyzer:
             expected_stream=case.stream,
             expected_trace=False,
         )
+        attempt_summary = self.validate_measurement_attempts(result, location)
         reference_values = self.validate_sample_count(
             result, location, "reference", 100
         )
@@ -2901,6 +3289,7 @@ class Analyzer:
                 (derived_speedup - 1.0) * 100.0 if derived_speedup is not None else None
             ),
             "samples": len(ratios),
+            "measurement_attempts": attempt_summary,
             "gate_passed": result.get("gate", {}).get("passed"),
             "disposition": result.get("disposition"),
             "candidate_manifest_sha256": (
@@ -3152,10 +3541,10 @@ class Analyzer:
         *,
         candidate: bool,
         candidate_expectation: Optional[dict[str, Any]] = None,
-    ) -> None:
+    ) -> dict[str, int]:
         result = self.read_json(relative)
         if result is None:
-            return
+            return {}
         self.validate_common_result(
             result,
             case,
@@ -3164,6 +3553,7 @@ class Analyzer:
             expected_stream=case.stream,
             expected_trace=False,
         )
+        attempt_summary = self.validate_measurement_attempts(result, relative)
         reference_ready = self.validate_sample_count(
             result, relative, "reference", 20
         )
@@ -3274,6 +3664,7 @@ class Analyzer:
                         )
         elif result.get("candidate") is not None:
             self.error("unexpected_profile_candidate", relative, "candidate is present")
+        return attempt_summary
 
     def load_profile_selection(self) -> dict[str, dict[str, Any]]:
         selected: dict[str, dict[str, Any]] = {}
@@ -3655,6 +4046,12 @@ class Analyzer:
             )
         return {
             **{label: file_summary(path) for label, path in required.items()},
+            "expected_collective_launches_per_device": (
+                expected_collective_launches_per_device
+            ),
+            "expected_graph_launches_per_process": (
+                expected_graph_launches_per_process
+            ),
             "measured_kernel_rows": len(kernel_rows),
             "measured_window_ns": list(bounds) if bounds is not None else None,
             "kernels_by_device": kernels_by_device,
@@ -3685,7 +4082,7 @@ class Analyzer:
                     f"profile/{case.short_name}.nsys-rep",
                     "stock report absent or empty",
                 )
-            self.validate_profile_result(
+            stock_measurements = self.validate_profile_result(
                 f"profile/{case.short_name}.result.json", case, candidate=False
             )
             stock_stats = self.root / f"profile/{case.short_name}.stats.log"
@@ -3710,14 +4107,19 @@ class Analyzer:
             stock_exports = self.validate_profile_exports(
                 case.short_name,
                 expected_stock_range,
-                expected_collective_launches_per_device=20,
+                expected_collective_launches_per_device=stock_measurements.get(
+                    "total_sample_calls", 0
+                ),
                 expected_graph_launches_per_process=(
-                    20 if case.execution_mode == "cuda_graph" else None
+                    stock_measurements.get("total_sample_calls", 0)
+                    if case.execution_mode == "cuda_graph"
+                    else None
                 ),
             )
             item: dict[str, Any] = {
                 "stock": report_summary,
                 "stock_stats_log": file_summary(stock_stats),
+                "stock_measurement_attempts": stock_measurements,
                 "stock_exports": stock_exports,
                 "candidate": None,
             }
@@ -3801,7 +4203,7 @@ class Analyzer:
                         f"profile/{case.short_name}_c10d.nsys-rep",
                         "candidate report absent or empty",
                     )
-                self.validate_profile_result(
+                candidate_measurements = self.validate_profile_result(
                     f"profile/{case.short_name}_c10d.result.json",
                     case,
                     candidate=True,
@@ -3835,12 +4237,17 @@ class Analyzer:
                     "variant": expected_variant,
                     "report": candidate_summary,
                     "stats_log": file_summary(candidate_stats),
+                    "measurement_attempts": candidate_measurements,
                     "exports": self.validate_profile_exports(
                         f"{case.short_name}_c10d",
                         expected_candidate_range,
-                        expected_collective_launches_per_device=40,
+                        expected_collective_launches_per_device=(
+                            candidate_measurements.get("total_sample_calls", 0)
+                        ),
                         expected_graph_launches_per_process=(
-                            40 if case.execution_mode == "cuda_graph" else None
+                            candidate_measurements.get("total_sample_calls", 0)
+                            if case.execution_mode == "cuda_graph"
+                            else None
                         ),
                     ),
                 }

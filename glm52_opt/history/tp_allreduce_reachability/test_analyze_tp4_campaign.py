@@ -28,11 +28,20 @@ sys.modules[SPEC.name] = ANALYZER
 SPEC.loader.exec_module(ANALYZER)
 
 
-def _sample(index: int, position: int) -> dict:
+def _sample(
+    index: int,
+    position: int,
+    *,
+    attempt_id: int,
+    retry_ordinal: int,
+    input_variant: int,
+) -> dict:
     return {
         "sample_index": index,
         "position": position,
-        "variant": index % 2,
+        "variant": input_variant,
+        "pair_attempt_id": attempt_id,
+        "pair_retry_ordinal": retry_ordinal,
         "scheduled_start_arrival_ns_by_rank": [
             994_998_700,
             994_998_800,
@@ -61,6 +70,144 @@ def _sample(index: int, position: int) -> dict:
     }
 
 
+def _set_start_envelope(sample: dict, span_ns: int) -> None:
+    first = sample["start_record_bracket_ns_by_rank"][0][0]
+    sample["start_record_bracket_ns_by_rank"][-1] = [
+        first + span_ns - 10,
+        first + span_ns,
+    ]
+    sample["start_record_envelope_span_ns"] = span_ns
+
+
+def _raw_samples(
+    count: int,
+    *,
+    paired: bool,
+    rejected_side: str | None = None,
+    warmup_count: int = 10,
+) -> dict:
+    attempts: list[dict] = []
+    accepted_reference: list[dict] = []
+    accepted_candidate: list[dict] | None = [] if paired else None
+    measured_order: list[list[str]] = []
+    attempt_id = 0
+    warmup_order = [
+        (
+            ["reference", "candidate"]
+            if paired and index % 2 == 0
+            else ["candidate", "reference"]
+            if paired
+            else ["reference"]
+        )
+        for index in range(warmup_count)
+    ]
+    warmup_variants = [(1 + index) % 2 for index in range(warmup_count)]
+    initial_input_variant = (1 + warmup_count) % 2
+
+    for logical_pair_index in range(count):
+        order = (
+            ["reference", "candidate"]
+            if paired and logical_pair_index % 2 == 0
+            else ["candidate", "reference"]
+            if paired
+            else ["reference"]
+        )
+        retry_ordinal = 0
+        if logical_pair_index == 0 and rejected_side is not None:
+            input_variant = (initial_input_variant + attempt_id) % 2
+            rejected_samples = {
+                side: _sample(
+                    logical_pair_index,
+                    position,
+                    attempt_id=attempt_id,
+                    retry_ordinal=retry_ordinal,
+                    input_variant=input_variant,
+                )
+                for position, side in enumerate(order)
+            }
+            _set_start_envelope(rejected_samples[rejected_side], 600_001)
+            attempts.append(
+                {
+                    "attempt_id": attempt_id,
+                    "logical_pair_index": logical_pair_index,
+                    "retry_ordinal": retry_ordinal,
+                    "order": order,
+                    "variant": input_variant,
+                    "accepted": False,
+                    "rejection_reasons": [
+                        {
+                            "side": rejected_side,
+                            "start_record_envelope_span_ns": 600_001,
+                            "limit_ns": 500_000,
+                        }
+                    ],
+                    "samples": rejected_samples,
+                }
+            )
+            attempt_id += 1
+            retry_ordinal += 1
+
+        input_variant = (initial_input_variant + attempt_id) % 2
+        accepted_samples = {
+            side: _sample(
+                logical_pair_index,
+                position,
+                attempt_id=attempt_id,
+                retry_ordinal=retry_ordinal,
+                input_variant=input_variant,
+            )
+            for position, side in enumerate(order)
+        }
+        attempt = {
+            "attempt_id": attempt_id,
+            "logical_pair_index": logical_pair_index,
+            "retry_ordinal": retry_ordinal,
+            "order": order,
+            "variant": input_variant,
+            "accepted": True,
+            "rejection_reasons": [],
+            "samples": accepted_samples,
+        }
+        attempts.append(attempt)
+        measured_order.append(order)
+        accepted_reference.append(accepted_samples["reference"])
+        if paired:
+            assert accepted_candidate is not None
+            accepted_candidate.append(accepted_samples["candidate"])
+        attempt_id += 1
+
+    rejected_count = sum(not attempt["accepted"] for attempt in attempts)
+    return {
+        "rank_order": [0, 1, 2, 3],
+        "warmup_order": warmup_order,
+        "warmup_variants": warmup_variants,
+        "measured_order": measured_order,
+        "reference": accepted_reference,
+        "candidate": accepted_candidate,
+        "alignment_policy": {
+            "start_record_envelope_limit_ns": 500_000,
+            "max_pair_attempts": 10,
+            "requested_logical_pairs": count,
+            "accepted_pair_attempts": count,
+            "rejected_pair_attempts": rejected_count,
+            "total_pair_attempts": len(attempts),
+            "initial_input_variant": initial_input_variant,
+            "next_input_variant": (
+                initial_input_variant + len(attempts)
+            )
+            % 2,
+            "admission_fields": [
+                "scheduled_start_arrival_ns_by_rank",
+                "scheduled_start_target_ns_by_rank",
+                "start_record_bracket_ns_by_rank",
+                "start_record_envelope_span_ns",
+            ],
+            "latency_fields_excluded": True,
+        },
+        "measurement_attempts": attempts,
+    }
+
+
 def _paired_resolution_result(
     *,
     case,
@@ -71,14 +218,7 @@ def _paired_resolution_result(
     harness_sha: str,
     sglang_sha: str,
 ) -> dict:
-    measured_order = [
-        ["reference", "candidate"]
-        if index % 2 == 0
-        else ["candidate", "reference"]
-        for index in range(100)
-    ]
-    reference_samples = [_sample(index, index % 2) for index in range(100)]
-    candidate_samples = [_sample(index, 1 - index % 2) for index in range(100)]
+    raw_samples = _raw_samples(100, paired=True, rejected_side="reference")
     metric_summary = {
         "collective_only": {"median_ms": 1.3},
         "ready_region": {"median_ms": 1.4},
@@ -204,12 +344,7 @@ def _paired_resolution_result(
             "paired_p90_speedup": 1.0,
             "passes_3pct_median_gate": False,
         },
-        "raw_samples": {
-            "rank_order": [0, 1, 2, 3],
-            "measured_order": measured_order,
-            "reference": reference_samples,
-            "candidate": candidate_samples,
-        },
+        "raw_samples": raw_samples,
         "disposition": "tp4_diagnostic_no_replacement",
     }
 
@@ -440,17 +575,7 @@ class TestCampaignAnalyzer(unittest.TestCase):
         )
 
     def test_rank_max_and_alternating_order_are_rederived(self):
-        result = {
-            "raw_samples": {
-                "rank_order": [0, 1, 2, 3],
-                "measured_order": [
-                    ["reference", "candidate"],
-                    ["candidate", "reference"],
-                ],
-                "reference": [_sample(0, 0), _sample(1, 1)],
-                "candidate": [_sample(0, 1), _sample(1, 0)],
-            }
-        }
+        result = {"raw_samples": _raw_samples(2, paired=True)}
         self.assertEqual(
             ANALYZER.Analyzer._sample_values(
                 result, "candidate", "collective_only"
@@ -485,15 +610,151 @@ class TestCampaignAnalyzer(unittest.TestCase):
                 mismatched_arrival, "candidate", "ready_region"
             )
 
-    def test_single_sided_reference_order_is_accepted(self):
+    def test_whole_pair_rejection_ledger_and_projections_are_exact(self):
         result = {
-            "raw_samples": {
-                "rank_order": [0, 1, 2, 3],
-                "measured_order": [["reference"]],
-                "reference": [_sample(0, 0)],
-                "candidate": None,
-            }
+            "raw_samples": _raw_samples(
+                2, paired=True, rejected_side="reference"
+            )
         }
+        rejected_reference = result["raw_samples"]["measurement_attempts"][0][
+            "samples"
+        ]["reference"]
+        rejected_reference["ready_region"] = {
+            "local_ms": 90.0,
+            "rank_ms": [90.0, 91.0, 92.0, 93.0],
+            "rank_max_ms": 93.0,
+        }
+        audit = ANALYZER.Analyzer._measurement_attempt_audit(result)
+        attempts = result["raw_samples"]["measurement_attempts"]
+        self.assertEqual(
+            [attempt["variant"] for attempt in attempts],
+            [1, 0, 1],
+        )
+        self.assertEqual(
+            [attempt["logical_pair_index"] for attempt in attempts],
+            [0, 0, 1],
+        )
+        self.assertEqual(
+            result["raw_samples"]["reference"][0]["variant"],
+            0,
+        )
+        self.assertEqual(
+            {
+                key: audit[key]
+                for key in (
+                    "requested_logical_pairs",
+                    "accepted_pair_attempts",
+                    "rejected_pair_attempts",
+                    "total_pair_attempts",
+                    "total_sample_calls",
+                )
+            },
+            {
+                "requested_logical_pairs": 2,
+                "accepted_pair_attempts": 2,
+                "rejected_pair_attempts": 1,
+                "total_pair_attempts": 3,
+                "total_sample_calls": 6,
+            },
+        )
+        self.assertEqual(
+            ANALYZER.Analyzer._sample_values(result, "reference", "ready_region"),
+            [1.4, 1.4],
+        )
+
+        bad_reason = copy.deepcopy(result)
+        bad_reason["raw_samples"]["measurement_attempts"][0][
+            "rejection_reasons"
+        ][0]["limit_ns"] += 1
+        with self.assertRaisesRegex(ValueError, "rejection_reasons"):
+            ANALYZER.Analyzer._measurement_attempt_audit(bad_reason)
+
+        no_derived_violation = copy.deepcopy(result)
+        _set_start_envelope(
+            no_derived_violation["raw_samples"]["measurement_attempts"][0][
+                "samples"
+            ]["reference"],
+            310,
+        )
+        with self.assertRaisesRegex(ValueError, "rejection_reasons"):
+            ANALYZER.Analyzer._measurement_attempt_audit(no_derived_violation)
+
+        rejected_metric_tamper = copy.deepcopy(result)
+        rejected_metric_tamper["raw_samples"]["measurement_attempts"][0][
+            "samples"
+        ]["reference"]["ready_region"]["rank_max_ms"] = 1.0
+        with self.assertRaisesRegex(ValueError, "rank_max_ms"):
+            ANALYZER.Analyzer._measurement_attempt_audit(rejected_metric_tamper)
+
+        retry_gap = copy.deepcopy(result)
+        retry_gap["raw_samples"]["measurement_attempts"][1]["retry_ordinal"] = 2
+        retry_gap["raw_samples"]["measurement_attempts"][1]["samples"][
+            "reference"
+        ]["pair_retry_ordinal"] = 2
+        retry_gap["raw_samples"]["measurement_attempts"][1]["samples"][
+            "candidate"
+        ]["pair_retry_ordinal"] = 2
+        with self.assertRaisesRegex(ValueError, "retry_ordinal"):
+            ANALYZER.Analyzer._measurement_attempt_audit(retry_gap)
+
+        bad_projection = copy.deepcopy(result)
+        bad_projection["raw_samples"]["reference"] = copy.deepcopy(
+            bad_projection["raw_samples"]["reference"]
+        )
+        bad_projection["raw_samples"]["reference"][0]["pair_attempt_id"] = 999
+        with self.assertRaisesRegex(ValueError, "exact accepted-attempt projection"):
+            ANALYZER.Analyzer._measurement_attempt_audit(bad_projection)
+
+        latency_admission = copy.deepcopy(result)
+        latency_admission["raw_samples"]["alignment_policy"][
+            "latency_fields_excluded"
+        ] = False
+        with self.assertRaisesRegex(ValueError, "alignment_policy contract"):
+            ANALYZER.Analyzer._measurement_attempt_audit(latency_admission)
+
+        count_tamper = copy.deepcopy(result)
+        count_tamper["raw_samples"]["alignment_policy"][
+            "rejected_pair_attempts"
+        ] = 0
+        with self.assertRaisesRegex(ValueError, "rejected_pair_attempts"):
+            ANALYZER.Analyzer._measurement_attempt_audit(count_tamper)
+
+        bad_warmup_variant = copy.deepcopy(result)
+        bad_warmup_variant["raw_samples"]["warmup_variants"][0] = True
+        with self.assertRaisesRegex(ValueError, "warmup_variants"):
+            ANALYZER.Analyzer._measurement_attempt_audit(bad_warmup_variant)
+
+        bad_initial_variant = copy.deepcopy(result)
+        bad_initial_variant["raw_samples"]["alignment_policy"][
+            "initial_input_variant"
+        ] = 0
+        with self.assertRaisesRegex(ValueError, "initial_input_variant"):
+            ANALYZER.Analyzer._measurement_attempt_audit(bad_initial_variant)
+
+        bad_next_variant = copy.deepcopy(result)
+        bad_next_variant["raw_samples"]["alignment_policy"][
+            "next_input_variant"
+        ] ^= 1
+        with self.assertRaisesRegex(ValueError, "next_input_variant"):
+            ANALYZER.Analyzer._measurement_attempt_audit(bad_next_variant)
+
+        stale_retry_variant = copy.deepcopy(result)
+        stale_retry = stale_retry_variant["raw_samples"]["measurement_attempts"][1]
+        stale_retry["variant"] = 1
+        stale_retry["samples"]["reference"]["variant"] = 1
+        stale_retry["samples"]["candidate"]["variant"] = 1
+        with self.assertRaisesRegex(ValueError, r"measurement_attempts\[1\]\.variant"):
+            ANALYZER.Analyzer._measurement_attempt_audit(stale_retry_variant)
+
+        sample_variant_tamper = copy.deepcopy(result)
+        sample_variant_tamper["raw_samples"]["measurement_attempts"][0][
+            "samples"
+        ]["candidate"]["variant"] = 0
+        with self.assertRaisesRegex(ValueError, r"samples\.candidate\.variant"):
+            ANALYZER.Analyzer._measurement_attempt_audit(sample_variant_tamper)
+
+    def test_single_sided_reference_order_is_accepted(self):
+        result = {"raw_samples": _raw_samples(1, paired=False)}
         self.assertEqual(
             ANALYZER.Analyzer._sample_values(
                 result, "reference", "ready_region"
@@ -502,18 +763,10 @@ class TestCampaignAnalyzer(unittest.TestCase):
         )
 
         misaligned = copy.deepcopy(result)
-        misaligned["raw_samples"]["reference"][0][
-            "start_record_bracket_ns_by_rank"
-        ] = [
-            [1_000_000_000, 1_000_000_010],
-            [1_000_000_100, 1_000_000_110],
-            [1_000_000_200, 1_000_000_210],
-            [1_000_600_001, 1_000_600_011],
-        ]
-        misaligned["raw_samples"]["reference"][0][
-            "start_record_envelope_span_ns"
-        ] = 600_011
-        with self.assertRaisesRegex(ValueError, "exceeds 500000"):
+        _set_start_envelope(
+            misaligned["raw_samples"]["reference"][0], 600_011
+        )
+        with self.assertRaisesRegex(ValueError, "rejection_reasons"):
             ANALYZER.Analyzer._sample_values(
                 misaligned, "reference", "ready_region"
             )
@@ -722,6 +975,15 @@ class TestCampaignAnalyzer(unittest.TestCase):
             root = Path(tmpdir)
             profile = root / "profile"
             profile.mkdir()
+            profile_measurements = ANALYZER.Analyzer._measurement_attempt_audit(
+                {
+                    "raw_samples": _raw_samples(
+                        20, paired=False, rejected_side="reference"
+                    )
+                }
+            )
+            expected_sample_calls = profile_measurements["total_sample_calls"]
+            self.assertEqual(expected_sample_calls, 21)
             name = "m16"
             expected_range = (
                 "serving_native/tp4_allreduce_decode_m16/"
@@ -752,7 +1014,7 @@ class TestCampaignAnalyzer(unittest.TestCase):
                 + "".join(
                     f"{1000 + rank},cudaGraphLaunch_v12000\n"
                     for rank in range(4)
-                    for _ in range(20)
+                    for _ in range(expected_sample_calls)
                 ),
                 encoding="utf-8",
             )
@@ -791,7 +1053,7 @@ class TestCampaignAnalyzer(unittest.TestCase):
                     "cross_device_reduce_1stage",
                 ]
                 for rank in range(4)
-                for _ in range(20)
+                for _ in range(expected_sample_calls)
             ]
             with kernel_path.open("w", newline="", encoding="utf-8") as handle:
                 writer = csv.writer(handle)
@@ -801,13 +1063,20 @@ class TestCampaignAnalyzer(unittest.TestCase):
             summary = analyzer.validate_profile_exports(
                 name,
                 expected_range,
-                expected_collective_launches_per_device=20,
-                expected_graph_launches_per_process=20,
+                expected_collective_launches_per_device=expected_sample_calls,
+                expected_graph_launches_per_process=expected_sample_calls,
             )
             self.assertEqual(analyzer.errors, [])
-            self.assertEqual(summary["kernels_by_device"], {0: 20, 1: 20, 2: 20, 3: 20})
+            self.assertEqual(
+                summary["kernels_by_device"],
+                {rank: expected_sample_calls for rank in range(4)},
+            )
+            self.assertEqual(
+                summary["expected_graph_launches_per_process"],
+                expected_sample_calls,
+            )
 
-            rows[20][7] = "1000"
+            rows[expected_sample_calls][7] = "1000"
             with kernel_path.open("w", newline="", encoding="utf-8") as handle:
                 writer = csv.writer(handle)
                 writer.writerow(header)
@@ -816,8 +1085,8 @@ class TestCampaignAnalyzer(unittest.TestCase):
             corrupted.validate_profile_exports(
                 name,
                 expected_range,
-                expected_collective_launches_per_device=20,
-                expected_graph_launches_per_process=20,
+                expected_collective_launches_per_device=expected_sample_calls,
+                expected_graph_launches_per_process=expected_sample_calls,
             )
             self.assertIn(
                 "profile_kernel_export_process_coverage_mismatch",
@@ -834,8 +1103,8 @@ class TestCampaignAnalyzer(unittest.TestCase):
             missing_collective.validate_profile_exports(
                 name,
                 expected_range,
-                expected_collective_launches_per_device=20,
-                expected_graph_launches_per_process=20,
+                expected_collective_launches_per_device=expected_sample_calls,
+                expected_graph_launches_per_process=expected_sample_calls,
             )
             self.assertIn(
                 "profile_collective_kernel_coverage_mismatch",
