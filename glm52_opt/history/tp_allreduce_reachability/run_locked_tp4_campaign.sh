@@ -266,12 +266,17 @@ for task in \
     --candidate "$HARNESS/serving_native/candidates/allreduce_torch_outplace.py" \
     --execution-mode "$MODE" --stream "$STREAM" --warmup 10 --repeat 100 \
     --output "$OUT_ROOT/paired/${SHORT}_c10d_outplace.json"
+  run_step required "paired/${SHORT}_c10d_abi_resolution" \
+    "$HARNESS/.venv/bin/python" \
+    "$SGLANG/glm52_opt/history/tp_allreduce_reachability/analyze_tp4_campaign.py" \
+    "$OUT_ROOT" --resolve-c10d "$SHORT" --harness-root "$HARNESS" \
+    --output "$OUT_ROOT/paired/${SHORT}_c10d_selection.json"
 done
 require_phase baseline_and_paired_control
 
 # This upstream sweep is performance-only scouting. Its provider timings do not
 # replace the exact production-ABI gate above.
-run_step attempt backend_scout/custom_allreduce \
+run_step required backend_scout/custom_allreduce \
   env \
   _IS_BENCH_MULTIGPU_SGLANG_JIT_KERNEL=1 \
   "_IS_BENCH_MULTIGPU_SGLANG_JIT_KERNEL_PID=$$" \
@@ -296,9 +301,11 @@ profile_run() {
   run_step required "profile/${short_name}_nsys" \
     nsys profile \
     --trace=cuda,nvtx,nccl,osrt \
+    --cuda-trace-scope=process-tree \
     --cuda-graph-trace=node \
     --sample=none \
     --cpuctxsw=none \
+    --wait=all \
     --force-overwrite=true \
     --output="$OUT_ROOT/profile/${short_name}" \
     "$HARNESS/serving_native/run.sh" "$task" \
@@ -343,24 +350,38 @@ profile_candidate_run() {
   local task="$2"
   local mode="$3"
   local stream="$4"
-  local candidate result_path
-  if [[ -s "$OUT_ROOT/paired/${short_name}_c10d_outplace.json" ]]; then
-    candidate="$HARNESS/serving_native/candidates/allreduce_torch_outplace.py"
-    result_path="$OUT_ROOT/paired/${short_name}_c10d_outplace.json"
-  elif [[ -s "$OUT_ROOT/paired/${short_name}_c10d_inplace.json" ]]; then
-    candidate="$HARNESS/serving_native/candidates/allreduce_torch.py"
-    result_path="$OUT_ROOT/paired/${short_name}_c10d_inplace.json"
-  else
-    run_step attempt "profile/${short_name}_c10d_skipped" \
-      bash -c 'echo "no ABI-compatible c10d result was persisted; profiler delta is inapplicable"; exit 2'
+  local candidate result_path selection_path
+  local -a selection
+  selection_path="$OUT_ROOT/paired/${short_name}_c10d_selection.json"
+  if [[ ! -s "$selection_path" ]]; then
+    run_step required "profile/${short_name}_c10d_missing" \
+      bash -c 'echo "required ABI selection receipt is absent"; exit 2'
     return
   fi
+  mapfile -t selection < <(
+    "$HARNESS/.venv/bin/python" -c '
+import json
+import sys
+receipt = json.load(open(sys.argv[1], encoding="utf-8"))
+print(receipt["selected"]["candidate_path"])
+print(receipt["selected"]["result_path"])
+' "$selection_path"
+  )
+  if [[ "${#selection[@]}" -ne 2 ]]; then
+    run_step required "profile/${short_name}_c10d_missing" \
+      bash -c 'echo "ABI selection receipt could not be consumed"; exit 2'
+    return
+  fi
+  candidate="${selection[0]}"
+  result_path="${selection[1]}"
   run_step required "profile/${short_name}_c10d_nsys" \
     nsys profile \
     --trace=cuda,nvtx,nccl,osrt \
+    --cuda-trace-scope=process-tree \
     --cuda-graph-trace=node \
     --sample=none \
     --cpuctxsw=none \
+    --wait=all \
     --force-overwrite=true \
     --output="$OUT_ROOT/profile/${short_name}_c10d" \
     "$HARNESS/serving_native/run.sh" "$task" \
@@ -368,8 +389,6 @@ profile_candidate_run() {
     --execution-mode "$mode" --stream "$stream" --warmup 3 --repeat 20 \
     --output "$OUT_ROOT/profile/${short_name}_c10d.result.json"
   check_candidate_report "$short_name"
-  printf '%s\t%s\t%s\n' "$short_name" "$candidate" "$result_path" \
-    >>"$OUT_ROOT/profile/c10d_profile_selection.tsv"
 }
 
 profile_candidate_run m16 tp4_allreduce_decode_m16 cuda_graph nondefault
@@ -382,9 +401,16 @@ run_step required environment/nvidia_smi_after \
   nvidia-smi --query-gpu=index,uuid,clocks.current.sm,clocks.current.memory,power.draw,temperature.gpu \
   --format=csv
 run_step required environment/compute_processes_after \
-  nvidia-smi \
-  --query-compute-apps=timestamp,gpu_uuid,pid,process_name,used_gpu_memory \
-  --format=csv
+  bash -c '
+    set -euo pipefail
+    expected="timestamp, gpu_uuid, pid, process_name, used_gpu_memory [MiB]"
+    snapshot="$(timeout --signal=TERM --kill-after=5s 30s nvidia-smi \
+      --query-compute-apps=timestamp,gpu_uuid,pid,process_name,used_gpu_memory \
+      --format=csv)"
+    printf "%s\n" "$snapshot"
+    [[ "$(printf "%s\n" "$snapshot" | sed -n "1p")" == "$expected" ]]
+    [[ -z "$(printf "%s\n" "$snapshot" | tail -n +2 | sed "/^[[:space:]]*$/d")" ]]
+  '
 run_step required environment/source_identity_after \
   bash -c 'for repo in "$1" "$2"; do status="$(git -C "$repo" status --porcelain=v1)"; printf "%s\n%s\n" "$repo" "$status"; [[ -z "$status" ]] || exit 1; git -C "$repo" rev-parse HEAD; done' \
   _ "$HARNESS" "$SGLANG"

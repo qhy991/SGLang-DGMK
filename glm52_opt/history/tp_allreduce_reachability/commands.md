@@ -24,18 +24,24 @@ The single lock acquisition runs, in order:
 2. short M16, M32, and prefill coordinator traces;
 3. eager/default, eager/nondefault, and graph/nondefault exact semantic checks;
 4. three uncontended rank-max baselines per shape;
-5. paired reference controls and in-place/out-of-place c10d/NCCL attempts;
+5. paired reference controls, both c10d/NCCL ABI attempts, and a required
+   content-aware selection receipt that validates the result, all-rank alias
+   contract, status, candidate path/digests, and canonical failed-attempt cause;
 6. the upstream SGLang backend sweep as performance-only scouting;
-7. single-GPU production-ABI O-projection measurements while retaining the lock;
+7. single-GPU production-ABI O-projection reference controls while retaining
+   the lock; each result preserves all 100 alternating A/B measurements and
+   execution order so the analyzer can rederive latency summaries, paired
+   p10/p50/p90, and the 3% decision;
 8. full-lifecycle Nsight Systems captures for all three stock shapes and every
    ABI-compatible c10d attempt; and
 9. final NVLink counters, clocks, power, compute-process snapshot, and per-step
    exit status.
 
-The campaign fixes `SGLANG_GLM52_OPT=0` and explicitly unsets
-`SGLANG_OPT_USE_CUSTOM_ALL_REDUCE_V2`, `NCCL_ALGO`, and `NCCL_PROTO`. The
-analyzer rejects a result that inherited any of those dispatch/protocol
-overrides.
+The campaign fixes `SGLANG_GLM52_OPT=0` and explicitly unsets `LOCAL_SIZE`,
+`SGLANG_OPT_USE_CUSTOM_ALL_REDUCE_V2`, `NCCL_ALGO`, and `NCCL_PROTO`.
+`LOCAL_SIZE` is a CPU shared-memory hint, not the GPU local-world size; the
+production GPU default is zero. The analyzer rejects a result that inherited
+any of those dispatch/protocol overrides.
 
 `SGLANG_ALL_REDUCE_TRACE` is import-time gated and appears only in the short
 reachability runs. The benchmark marks those timings ineligible. Python can see
@@ -46,32 +52,17 @@ around all four ranks' measured work, but it is not a process-scoped NVTX
 enclosure for ranks 1-3. Process-tree CUDA traces and timestamps are therefore
 required when attributing the other ranks.
 
-After the GPU lock is released, generate text profiler tables without CUDA:
+After the GPU lock is released, export lifecycle and measured-window profiler
+tables without CUDA. The script extracts the unique rank-0 NVTX range bounds,
+uses that global time interval (not process-scoped `--filter-nvtx`) for CUDA API
+and kernel exports, retains the lifecycle NVTX table and SQLite database, and
+the analyzer requires four distinct worker PIDs mapped one-to-one onto devices
+0-3:
 
 ```bash
-set -euo pipefail
 OUT=/tmp/tp_allreduce_reachability_20260722T120000Z
-STATS_STATUS="$OUT/profile/stats_status.tsv"
-printf 'report\texit_code\tlog\n' >"$STATS_STATUS"
-
-for name in m16 m32 prefill; do
-  test -s "$OUT/profile/$name.nsys-rep"
-done
-
-for name in m16 m32 prefill m16_c10d m32_c10d prefill_c10d; do
-  REPORT="$OUT/profile/$name.nsys-rep"
-  LOG="$OUT/profile/$name.stats.log"
-  [[ -s "$REPORT" ]] || continue
-  set +e
-  nsys stats --force-export=true \
-    --report cuda_gpu_kern_sum,cuda_api_sum,cuda_kern_exec_sum,nvtx_pushpop_sum,nvtx_kern_sum,nvtx_gpu_proj_sum \
-    --format csv --output - "$REPORT" >"$LOG" 2>&1
-  RC=$?
-  set -e
-  printf '%s\t%s\t%s\n' "$name" "$RC" "$LOG" >>"$STATS_STATUS"
-  test "$RC" -eq 0
-  test -s "$LOG"
-done
+/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/sglang/glm52_opt/history/tp_allreduce_reachability/postprocess_tp4_profiles.sh \
+  "$OUT"
 
 python3 \
   /home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/sglang/glm52_opt/history/tp_allreduce_reachability/analyze_tp4_campaign.py \
