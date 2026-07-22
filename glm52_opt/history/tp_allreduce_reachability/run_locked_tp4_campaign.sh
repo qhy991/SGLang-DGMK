@@ -95,6 +95,14 @@ run_step() {
   return 0
 }
 
+require_phase() {
+  local phase="$1"
+  if [[ "$REQUIRED_FAILED" -ne 0 ]]; then
+    echo "required $phase phase failed; stopping before later GPU work" >&2
+    exit 1
+  fi
+}
+
 export SGLANG_ROOT="$SGLANG"
 export KERNEL_HARNESS_PYTHON="$HARNESS/.venv/bin/python"
 export PYTHONPATH="$SGLANG/python:$HARNESS:${PYTHONPATH:-}"
@@ -112,6 +120,7 @@ run_step required environment/nvidia_smi \
 run_step required environment/topology nvidia-smi topo -m
 run_step required environment/nvlink_status nvidia-smi nvlink --status
 run_step required environment/nvlink_throughput_before nvidia-smi nvlink --getthroughput d
+require_phase environment
 
 trace_run() {
   local short_name="$1"
@@ -129,6 +138,7 @@ trace_run m16 tp4_allreduce_decode_m16 cuda_graph nondefault
 trace_run m32 tp4_allreduce_decode_m32 cuda_graph nondefault
 trace_run prefill tp4_allreduce_prefill eager nondefault
 unset SGLANG_ALL_REDUCE_TRACE
+require_phase reachability
 
 for task in \
   tp4_allreduce_decode_m16 \
@@ -142,6 +152,7 @@ for task in \
       --output "$OUT_ROOT/semantics/${task}.${mode}.${stream}.json"
   done
 done
+require_phase semantics
 
 task_settings() {
   case "$1" in
@@ -195,6 +206,7 @@ for task in \
     --execution-mode "$MODE" --stream "$STREAM" --warmup 10 --repeat 100 \
     --output "$OUT_ROOT/paired/${SHORT}_c10d_outplace.json"
 done
+require_phase baseline_and_paired_control
 
 # This upstream sweep is performance-only scouting. Its provider timings do not
 # replace the exact production-ABI gate above.
@@ -213,6 +225,7 @@ for task in linear_attn_o_decode_m16 linear_attn_o_decode_m32; do
     --warmup 10 --repeat 100 \
     --output "$OUT_ROOT/producer_abi/${task}.json"
 done
+require_phase producer_abi
 
 profile_run() {
   local short_name="$1"
@@ -262,6 +275,7 @@ check_candidate_report() {
 profile_run m16 tp4_allreduce_decode_m16 cuda_graph nondefault
 profile_run m32 tp4_allreduce_decode_m32 cuda_graph nondefault
 profile_run prefill tp4_allreduce_prefill eager nondefault
+require_phase stock_profile
 
 profile_candidate_run() {
   local short_name="$1"
@@ -300,6 +314,7 @@ profile_candidate_run() {
 profile_candidate_run m16 tp4_allreduce_decode_m16 cuda_graph nondefault
 profile_candidate_run m32 tp4_allreduce_decode_m32 cuda_graph nondefault
 profile_candidate_run prefill tp4_allreduce_prefill eager nondefault
+require_phase candidate_profile
 
 run_step required environment/nvlink_throughput_after nvidia-smi nvlink --getthroughput d
 run_step required environment/nvidia_smi_after \

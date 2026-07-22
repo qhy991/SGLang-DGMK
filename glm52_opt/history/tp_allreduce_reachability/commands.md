@@ -43,10 +43,15 @@ for name in m16 m32 prefill m16_c10d m32_c10d prefill_c10d; do
   [[ -f "$OUT/profile/$name.nsys-rep" ]] || continue
   nsys stats --force-export=true \
     --report cuda_gpu_kern_sum,cuda_api_sum,cuda_kern_exec_sum,nvtx_pushpop_sum \
-    --format csv --output . \
+    --format csv --output - \
     "$OUT/profile/$name.nsys-rep" \
     >"$OUT/profile/$name.stats.log" 2>&1
 done
+
+python3 \
+  /home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/sglang/glm52_opt/history/tp_allreduce_reachability/analyze_tp4_campaign.py \
+  "$OUT" --output "$OUT/summary.json" \
+  >"$OUT/analyzer.stdout.json"
 ```
 
 ## Preserved external TP8 production gate
