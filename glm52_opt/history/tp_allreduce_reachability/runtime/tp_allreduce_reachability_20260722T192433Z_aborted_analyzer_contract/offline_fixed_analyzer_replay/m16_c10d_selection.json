@@ -1,0 +1,26 @@
+{
+  "errors": [],
+  "expected_variant": "inplace",
+  "failed": {
+    "canonical_failure_records": 4,
+    "exit_code": 1,
+    "log_path": "paired/m16_c10d_outplace.log",
+    "log_sha256": "9d3eef9320856a2dc6a78fcf6a55b02840a0e0457733aebcf0996edf2e8306b6",
+    "variant": "outplace"
+  },
+  "reference_control_path": "paired/m16_reference_control.json",
+  "reference_control_sha256": "974c1bfac6dff4d32a6b50350ec27c4d5398d706fed37fd360d7b9309db920ea",
+  "schema_version": 1,
+  "scope": "tp4_allreduce_diagnostic_only",
+  "selected": {
+    "candidate_entrypoint_sha256": "6793d235066fb8679fd98c1153e4d82741f195d4ba224449caa8ab38f9e07cd6",
+    "candidate_manifest_sha256": "af7a19e204b4fb90430c109efa28aa9528c22901d2452952d4afcb8a95e7c22f",
+    "candidate_path": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/serving_native/candidates/allreduce_torch.py",
+    "result_path": "paired/m16_c10d_inplace.json",
+    "result_sha256": "0a642cb5b9cf22b892b36ce1aa10d6a4f20ddbb32e1c3a9504a78e4ae297629e",
+    "variant": "inplace"
+  },
+  "short_name": "m16",
+  "task": "tp4_allreduce_decode_m16",
+  "valid": true
+}

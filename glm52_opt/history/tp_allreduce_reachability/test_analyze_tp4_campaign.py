@@ -309,7 +309,14 @@ def _paired_resolution_result(
                 "selected stream synchronized after restoration; TP CPU-group "
                 "all-gather selects a common same-host monotonic deadline 5 ms "
                 "after latest arrival; ranks busy-wait; host timestamps bracket "
-                "every start-event record call"
+                "every start-event record call; a host-only 500 us envelope "
+                "predicate allows at most 10 physical attempts for the whole "
+                "logical A/B pair; the exact input variant alternates on every "
+                "physical pair"
+            ),
+            "alignment_retry_admission": (
+                "scheduled arrivals, common targets, and start-record brackets "
+                "only; collective and ready-region latency are excluded"
             ),
         },
         "readiness_probe": {
@@ -420,6 +427,8 @@ def _write_resolution_fixture(root: Path, harness: Path) -> None:
     (paired / "m16_c10d_inplace.json").write_text(
         json.dumps(result), encoding="utf-8"
     )
+    arrivals = [1_000_000_000 + rank * 100 for rank in range(4)]
+    target = max(arrivals) + ANALYZER.SCHEDULED_START_LEAD_NS
     failures = [
         {
             "rank": rank,
@@ -427,6 +436,12 @@ def _write_resolution_fixture(root: Path, harness: Path) -> None:
                 "AssertionError: candidate destructive/alias ABI differs from "
                 "reference: candidate != reference"
             ),
+            "scheduled_start_arrival_ns_by_rank": arrivals,
+            "scheduled_start_target_ns": target,
+            "start_record_bracket_ns": [
+                target + rank * 10,
+                target + rank * 10 + 5,
+            ],
         }
         for rank in range(4)
     ]
@@ -850,6 +865,58 @@ class TestCampaignAnalyzer(unittest.TestCase):
             )
             self.assertEqual(archived_receipt, receipt)
 
+            reference_path = root / "paired/m16_reference_control.json"
+            stale_contract = json.loads(reference_path.read_text(encoding="utf-8"))
+            stale_contract["timing_contract"]["rank_start_alignment"] = (
+                "selected stream synchronized after restoration; TP CPU-group "
+                "all-gather selects a common same-host monotonic deadline 5 ms "
+                "after latest arrival; ranks busy-wait; host timestamps bracket "
+                "every start-event record call"
+            )
+            reference_path.write_text(
+                json.dumps(stale_contract), encoding="utf-8"
+            )
+            with self.assertRaisesRegex(ValueError, "timing_contract_mismatch"):
+                ANALYZER.resolve_c10d_abi(root, ANALYZER.CASES[0], harness)
+
+            _write_resolution_fixture(root, harness)
+            reference_path = root / "paired/m16_reference_control.json"
+            extra_contract = json.loads(reference_path.read_text(encoding="utf-8"))
+            extra_contract["timing_contract"]["unrecognized"] = "must fail closed"
+            reference_path.write_text(json.dumps(extra_contract), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "timing_contract_mismatch"):
+                ANALYZER.resolve_c10d_abi(root, ANALYZER.CASES[0], harness)
+
+            _write_resolution_fixture(root, harness)
+            failure_log = root / "paired/m16_c10d_outplace.log"
+            failure_prefix = (
+                "SharedValidationError: candidate correctness failed collectively: "
+            )
+            failures = json.loads(
+                failure_log.read_text(encoding="utf-8").removeprefix(
+                    failure_prefix
+                )
+            )
+            failures[0]["rank"] = False
+            with self.assertRaisesRegex(ValueError, "unexpected collective ABI"):
+                ANALYZER._canonical_abi_mismatch_failures(
+                    failure_prefix + json.dumps(failures) + "\n"
+                )
+
+            _write_resolution_fixture(root, harness)
+            failure_log = root / "paired/m16_c10d_outplace.log"
+            failures = json.loads(
+                failure_log.read_text(encoding="utf-8").removeprefix(
+                    failure_prefix
+                )
+            )
+            failures[0]["scheduled_start_target_ns"] += 1
+            with self.assertRaisesRegex(ValueError, "invalid failed-attempt scheduled"):
+                ANALYZER._canonical_abi_mismatch_failures(
+                    failure_prefix + json.dumps(failures) + "\n"
+                )
+
+            _write_resolution_fixture(root, harness)
             status = root / "status.tsv"
             status.write_text(
                 status.read_text(encoding="utf-8").replace(

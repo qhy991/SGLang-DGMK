@@ -1,0 +1,16 @@
+started_utc=2026-07-22T19:30:12.122958011Z
+command= /home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/.venv/bin/python /home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/sglang/glm52_opt/history/tp_allreduce_reachability/analyze_tp4_campaign.py /tmp/tp_allreduce_reachability_20260722T192433Z --resolve-c10d m16 --harness-root /home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness --output /tmp/tp_allreduce_reachability_20260722T192433Z/paired/m16_c10d_selection.json
+timeout_seconds=1800
+{
+  "errors": [
+    {
+      "code": "c10d_abi_resolution_error",
+      "detail": "reference control failed full paired validation: [{\"code\": \"timing_contract_mismatch\", \"detail\": \"rank_start_alignment: expected 'selected stream synchronized after restoration; TP CPU-group all-gather selects a common same-host monotonic deadline 5 ms after latest arrival; ranks busy-wait; host timestamps bracket every start-event record call', got 'selected stream synchronized after restoration; TP CPU-group all-gather selects a common same-host monotonic deadline 5 ms after latest arrival; ranks busy-wait; host timestamps bracket every start-event record call; a host-only 500 us envelope predicate allows at most 10 physical attempts for the whole logical A/B pair; the exact input variant alternates on every physical pair'\", \"location\": \"paired/m16_reference_control.json\"}]",
+      "location": "paired/m16"
+    }
+  ],
+  "schema_version": 1,
+  "scope": "tp4_allreduce_diagnostic_only",
+  "short_name": "m16",
+  "valid": false
+}

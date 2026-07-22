@@ -230,6 +230,41 @@ them as absent or successful.
   dispatch policy changed; stock remains active. Rollback is the previous
   committed Harness `46ba026` runner.
 
+## Infrastructure attempt P4: clean campaign rejected by stale analyzer schema
+
+- Status: **REJECTED PARTIAL CAMPAIGN; ANALYZER FIX VALIDATED OFFLINE, FRESH
+  CLEAN CAMPAIGN REQUIRED** on 2026-07-22.
+- Identity: clean Harness `bea4a8cd294a84f2d305cd023eb3fed281de4b1e`
+  and SGLang `a91928c6f713d69722176a8d13781367e9b78dc4`, physical GPUs
+  0--3 under the all-GPU lock. Immutable raw files, status ledger, failure note,
+  fix receipt, offline replay receipts, and manifest:
+  [runtime/tp_allreduce_reachability_20260722T192433Z_aborted_analyzer_contract](runtime/tp_allreduce_reachability_20260722T192433Z_aborted_analyzer_contract/).
+- Hypothesis: the now-validated lifecycle and pair-retry runner would complete
+  the full clean campaign, and the committed analyzer would resolve the exact
+  in-place/out-of-place ABI before later GPU work.
+- Completed evidence: environment/topology, all three runtime traces, all nine
+  semantic rows, three baselines per shape, three reference controls, and six
+  c10d ABI attempts exited as expected. Exact in-place c10d passed for all
+  shapes; cloned out-of-place c10d failed its all-rank alias/poststate contract.
+- Failure: all three required ABI resolver steps exited 1 because the analyzer
+  still required the pre-retry `rank_start_alignment` text. Source inspection
+  during fix development found a second stale restriction: current collective
+  failure records include four scheduled arrivals and a common target in
+  addition to rank/error/bracket. The required phase guard stopped before
+  backend scouting, producer controls, profiles, and after-state receipts.
+- Exact delta and validation: the analyzer now requires the complete retry
+  timing contract and independently validates failure arrivals, the
+  `max(arrivals)+5,000,000 ns` target, rank brackets, and cross-rank equality.
+  Fifteen CPU tests pass. All three resolvers replayed successfully against the
+  untouched archive, selecting `inplace` and rejecting `outplace`.
+- Performance/profiler: ineligible and deliberately not summarized; the
+  campaign has no profiler or after-state evidence and the corrected analyzer
+  is a new source revision.
+- Risk/decision/rollback: offline replay validates the fix but cannot resume a
+  source-frozen campaign. Rerun from a fresh path after committing the analyzer
+  and archive. No backend or threshold is enabled; all TP4/TP8 behavior remains
+  stock.
+
 ## Planned attempt A0: stock reachability and reference characterization
 
 - Status: PENDING

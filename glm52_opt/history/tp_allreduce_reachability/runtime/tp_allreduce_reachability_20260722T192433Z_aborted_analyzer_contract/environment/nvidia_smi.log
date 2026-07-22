@@ -1,0 +1,8 @@
+started_utc=2026-07-22T19:24:47.097174975Z
+command= nvidia-smi --query-gpu=index\,uuid\,name\,pci.bus_id\,clocks.current.sm\,clocks.current.memory\,power.draw\,temperature.gpu --format=csv
+timeout_seconds=1800
+index, uuid, name, pci.bus_id, clocks.current.sm [MHz], clocks.current.memory [MHz], power.draw [W], temperature.gpu
+0, GPU-30b619de-87f2-1862-0d07-a595da8fe417, NVIDIA B200, 00000000:05:00.0, 120 MHz, 3996 MHz, 140.77 W, 31
+1, GPU-5b9be10b-5bfc-b658-9b31-f7ae8516dc54, NVIDIA B200, 00000000:06:00.0, 120 MHz, 3996 MHz, 146.18 W, 34
+2, GPU-df8b1d78-b06c-39a2-54f0-66b9fabf3a99, NVIDIA B200, 00000000:07:00.0, 120 MHz, 3996 MHz, 142.88 W, 33
+3, GPU-705cc39e-af1d-c4c0-d97d-4155237646af, NVIDIA B200, 00000000:08:00.0, 120 MHz, 3996 MHz, 145.94 W, 31

@@ -1,0 +1,2203 @@
+{
+  "all_reduce_trace": {
+    "enabled": false,
+    "evidence_valid": null,
+    "failure_counts_by_rank": null,
+    "measurement_instrumented": false,
+    "paths_by_rank": null,
+    "replay_limitation": "Python observes eager dispatch or CUDA graph capture only; CUDA graph replay does not re-enter this hook. Correlate stable kernel names in an Nsight Systems trace to prove replay execution."
+  },
+  "allreduce": {
+    "candidate_capture_context_by_rank": null,
+    "candidate_contract_by_rank": null,
+    "exact_oracle": "hash[row,col]=(37*(row%127)+17*(col%127)+13*(row%127)*(col%127))%127; base_variant=((hash+shift)%127)-63 for shifts [0,31]; source=base+2*rank-(world_size-1); expected=world_size*base",
+    "message_bytes": 393216,
+    "reference_contract_by_rank": [
+      {
+        "exact_values": true,
+        "local_poststate": "reduced",
+        "output": {
+          "device": "cuda:0",
+          "dtype": "torch.bfloat16",
+          "shape": [
+            32,
+            6144
+          ],
+          "stride": [
+            6144,
+            1
+          ]
+        },
+        "output_aliases_local": true,
+        "source_immutable": true
+      },
+      {
+        "exact_values": true,
+        "local_poststate": "reduced",
+        "output": {
+          "device": "cuda:1",
+          "dtype": "torch.bfloat16",
+          "shape": [
+            32,
+            6144
+          ],
+          "stride": [
+            6144,
+            1
+          ]
+        },
+        "output_aliases_local": true,
+        "source_immutable": true
+      },
+      {
+        "exact_values": true,
+        "local_poststate": "reduced",
+        "output": {
+          "device": "cuda:2",
+          "dtype": "torch.bfloat16",
+          "shape": [
+            32,
+            6144
+          ],
+          "stride": [
+            6144,
+            1
+          ]
+        },
+        "output_aliases_local": true,
+        "source_immutable": true
+      },
+      {
+        "exact_values": true,
+        "local_poststate": "reduced",
+        "output": {
+          "device": "cuda:3",
+          "dtype": "torch.bfloat16",
+          "shape": [
+            32,
+            6144
+          ],
+          "stride": [
+            6144,
+            1
+          ]
+        },
+        "output_aliases_local": true,
+        "source_immutable": true
+      }
+    ],
+    "reference_dispatch_by_rank": [
+      {
+        "communicators": {
+          "custom": {
+            "algorithm": "ONE_SHOT_PUSH",
+            "class": "sglang.srt.distributed.device_communicators.custom_all_reduce_v2.CustomAllReduceV2",
+            "fields": {
+              "config": "ModeConfig(one_shot_push_threshold=2097152, one_shot_pull_threshold=2097152)",
+              "disabled": "False",
+              "max_size": "16777216",
+              "override_algo": "None",
+              "rank": "0",
+              "tms_cudagraph": "False",
+              "world_size": "4"
+            },
+            "python_id": 137754964510480,
+            "should_custom_ar": {
+              "value": true
+            }
+          },
+          "pymscclpp": {
+            "should_mscclpp_allreduce": {
+              "value": false
+            }
+          },
+          "pynccl": {
+            "class": "sglang.srt.distributed.device_communicators.pynccl.PyNcclCommunicator",
+            "fields": {
+              "disabled": "True",
+              "rank": "0",
+              "world_size": "4"
+            },
+            "python_id": 137754833238448,
+            "symmetric_pool_enabled": {
+              "value": false
+            }
+          },
+          "quick": {
+            "should_quick_allreduce": {
+              "value": false
+            }
+          },
+          "torch_symmetric_memory": {
+            "should_torch_symm_mem_allreduce": {
+              "value": false
+            }
+          }
+        },
+        "dtype": "torch.bfloat16",
+        "execution_mode": "eager",
+        "group_name": "tp:0",
+        "group_ranks": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "local_size": 0,
+        "message_bytes": 393216,
+        "phase": "eager",
+        "predicted_reference_algorithm": "ONE_SHOT_PUSH",
+        "predicted_reference_backend": "custom_all_reduce_outplace",
+        "rank": 0,
+        "shape": [
+          32,
+          6144
+        ],
+        "stream": {
+          "cuda_stream": 108282940434720,
+          "requested": "nondefault"
+        },
+        "stride": [
+          6144,
+          1
+        ],
+        "world_size": 4
+      },
+      {
+        "communicators": {
+          "custom": {
+            "algorithm": "ONE_SHOT_PUSH",
+            "class": "sglang.srt.distributed.device_communicators.custom_all_reduce_v2.CustomAllReduceV2",
+            "fields": {
+              "config": "ModeConfig(one_shot_push_threshold=2097152, one_shot_pull_threshold=2097152)",
+              "disabled": "False",
+              "max_size": "16777216",
+              "override_algo": "None",
+              "rank": "1",
+              "tms_cudagraph": "False",
+              "world_size": "4"
+            },
+            "python_id": 134470930529168,
+            "should_custom_ar": {
+              "value": true
+            }
+          },
+          "pymscclpp": {
+            "should_mscclpp_allreduce": {
+              "value": false
+            }
+          },
+          "pynccl": {
+            "class": "sglang.srt.distributed.device_communicators.pynccl.PyNcclCommunicator",
+            "fields": {
+              "disabled": "True",
+              "rank": "1",
+              "world_size": "4"
+            },
+            "python_id": 134470930871744,
+            "symmetric_pool_enabled": {
+              "value": false
+            }
+          },
+          "quick": {
+            "should_quick_allreduce": {
+              "value": false
+            }
+          },
+          "torch_symmetric_memory": {
+            "should_torch_symm_mem_allreduce": {
+              "value": false
+            }
+          }
+        },
+        "dtype": "torch.bfloat16",
+        "execution_mode": "eager",
+        "group_name": "tp:0",
+        "group_ranks": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "local_size": 0,
+        "message_bytes": 393216,
+        "phase": "eager",
+        "predicted_reference_algorithm": "ONE_SHOT_PUSH",
+        "predicted_reference_backend": "custom_all_reduce_outplace",
+        "rank": 1,
+        "shape": [
+          32,
+          6144
+        ],
+        "stream": {
+          "cuda_stream": 105642475417456,
+          "requested": "nondefault"
+        },
+        "stride": [
+          6144,
+          1
+        ],
+        "world_size": 4
+      },
+      {
+        "communicators": {
+          "custom": {
+            "algorithm": "ONE_SHOT_PUSH",
+            "class": "sglang.srt.distributed.device_communicators.custom_all_reduce_v2.CustomAllReduceV2",
+            "fields": {
+              "config": "ModeConfig(one_shot_push_threshold=2097152, one_shot_pull_threshold=2097152)",
+              "disabled": "False",
+              "max_size": "16777216",
+              "override_algo": "None",
+              "rank": "2",
+              "tms_cudagraph": "False",
+              "world_size": "4"
+            },
+            "python_id": 137245011923920,
+            "should_custom_ar": {
+              "value": true
+            }
+          },
+          "pymscclpp": {
+            "should_mscclpp_allreduce": {
+              "value": false
+            }
+          },
+          "pynccl": {
+            "class": "sglang.srt.distributed.device_communicators.pynccl.PyNcclCommunicator",
+            "fields": {
+              "disabled": "True",
+              "rank": "2",
+              "world_size": "4"
+            },
+            "python_id": 137245012420240,
+            "symmetric_pool_enabled": {
+              "value": false
+            }
+          },
+          "quick": {
+            "should_quick_allreduce": {
+              "value": false
+            }
+          },
+          "torch_symmetric_memory": {
+            "should_torch_symm_mem_allreduce": {
+              "value": false
+            }
+          }
+        },
+        "dtype": "torch.bfloat16",
+        "execution_mode": "eager",
+        "group_name": "tp:0",
+        "group_ranks": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "local_size": 0,
+        "message_bytes": 393216,
+        "phase": "eager",
+        "predicted_reference_algorithm": "ONE_SHOT_PUSH",
+        "predicted_reference_backend": "custom_all_reduce_outplace",
+        "rank": 2,
+        "shape": [
+          32,
+          6144
+        ],
+        "stream": {
+          "cuda_stream": 96702091429440,
+          "requested": "nondefault"
+        },
+        "stride": [
+          6144,
+          1
+        ],
+        "world_size": 4
+      },
+      {
+        "communicators": {
+          "custom": {
+            "algorithm": "ONE_SHOT_PUSH",
+            "class": "sglang.srt.distributed.device_communicators.custom_all_reduce_v2.CustomAllReduceV2",
+            "fields": {
+              "config": "ModeConfig(one_shot_push_threshold=2097152, one_shot_pull_threshold=2097152)",
+              "disabled": "False",
+              "max_size": "16777216",
+              "override_algo": "None",
+              "rank": "3",
+              "tms_cudagraph": "False",
+              "world_size": "4"
+            },
+            "python_id": 130829743602000,
+            "should_custom_ar": {
+              "value": true
+            }
+          },
+          "pymscclpp": {
+            "should_mscclpp_allreduce": {
+              "value": false
+            }
+          },
+          "pynccl": {
+            "class": "sglang.srt.distributed.device_communicators.pynccl.PyNcclCommunicator",
+            "fields": {
+              "disabled": "True",
+              "rank": "3",
+              "world_size": "4"
+            },
+            "python_id": 130829743601232,
+            "symmetric_pool_enabled": {
+              "value": false
+            }
+          },
+          "quick": {
+            "should_quick_allreduce": {
+              "value": false
+            }
+          },
+          "torch_symmetric_memory": {
+            "should_torch_symm_mem_allreduce": {
+              "value": false
+            }
+          }
+        },
+        "dtype": "torch.bfloat16",
+        "execution_mode": "eager",
+        "group_name": "tp:0",
+        "group_ranks": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "local_size": 0,
+        "message_bytes": 393216,
+        "phase": "eager",
+        "predicted_reference_algorithm": "ONE_SHOT_PUSH",
+        "predicted_reference_backend": "custom_all_reduce_outplace",
+        "rank": 3,
+        "shape": [
+          32,
+          6144
+        ],
+        "stream": {
+          "cuda_stream": 104992571855520,
+          "requested": "nondefault"
+        },
+        "stride": [
+          6144,
+          1
+        ],
+        "world_size": 4
+      }
+    ]
+  },
+  "candidate": null,
+  "correctness": {
+    "alternating_input_variants": 2,
+    "candidate_state_guarded": false,
+    "exact_full_checks": "before and after timing",
+    "exact_full_tensor_consumer": "every warmup and measured sample",
+    "exact_position_probe": "every warmup and measured sample",
+    "passed": true,
+    "validation_errors_aggregated_over_tp_cpu_group": true
+  },
+  "disposition": "tp4_reference_characterization_only",
+  "environment": {
+    "device": {
+      "capability": [
+        10,
+        0
+      ],
+      "name": "NVIDIA B200",
+      "rank": 0,
+      "total_memory": 191490555904
+    },
+    "device_by_rank": [
+      {
+        "capability": [
+          10,
+          0
+        ],
+        "name": "NVIDIA B200",
+        "rank": 0,
+        "total_memory": 191490555904
+      },
+      {
+        "capability": [
+          10,
+          0
+        ],
+        "name": "NVIDIA B200",
+        "rank": 1,
+        "total_memory": 191490555904
+      },
+      {
+        "capability": [
+          10,
+          0
+        ],
+        "name": "NVIDIA B200",
+        "rank": 2,
+        "total_memory": 191490555904
+      },
+      {
+        "capability": [
+          10,
+          0
+        ],
+        "name": "NVIDIA B200",
+        "rank": 3,
+        "total_memory": 191490555904
+      }
+    ],
+    "env": {
+      "CUDA_VISIBLE_DEVICES": "0,1,2,3",
+      "NCCL_ALGO": null,
+      "NCCL_PROTO": null,
+      "SGLANG_ALL_REDUCE_TRACE": null,
+      "SGLANG_GLM52_OPT": "0",
+      "SGLANG_OPT_USE_CUSTOM_ALL_REDUCE_V2": null,
+      "SGLANG_ROOT": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/sglang"
+    },
+    "kernel_harness_git": {
+      "branch": "goal/glm52-prod-24-tp_allreduce_reachability",
+      "dirty": false,
+      "root": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness",
+      "sha": "bea4a8cd294a84f2d305cd023eb3fed281de4b1e",
+      "status": []
+    },
+    "packages": {
+      "flashinfer": {
+        "path": "/mnt/OS-oKqEXySb/home/qinhaiyan/miniconda3/envs/sglang/lib/python3.12/site-packages/flashinfer/__init__.py",
+        "version": "0.6.12"
+      },
+      "sgl_kernel": {
+        "path": "/mnt/OS-oKqEXySb/home/qinhaiyan/miniconda3/envs/sglang/lib/python3.12/site-packages/sgl_kernel/__init__.py",
+        "version": "0.4.4"
+      },
+      "sglang": {
+        "path": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/sglang/python/sglang/__init__.py",
+        "version": "0.5.15"
+      },
+      "torch": {
+        "cuda": "13.0",
+        "nccl": [
+          2,
+          28,
+          9
+        ],
+        "path": "/mnt/OS-oKqEXySb/home/qinhaiyan/miniconda3/envs/sglang/lib/python3.12/site-packages/torch/__init__.py",
+        "version": "2.11.0+cu130"
+      },
+      "triton": {
+        "path": "/mnt/OS-oKqEXySb/home/qinhaiyan/miniconda3/envs/sglang/lib/python3.12/site-packages/triton/__init__.py",
+        "version": "3.6.0"
+      }
+    },
+    "python": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/.venv/bin/python",
+    "python_version": "3.12.13 | packaged by Anaconda, Inc. | (main, Jul  9 2026, 14:38:16) [GCC 14.3.0]",
+    "sglang_git": {
+      "branch": "goal/glm52-prod-24-tp_allreduce_reachability",
+      "dirty": false,
+      "root": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/sglang",
+      "sha": "a91928c6f713d69722176a8d13781367e9b78dc4",
+      "status": []
+    }
+  },
+  "execution": {
+    "cuda_stream": 108282940434720,
+    "default_to_execution_waits_outside_timing": 3,
+    "mode": "eager",
+    "nvtx_measurement_range": "serving_native/tp4_allreduce_decode_m32/eager/nondefault/reference",
+    "nvtx_rank_synchronization": "rank 0 push after a TP CPU-group barrier; all ranks wait at a second barrier before measurement and before rank 0 pop",
+    "stream": "nondefault"
+  },
+  "gate": {
+    "candidate_present": false,
+    "metric": "paired ready-region rank-max p50 speedup",
+    "minimum_speedup": 1.03,
+    "passed": null,
+    "performance_eligible": true,
+    "stock_fallback_active": true
+  },
+  "production_acceptance": "This direct TP4 callable is not proof of the GLM serving caller/ABI and cannot be relabeled as TP8 evidence.",
+  "raw_samples": {
+    "alignment_policy": {
+      "accepted_pair_attempts": 10,
+      "admission_fields": [
+        "scheduled_start_arrival_ns_by_rank",
+        "scheduled_start_target_ns_by_rank",
+        "start_record_bracket_ns_by_rank",
+        "start_record_envelope_span_ns"
+      ],
+      "initial_input_variant": 0,
+      "latency_fields_excluded": true,
+      "max_pair_attempts": 10,
+      "next_input_variant": 0,
+      "rejected_pair_attempts": 0,
+      "requested_logical_pairs": 10,
+      "start_record_envelope_limit_ns": 500000,
+      "total_pair_attempts": 10
+    },
+    "candidate": null,
+    "measured_order": [
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ]
+    ],
+    "measurement_attempts": [
+      {
+        "accepted": true,
+        "attempt_id": 0,
+        "logical_pair_index": 0,
+        "order": [
+          "reference"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 0,
+        "samples": {
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.2500799894332886,
+              "rank_max_ms": 0.2500799894332886,
+              "rank_ms": [
+                0.2500799894332886,
+                0.23683199286460876,
+                0.22620800137519836,
+                0.22828799486160278
+              ]
+            },
+            "pair_attempt_id": 0,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.38470399379730225,
+              "rank_max_ms": 0.38470399379730225,
+              "rank_ms": [
+                0.38470399379730225,
+                0.24646399915218353,
+                0.32259199023246765,
+                0.31190401315689087
+              ]
+            },
+            "sample_index": 0,
+            "scheduled_start_arrival_ns_by_rank": [
+              744529561760595,
+              744529561805659,
+              744529561720564,
+              744529561716519
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              744529566805659,
+              744529566805659,
+              744529566805659,
+              744529566805659
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                744529566806384,
+                744529566837885
+              ],
+              [
+                744529566806808,
+                744529566841525
+              ],
+              [
+                744529566806347,
+                744529566832161
+              ],
+              [
+                744529566806387,
+                744529566835717
+              ]
+            ],
+            "start_record_envelope_span_ns": 35178,
+            "variant": 0
+          }
+        },
+        "variant": 0
+      },
+      {
+        "accepted": true,
+        "attempt_id": 1,
+        "logical_pair_index": 1,
+        "order": [
+          "reference"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 0,
+        "samples": {
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.36185601353645325,
+              "rank_max_ms": 0.3640959858894348,
+              "rank_ms": [
+                0.36185601353645325,
+                0.24531200528144836,
+                0.3640959858894348,
+                0.3627519905567169
+              ]
+            },
+            "pair_attempt_id": 1,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.3908799886703491,
+              "rank_max_ms": 0.3908799886703491,
+              "rank_ms": [
+                0.3908799886703491,
+                0.2545599937438965,
+                0.3741439878940582,
+                0.37279999256134033
+              ]
+            },
+            "sample_index": 1,
+            "scheduled_start_arrival_ns_by_rank": [
+              744529571885945,
+              744529572384709,
+              744529572070689,
+              744529572040415
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              744529577384709,
+              744529577384709,
+              744529577384709,
+              744529577384709
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                744529577385736,
+                744529577422231
+              ],
+              [
+                744529577386945,
+                744529577431311
+              ],
+              [
+                744529577385687,
+                744529577419768
+              ],
+              [
+                744529577385494,
+                744529577421446
+              ]
+            ],
+            "start_record_envelope_span_ns": 45817,
+            "variant": 1
+          }
+        },
+        "variant": 1
+      },
+      {
+        "accepted": true,
+        "attempt_id": 2,
+        "logical_pair_index": 2,
+        "order": [
+          "reference"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 0,
+        "samples": {
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.35836800932884216,
+              "rank_max_ms": 0.35836800932884216,
+              "rank_ms": [
+                0.35836800932884216,
+                0.24739199876785278,
+                0.354559987783432,
+                0.3572480082511902
+              ]
+            },
+            "pair_attempt_id": 2,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.42604801058769226,
+              "rank_max_ms": 0.48924800753593445,
+              "rank_ms": [
+                0.42604801058769226,
+                0.48924800753593445,
+                0.40806400775909424,
+                0.36713600158691406
+              ]
+            },
+            "sample_index": 2,
+            "scheduled_start_arrival_ns_by_rank": [
+              744529582436140,
+              744529582428900,
+              744529582309861,
+              744529582411152
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              744529587436140,
+              744529587436140,
+              744529587436140,
+              744529587436140
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                744529587437106,
+                744529587476470
+              ],
+              [
+                744529587437727,
+                744529587484165
+              ],
+              [
+                744529587437320,
+                744529587482983
+              ],
+              [
+                744529587436826,
+                744529587474999
+              ]
+            ],
+            "start_record_envelope_span_ns": 47339,
+            "variant": 0
+          }
+        },
+        "variant": 0
+      },
+      {
+        "accepted": true,
+        "attempt_id": 3,
+        "logical_pair_index": 3,
+        "order": [
+          "reference"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 0,
+        "samples": {
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.24508799612522125,
+              "rank_max_ms": 0.24508799612522125,
+              "rank_ms": [
+                0.24508799612522125,
+                0.23820799589157104,
+                0.20556800067424774,
+                0.2038400024175644
+              ]
+            },
+            "pair_attempt_id": 3,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.363072007894516,
+              "rank_max_ms": 0.363072007894516,
+              "rank_ms": [
+                0.363072007894516,
+                0.24767999351024628,
+                0.3023679852485657,
+                0.2828800082206726
+              ]
+            },
+            "sample_index": 3,
+            "scheduled_start_arrival_ns_by_rank": [
+              744529593086815,
+              744529592924877,
+              744529592969397,
+              744529592690265
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              744529598086815,
+              744529598086815,
+              744529598086815,
+              744529598086815
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                744529598087720,
+                744529598117701
+              ],
+              [
+                744529598088083,
+                744529598123334
+              ],
+              [
+                744529598087476,
+                744529598112679
+              ],
+              [
+                744529598087541,
+                744529598119351
+              ]
+            ],
+            "start_record_envelope_span_ns": 35858,
+            "variant": 1
+          }
+        },
+        "variant": 1
+      },
+      {
+        "accepted": true,
+        "attempt_id": 4,
+        "logical_pair_index": 4,
+        "order": [
+          "reference"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 0,
+        "samples": {
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.350847989320755,
+              "rank_max_ms": 0.3556160032749176,
+              "rank_ms": [
+                0.350847989320755,
+                0.24447999894618988,
+                0.3556160032749176,
+                0.3500159978866577
+              ]
+            },
+            "pair_attempt_id": 4,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.4212479889392853,
+              "rank_max_ms": 0.4880639910697937,
+              "rank_ms": [
+                0.4212479889392853,
+                0.4880639910697937,
+                0.3646399974822998,
+                0.36003199219703674
+              ]
+            },
+            "sample_index": 4,
+            "scheduled_start_arrival_ns_by_rank": [
+              744529601735353,
+              744529601850356,
+              744529602033410,
+              744529602036628
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              744529607036628,
+              744529607036628,
+              744529607036628,
+              744529607036628
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                744529607037533,
+                744529607073521
+              ],
+              [
+                744529607037652,
+                744529607073961
+              ],
+              [
+                744529607037200,
+                744529607067017
+              ],
+              [
+                744529607037472,
+                744529607075382
+              ]
+            ],
+            "start_record_envelope_span_ns": 38182,
+            "variant": 0
+          }
+        },
+        "variant": 0
+      },
+      {
+        "accepted": true,
+        "attempt_id": 5,
+        "logical_pair_index": 5,
+        "order": [
+          "reference"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 0,
+        "samples": {
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.358271986246109,
+              "rank_max_ms": 0.36294400691986084,
+              "rank_ms": [
+                0.358271986246109,
+                0.24611200392246246,
+                0.3598400056362152,
+                0.36294400691986084
+              ]
+            },
+            "pair_attempt_id": 5,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.3672960102558136,
+              "rank_max_ms": 0.4928640127182007,
+              "rank_ms": [
+                0.3672960102558136,
+                0.4928640127182007,
+                0.36982399225234985,
+                0.3728640079498291
+              ]
+            },
+            "sample_index": 5,
+            "scheduled_start_arrival_ns_by_rank": [
+              744529613216428,
+              744529613201497,
+              744529613060018,
+              744529612931260
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              744529618216428,
+              744529618216428,
+              744529618216428,
+              744529618216428
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                744529618217288,
+                744529618251514
+              ],
+              [
+                744529618217474,
+                744529618259241
+              ],
+              [
+                744529618217317,
+                744529618251177
+              ],
+              [
+                744529618217193,
+                744529618249914
+              ]
+            ],
+            "start_record_envelope_span_ns": 42048,
+            "variant": 1
+          }
+        },
+        "variant": 1
+      },
+      {
+        "accepted": true,
+        "attempt_id": 6,
+        "logical_pair_index": 6,
+        "order": [
+          "reference"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 0,
+        "samples": {
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.2616319954395294,
+              "rank_max_ms": 0.2616319954395294,
+              "rank_ms": [
+                0.2616319954395294,
+                0.25113600492477417,
+                0.23148800432682037,
+                0.19737599790096283
+              ]
+            },
+            "pair_attempt_id": 6,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.3891200125217438,
+              "rank_max_ms": 0.4917759895324707,
+              "rank_ms": [
+                0.3891200125217438,
+                0.4917759895324707,
+                0.34121599793434143,
+                0.28169599175453186
+              ]
+            },
+            "sample_index": 6,
+            "scheduled_start_arrival_ns_by_rank": [
+              744529623130117,
+              744529623193876,
+              744529622982401,
+              744529622991995
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              744529628193876,
+              744529628193876,
+              744529628193876,
+              744529628193876
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                744529628194814,
+                744529628229254
+              ],
+              [
+                744529628194739,
+                744529628232699
+              ],
+              [
+                744529628194535,
+                744529628222378
+              ],
+              [
+                744529628194502,
+                744529628227106
+              ]
+            ],
+            "start_record_envelope_span_ns": 38197,
+            "variant": 0
+          }
+        },
+        "variant": 0
+      },
+      {
+        "accepted": true,
+        "attempt_id": 7,
+        "logical_pair_index": 7,
+        "order": [
+          "reference"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 0,
+        "samples": {
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.2412160038948059,
+              "rank_max_ms": 0.24819199740886688,
+              "rank_ms": [
+                0.2412160038948059,
+                0.24819199740886688,
+                0.2253119945526123,
+                0.19382399320602417
+              ]
+            },
+            "pair_attempt_id": 7,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.36083200573921204,
+              "rank_max_ms": 0.4873279929161072,
+              "rank_ms": [
+                0.36083200573921204,
+                0.4873279929161072,
+                0.3387199938297272,
+                0.2800639867782593
+              ]
+            },
+            "sample_index": 7,
+            "scheduled_start_arrival_ns_by_rank": [
+              744529632273327,
+              744529632359945,
+              744529632210735,
+              744529632250015
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              744529637359945,
+              744529637359945,
+              744529637359945,
+              744529637359945
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                744529637360526,
+                744529637392338
+              ],
+              [
+                744529637360621,
+                744529637396008
+              ],
+              [
+                744529637360612,
+                744529637388720
+              ],
+              [
+                744529637360718,
+                744529637392004
+              ]
+            ],
+            "start_record_envelope_span_ns": 35482,
+            "variant": 1
+          }
+        },
+        "variant": 1
+      },
+      {
+        "accepted": true,
+        "attempt_id": 8,
+        "logical_pair_index": 8,
+        "order": [
+          "reference"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 0,
+        "samples": {
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.2728959918022156,
+              "rank_max_ms": 0.2728959918022156,
+              "rank_ms": [
+                0.2728959918022156,
+                0.2622080147266388,
+                0.23987199366092682,
+                0.22646400332450867
+              ]
+            },
+            "pair_attempt_id": 8,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.40115201473236084,
+              "rank_max_ms": 0.40115201473236084,
+              "rank_ms": [
+                0.40115201473236084,
+                0.2712000012397766,
+                0.343968003988266,
+                0.31196799874305725
+              ]
+            },
+            "sample_index": 8,
+            "scheduled_start_arrival_ns_by_rank": [
+              744529640952325,
+              744529640974157,
+              744529640915570,
+              744529640902675
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              744529645974157,
+              744529645974157,
+              744529645974157,
+              744529645974157
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                744529645975143,
+                744529646021403
+              ],
+              [
+                744529645975103,
+                744529646021536
+              ],
+              [
+                744529645974871,
+                744529646015543
+              ],
+              [
+                744529645974791,
+                744529646018598
+              ]
+            ],
+            "start_record_envelope_span_ns": 46745,
+            "variant": 0
+          }
+        },
+        "variant": 0
+      },
+      {
+        "accepted": true,
+        "attempt_id": 9,
+        "logical_pair_index": 9,
+        "order": [
+          "reference"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 0,
+        "samples": {
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.22195200622081757,
+              "rank_max_ms": 0.24079999327659607,
+              "rank_ms": [
+                0.22195200622081757,
+                0.24079999327659607,
+                0.1841920018196106,
+                0.17395199835300446
+              ]
+            },
+            "pair_attempt_id": 9,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.34143999218940735,
+              "rank_max_ms": 0.34143999218940735,
+              "rank_ms": [
+                0.34143999218940735,
+                0.25011199712753296,
+                0.28198400139808655,
+                0.26476800441741943
+              ]
+            },
+            "sample_index": 9,
+            "scheduled_start_arrival_ns_by_rank": [
+              744529650663325,
+              744529650482958,
+              744529650627853,
+              744529650729412
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              744529655729412,
+              744529655729412,
+              744529655729412,
+              744529655729412
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                744529655730128,
+                744529655758714
+              ],
+              [
+                744529655730197,
+                744529655758801
+              ],
+              [
+                744529655730102,
+                744529655752238
+              ],
+              [
+                744529655730159,
+                744529655759673
+              ]
+            ],
+            "start_record_envelope_span_ns": 29571,
+            "variant": 1
+          }
+        },
+        "variant": 1
+      }
+    ],
+    "rank_order": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "reference": [
+      {
+        "collective_only": {
+          "local_ms": 0.2500799894332886,
+          "rank_max_ms": 0.2500799894332886,
+          "rank_ms": [
+            0.2500799894332886,
+            0.23683199286460876,
+            0.22620800137519836,
+            0.22828799486160278
+          ]
+        },
+        "pair_attempt_id": 0,
+        "pair_retry_ordinal": 0,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.38470399379730225,
+          "rank_max_ms": 0.38470399379730225,
+          "rank_ms": [
+            0.38470399379730225,
+            0.24646399915218353,
+            0.32259199023246765,
+            0.31190401315689087
+          ]
+        },
+        "sample_index": 0,
+        "scheduled_start_arrival_ns_by_rank": [
+          744529561760595,
+          744529561805659,
+          744529561720564,
+          744529561716519
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          744529566805659,
+          744529566805659,
+          744529566805659,
+          744529566805659
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            744529566806384,
+            744529566837885
+          ],
+          [
+            744529566806808,
+            744529566841525
+          ],
+          [
+            744529566806347,
+            744529566832161
+          ],
+          [
+            744529566806387,
+            744529566835717
+          ]
+        ],
+        "start_record_envelope_span_ns": 35178,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.36185601353645325,
+          "rank_max_ms": 0.3640959858894348,
+          "rank_ms": [
+            0.36185601353645325,
+            0.24531200528144836,
+            0.3640959858894348,
+            0.3627519905567169
+          ]
+        },
+        "pair_attempt_id": 1,
+        "pair_retry_ordinal": 0,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.3908799886703491,
+          "rank_max_ms": 0.3908799886703491,
+          "rank_ms": [
+            0.3908799886703491,
+            0.2545599937438965,
+            0.3741439878940582,
+            0.37279999256134033
+          ]
+        },
+        "sample_index": 1,
+        "scheduled_start_arrival_ns_by_rank": [
+          744529571885945,
+          744529572384709,
+          744529572070689,
+          744529572040415
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          744529577384709,
+          744529577384709,
+          744529577384709,
+          744529577384709
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            744529577385736,
+            744529577422231
+          ],
+          [
+            744529577386945,
+            744529577431311
+          ],
+          [
+            744529577385687,
+            744529577419768
+          ],
+          [
+            744529577385494,
+            744529577421446
+          ]
+        ],
+        "start_record_envelope_span_ns": 45817,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.35836800932884216,
+          "rank_max_ms": 0.35836800932884216,
+          "rank_ms": [
+            0.35836800932884216,
+            0.24739199876785278,
+            0.354559987783432,
+            0.3572480082511902
+          ]
+        },
+        "pair_attempt_id": 2,
+        "pair_retry_ordinal": 0,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.42604801058769226,
+          "rank_max_ms": 0.48924800753593445,
+          "rank_ms": [
+            0.42604801058769226,
+            0.48924800753593445,
+            0.40806400775909424,
+            0.36713600158691406
+          ]
+        },
+        "sample_index": 2,
+        "scheduled_start_arrival_ns_by_rank": [
+          744529582436140,
+          744529582428900,
+          744529582309861,
+          744529582411152
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          744529587436140,
+          744529587436140,
+          744529587436140,
+          744529587436140
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            744529587437106,
+            744529587476470
+          ],
+          [
+            744529587437727,
+            744529587484165
+          ],
+          [
+            744529587437320,
+            744529587482983
+          ],
+          [
+            744529587436826,
+            744529587474999
+          ]
+        ],
+        "start_record_envelope_span_ns": 47339,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.24508799612522125,
+          "rank_max_ms": 0.24508799612522125,
+          "rank_ms": [
+            0.24508799612522125,
+            0.23820799589157104,
+            0.20556800067424774,
+            0.2038400024175644
+          ]
+        },
+        "pair_attempt_id": 3,
+        "pair_retry_ordinal": 0,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.363072007894516,
+          "rank_max_ms": 0.363072007894516,
+          "rank_ms": [
+            0.363072007894516,
+            0.24767999351024628,
+            0.3023679852485657,
+            0.2828800082206726
+          ]
+        },
+        "sample_index": 3,
+        "scheduled_start_arrival_ns_by_rank": [
+          744529593086815,
+          744529592924877,
+          744529592969397,
+          744529592690265
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          744529598086815,
+          744529598086815,
+          744529598086815,
+          744529598086815
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            744529598087720,
+            744529598117701
+          ],
+          [
+            744529598088083,
+            744529598123334
+          ],
+          [
+            744529598087476,
+            744529598112679
+          ],
+          [
+            744529598087541,
+            744529598119351
+          ]
+        ],
+        "start_record_envelope_span_ns": 35858,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.350847989320755,
+          "rank_max_ms": 0.3556160032749176,
+          "rank_ms": [
+            0.350847989320755,
+            0.24447999894618988,
+            0.3556160032749176,
+            0.3500159978866577
+          ]
+        },
+        "pair_attempt_id": 4,
+        "pair_retry_ordinal": 0,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.4212479889392853,
+          "rank_max_ms": 0.4880639910697937,
+          "rank_ms": [
+            0.4212479889392853,
+            0.4880639910697937,
+            0.3646399974822998,
+            0.36003199219703674
+          ]
+        },
+        "sample_index": 4,
+        "scheduled_start_arrival_ns_by_rank": [
+          744529601735353,
+          744529601850356,
+          744529602033410,
+          744529602036628
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          744529607036628,
+          744529607036628,
+          744529607036628,
+          744529607036628
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            744529607037533,
+            744529607073521
+          ],
+          [
+            744529607037652,
+            744529607073961
+          ],
+          [
+            744529607037200,
+            744529607067017
+          ],
+          [
+            744529607037472,
+            744529607075382
+          ]
+        ],
+        "start_record_envelope_span_ns": 38182,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.358271986246109,
+          "rank_max_ms": 0.36294400691986084,
+          "rank_ms": [
+            0.358271986246109,
+            0.24611200392246246,
+            0.3598400056362152,
+            0.36294400691986084
+          ]
+        },
+        "pair_attempt_id": 5,
+        "pair_retry_ordinal": 0,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.3672960102558136,
+          "rank_max_ms": 0.4928640127182007,
+          "rank_ms": [
+            0.3672960102558136,
+            0.4928640127182007,
+            0.36982399225234985,
+            0.3728640079498291
+          ]
+        },
+        "sample_index": 5,
+        "scheduled_start_arrival_ns_by_rank": [
+          744529613216428,
+          744529613201497,
+          744529613060018,
+          744529612931260
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          744529618216428,
+          744529618216428,
+          744529618216428,
+          744529618216428
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            744529618217288,
+            744529618251514
+          ],
+          [
+            744529618217474,
+            744529618259241
+          ],
+          [
+            744529618217317,
+            744529618251177
+          ],
+          [
+            744529618217193,
+            744529618249914
+          ]
+        ],
+        "start_record_envelope_span_ns": 42048,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.2616319954395294,
+          "rank_max_ms": 0.2616319954395294,
+          "rank_ms": [
+            0.2616319954395294,
+            0.25113600492477417,
+            0.23148800432682037,
+            0.19737599790096283
+          ]
+        },
+        "pair_attempt_id": 6,
+        "pair_retry_ordinal": 0,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.3891200125217438,
+          "rank_max_ms": 0.4917759895324707,
+          "rank_ms": [
+            0.3891200125217438,
+            0.4917759895324707,
+            0.34121599793434143,
+            0.28169599175453186
+          ]
+        },
+        "sample_index": 6,
+        "scheduled_start_arrival_ns_by_rank": [
+          744529623130117,
+          744529623193876,
+          744529622982401,
+          744529622991995
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          744529628193876,
+          744529628193876,
+          744529628193876,
+          744529628193876
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            744529628194814,
+            744529628229254
+          ],
+          [
+            744529628194739,
+            744529628232699
+          ],
+          [
+            744529628194535,
+            744529628222378
+          ],
+          [
+            744529628194502,
+            744529628227106
+          ]
+        ],
+        "start_record_envelope_span_ns": 38197,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.2412160038948059,
+          "rank_max_ms": 0.24819199740886688,
+          "rank_ms": [
+            0.2412160038948059,
+            0.24819199740886688,
+            0.2253119945526123,
+            0.19382399320602417
+          ]
+        },
+        "pair_attempt_id": 7,
+        "pair_retry_ordinal": 0,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.36083200573921204,
+          "rank_max_ms": 0.4873279929161072,
+          "rank_ms": [
+            0.36083200573921204,
+            0.4873279929161072,
+            0.3387199938297272,
+            0.2800639867782593
+          ]
+        },
+        "sample_index": 7,
+        "scheduled_start_arrival_ns_by_rank": [
+          744529632273327,
+          744529632359945,
+          744529632210735,
+          744529632250015
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          744529637359945,
+          744529637359945,
+          744529637359945,
+          744529637359945
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            744529637360526,
+            744529637392338
+          ],
+          [
+            744529637360621,
+            744529637396008
+          ],
+          [
+            744529637360612,
+            744529637388720
+          ],
+          [
+            744529637360718,
+            744529637392004
+          ]
+        ],
+        "start_record_envelope_span_ns": 35482,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.2728959918022156,
+          "rank_max_ms": 0.2728959918022156,
+          "rank_ms": [
+            0.2728959918022156,
+            0.2622080147266388,
+            0.23987199366092682,
+            0.22646400332450867
+          ]
+        },
+        "pair_attempt_id": 8,
+        "pair_retry_ordinal": 0,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.40115201473236084,
+          "rank_max_ms": 0.40115201473236084,
+          "rank_ms": [
+            0.40115201473236084,
+            0.2712000012397766,
+            0.343968003988266,
+            0.31196799874305725
+          ]
+        },
+        "sample_index": 8,
+        "scheduled_start_arrival_ns_by_rank": [
+          744529640952325,
+          744529640974157,
+          744529640915570,
+          744529640902675
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          744529645974157,
+          744529645974157,
+          744529645974157,
+          744529645974157
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            744529645975143,
+            744529646021403
+          ],
+          [
+            744529645975103,
+            744529646021536
+          ],
+          [
+            744529645974871,
+            744529646015543
+          ],
+          [
+            744529645974791,
+            744529646018598
+          ]
+        ],
+        "start_record_envelope_span_ns": 46745,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.22195200622081757,
+          "rank_max_ms": 0.24079999327659607,
+          "rank_ms": [
+            0.22195200622081757,
+            0.24079999327659607,
+            0.1841920018196106,
+            0.17395199835300446
+          ]
+        },
+        "pair_attempt_id": 9,
+        "pair_retry_ordinal": 0,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.34143999218940735,
+          "rank_max_ms": 0.34143999218940735,
+          "rank_ms": [
+            0.34143999218940735,
+            0.25011199712753296,
+            0.28198400139808655,
+            0.26476800441741943
+          ]
+        },
+        "sample_index": 9,
+        "scheduled_start_arrival_ns_by_rank": [
+          744529650663325,
+          744529650482958,
+          744529650627853,
+          744529650729412
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          744529655729412,
+          744529655729412,
+          744529655729412,
+          744529655729412
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            744529655730128,
+            744529655758714
+          ],
+          [
+            744529655730197,
+            744529655758801
+          ],
+          [
+            744529655730102,
+            744529655752238
+          ],
+          [
+            744529655730159,
+            744529655759673
+          ]
+        ],
+        "start_record_envelope_span_ns": 29571,
+        "variant": 1
+      }
+    ],
+    "warmup_order": [
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ]
+    ],
+    "warmup_variants": [
+      1,
+      0,
+      1
+    ]
+  },
+  "readiness_probe": {
+    "dtype": "torch.bfloat16",
+    "full_tensor_consumer": "preallocated BF16 negation output",
+    "full_tensor_validation": "exact on every warmup and measured sample",
+    "num_elements": 60,
+    "positions": [
+      [
+        0,
+        0
+      ],
+      [
+        0,
+        1
+      ],
+      [
+        0,
+        2
+      ],
+      [
+        0,
+        3
+      ],
+      [
+        0,
+        2048
+      ],
+      [
+        0,
+        3072
+      ],
+      [
+        0,
+        6140
+      ],
+      [
+        0,
+        6141
+      ],
+      [
+        0,
+        6142
+      ],
+      [
+        0,
+        6143
+      ],
+      [
+        1,
+        0
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        1,
+        3
+      ],
+      [
+        1,
+        2048
+      ],
+      [
+        1,
+        3072
+      ],
+      [
+        1,
+        6140
+      ],
+      [
+        1,
+        6141
+      ],
+      [
+        1,
+        6142
+      ],
+      [
+        1,
+        6143
+      ],
+      [
+        10,
+        0
+      ],
+      [
+        10,
+        1
+      ],
+      [
+        10,
+        2
+      ],
+      [
+        10,
+        3
+      ],
+      [
+        10,
+        2048
+      ],
+      [
+        10,
+        3072
+      ],
+      [
+        10,
+        6140
+      ],
+      [
+        10,
+        6141
+      ],
+      [
+        10,
+        6142
+      ],
+      [
+        10,
+        6143
+      ],
+      [
+        16,
+        0
+      ],
+      [
+        16,
+        1
+      ],
+      [
+        16,
+        2
+      ],
+      [
+        16,
+        3
+      ],
+      [
+        16,
+        2048
+      ],
+      [
+        16,
+        3072
+      ],
+      [
+        16,
+        6140
+      ],
+      [
+        16,
+        6141
+      ],
+      [
+        16,
+        6142
+      ],
+      [
+        16,
+        6143
+      ],
+      [
+        30,
+        0
+      ],
+      [
+        30,
+        1
+      ],
+      [
+        30,
+        2
+      ],
+      [
+        30,
+        3
+      ],
+      [
+        30,
+        2048
+      ],
+      [
+        30,
+        3072
+      ],
+      [
+        30,
+        6140
+      ],
+      [
+        30,
+        6141
+      ],
+      [
+        30,
+        6142
+      ],
+      [
+        30,
+        6143
+      ],
+      [
+        31,
+        0
+      ],
+      [
+        31,
+        1
+      ],
+      [
+        31,
+        2
+      ],
+      [
+        31,
+        3
+      ],
+      [
+        31,
+        2048
+      ],
+      [
+        31,
+        3072
+      ],
+      [
+        31,
+        6140
+      ],
+      [
+        31,
+        6141
+      ],
+      [
+        31,
+        6142
+      ],
+      [
+        31,
+        6143
+      ]
+    ],
+    "validation": "exact on every warmup and measured sample"
+  },
+  "reference": {
+    "collective_only": {
+      "median_ms": 0.2672639936208725,
+      "min_ms": 0.24079999327659607,
+      "p95_ms": 0.36294400691986084
+    },
+    "gate_metric": "ready_region.rank_max_ms",
+    "readiness_probe_overhead_median_ms": 0.13040000200271606,
+    "ready_region": {
+      "median_ms": 0.444240003824234,
+      "min_ms": 0.34143999218940735,
+      "p95_ms": 0.4917759895324707
+    }
+  },
+  "reference_policy": "SGLANG_GLM52_OPT=0 production GroupCoordinator path",
+  "result_path": "/tmp/tp_allreduce_reachability_20260722T192433Z/semantics/tp4_allreduce_decode_m32.eager.nondefault.json",
+  "schema_version": 2,
+  "scope": "tp4_allreduce_diagnostic_only",
+  "timing_contract": {
+    "alignment_retry_admission": "scheduled arrivals, common targets, and start-record brackets only; collective and ready-region latency are excluded",
+    "collective_only": "start event through event recorded immediately after run()",
+    "gate_metric": "ready_region rank-max paired p50",
+    "rank_start_alignment": "selected stream synchronized after restoration; TP CPU-group all-gather selects a common same-host monotonic deadline 5 ms after latest arrival; ranks busy-wait; host timestamps bracket every start-event record call; a host-only 500 us envelope predicate allows at most 10 physical attempts for the whole logical A/B pair; the exact input variant alternates on every physical pair",
+    "ready_region": "start event through full-tensor same-stream negation and position-sensitive gather",
+    "restoration": "variant source-to-local copy and consumer/probe poison occur before every start event"
+  },
+  "workload": {
+    "distributed": true,
+    "family": "allreduce",
+    "name": "tp4_allreduce_decode_m32",
+    "notes": "TP4/DP4 decode bucket: local M=32; sum reduction. Standalone diagnostic; production caller/ABI not yet proven.",
+    "params": {
+      "dtype": "bfloat16",
+      "hidden": 6144,
+      "local_tokens": 32
+    },
+    "phase": "decode",
+    "source_symbol": "sglang.srt.distributed.parallel_state.GroupCoordinator.all_reduce",
+    "world_size": 4
+  }
+}

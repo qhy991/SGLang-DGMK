@@ -1,0 +1,79 @@
+started_utc=2026-07-22T19:24:47.717106497Z
+command= nvidia-smi nvlink --status
+timeout_seconds=1800
+GPU 0: NVIDIA B200 (UUID: GPU-30b619de-87f2-1862-0d07-a595da8fe417)
+	 Link 0: 53.125 GB/s
+	 Link 1: 53.125 GB/s
+	 Link 2: 53.125 GB/s
+	 Link 3: 53.125 GB/s
+	 Link 4: 53.125 GB/s
+	 Link 5: 53.125 GB/s
+	 Link 6: 53.125 GB/s
+	 Link 7: 53.125 GB/s
+	 Link 8: 53.125 GB/s
+	 Link 9: 53.125 GB/s
+	 Link 10: 53.125 GB/s
+	 Link 11: 53.125 GB/s
+	 Link 12: 53.125 GB/s
+	 Link 13: 53.125 GB/s
+	 Link 14: 53.125 GB/s
+	 Link 15: 53.125 GB/s
+	 Link 16: 53.125 GB/s
+	 Link 17: 53.125 GB/s
+GPU 1: NVIDIA B200 (UUID: GPU-5b9be10b-5bfc-b658-9b31-f7ae8516dc54)
+	 Link 0: 53.125 GB/s
+	 Link 1: 53.125 GB/s
+	 Link 2: 53.125 GB/s
+	 Link 3: 53.125 GB/s
+	 Link 4: 53.125 GB/s
+	 Link 5: 53.125 GB/s
+	 Link 6: 53.125 GB/s
+	 Link 7: 53.125 GB/s
+	 Link 8: 53.125 GB/s
+	 Link 9: 53.125 GB/s
+	 Link 10: 53.125 GB/s
+	 Link 11: 53.125 GB/s
+	 Link 12: 53.125 GB/s
+	 Link 13: 53.125 GB/s
+	 Link 14: 53.125 GB/s
+	 Link 15: 53.125 GB/s
+	 Link 16: 53.125 GB/s
+	 Link 17: 53.125 GB/s
+GPU 2: NVIDIA B200 (UUID: GPU-df8b1d78-b06c-39a2-54f0-66b9fabf3a99)
+	 Link 0: 53.125 GB/s
+	 Link 1: 53.125 GB/s
+	 Link 2: 53.125 GB/s
+	 Link 3: 53.125 GB/s
+	 Link 4: 53.125 GB/s
+	 Link 5: 53.125 GB/s
+	 Link 6: 53.125 GB/s
+	 Link 7: 53.125 GB/s
+	 Link 8: 53.125 GB/s
+	 Link 9: 53.125 GB/s
+	 Link 10: 53.125 GB/s
+	 Link 11: 53.125 GB/s
+	 Link 12: 53.125 GB/s
+	 Link 13: 53.125 GB/s
+	 Link 14: 53.125 GB/s
+	 Link 15: 53.125 GB/s
+	 Link 16: 53.125 GB/s
+	 Link 17: 53.125 GB/s
+GPU 3: NVIDIA B200 (UUID: GPU-705cc39e-af1d-c4c0-d97d-4155237646af)
+	 Link 0: 53.125 GB/s
+	 Link 1: 53.125 GB/s
+	 Link 2: 53.125 GB/s
+	 Link 3: 53.125 GB/s
+	 Link 4: 53.125 GB/s
+	 Link 5: 53.125 GB/s
+	 Link 6: 53.125 GB/s
+	 Link 7: 53.125 GB/s
+	 Link 8: 53.125 GB/s
+	 Link 9: 53.125 GB/s
+	 Link 10: 53.125 GB/s
+	 Link 11: 53.125 GB/s
+	 Link 12: 53.125 GB/s
+	 Link 13: 53.125 GB/s
+	 Link 14: 53.125 GB/s
+	 Link 15: 53.125 GB/s
+	 Link 16: 53.125 GB/s
+	 Link 17: 53.125 GB/s

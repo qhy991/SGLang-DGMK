@@ -1,0 +1,13 @@
+{
+  "errors": [
+    {
+      "code": "c10d_abi_resolution_error",
+      "detail": "reference control failed full paired validation: [{\"code\": \"timing_contract_mismatch\", \"detail\": \"rank_start_alignment: expected 'selected stream synchronized after restoration; TP CPU-group all-gather selects a common same-host monotonic deadline 5 ms after latest arrival; ranks busy-wait; host timestamps bracket every start-event record call', got 'selected stream synchronized after restoration; TP CPU-group all-gather selects a common same-host monotonic deadline 5 ms after latest arrival; ranks busy-wait; host timestamps bracket every start-event record call; a host-only 500 us envelope predicate allows at most 10 physical attempts for the whole logical A/B pair; the exact input variant alternates on every physical pair'\", \"location\": \"paired/prefill_reference_control.json\"}]",
+      "location": "paired/prefill"
+    }
+  ],
+  "schema_version": 1,
+  "scope": "tp4_allreduce_diagnostic_only",
+  "short_name": "prefill",
+  "valid": false
+}

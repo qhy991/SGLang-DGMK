@@ -1,0 +1,119 @@
+started_utc=2026-07-22T19:33:38.986602191Z
+command= /home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/serving_native/run.sh tp4_allreduce_prefill --candidate /home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/serving_native/candidates/allreduce_torch_outplace.py --execution-mode eager --stream nondefault --warmup 10 --repeat 100 --output /tmp/tp_allreduce_reachability_20260722T192433Z/paired/prefill_c10d_outplace.json
+timeout_seconds=1800
+
+*****************************************
+Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+*****************************************
+/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/.venv/lib/python3.12/site-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+  return func(*args, **kwargs)
+[rank0]:[W722 19:33:50.033214589 ProcessGroupNCCL.cpp:5188] Guessing device ID based on global rank. This can cause a hang if rank to GPU mapping is heterogeneous. You can specify device_id in init_process_group()
+[rank0]: Traceback (most recent call last):
+[rank0]:   File "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/serving_native/tp_allreduce_runner.py", line 2066, in <module>
+[rank0]:     raise SystemExit(run_task(parse_args()))
+[rank0]:                      ^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/serving_native/tp_allreduce_runner.py", line 1735, in run_task
+[rank0]:     _, candidate_contract, _ = _invoke(
+[rank0]:                                ^^^^^^^^
+[rank0]:   File "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/serving_native/tp_allreduce_runner.py", line 923, in _invoke
+[rank0]:     gathered = _gather_status_or_raise(runtime, label=label, local=local)
+[rank0]:                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/serving_native/tp_allreduce_runner.py", line 730, in _gather_status_or_raise
+[rank0]:     raise SharedValidationError(
+[rank0]: SharedValidationError: candidate correctness failed collectively: [{"error": "AssertionError: candidate destructive/alias ABI differs from reference: {'output': {'shape': [8192, 6144], 'stride': [6144, 1], 'dtype': 'torch.bfloat16', 'device': 'cuda:0'}, 'output_aliases_local': False, 'local_poststate': 'source', 'source_immutable': True, 'exact_values': True} != {'output': {'shape': [8192, 6144], 'stride': [6144, 1], 'dtype': 'torch.bfloat16', 'device': 'cuda:0'}, 'output_aliases_local': True, 'local_poststate': 'reduced', 'source_immutable': True, 'exact_values': True}", "rank": 0, "scheduled_start_arrival_ns_by_rank": [744934143671229, 744934143794335, 744934143892787, 744934143789524], "scheduled_start_target_ns": 744934148892787, "start_record_bracket_ns": [744934148895007, 744934148949861]}, {"error": "AssertionError: candidate destructive/alias ABI differs from reference: {'output': {'shape': [8192, 6144], 'stride': [6144, 1], 'dtype': 'torch.bfloat16', 'device': 'cuda:1'}, 'output_aliases_local': False, 'local_poststate': 'source', 'source_immutable': True, 'exact_values': True} != {'output': {'shape': [8192, 6144], 'stride': [6144, 1], 'dtype': 'torch.bfloat16', 'device': 'cuda:1'}, 'output_aliases_local': True, 'local_poststate': 'reduced', 'source_immutable': True, 'exact_values': True}", "rank": 1, "scheduled_start_arrival_ns_by_rank": [744934143671229, 744934143794335, 744934143892787, 744934143789524], "scheduled_start_target_ns": 744934148892787, "start_record_bracket_ns": [744934148894164, 744934148941645]}, {"error": "AssertionError: candidate destructive/alias ABI differs from reference: {'output': {'shape': [8192, 6144], 'stride': [6144, 1], 'dtype': 'torch.bfloat16', 'device': 'cuda:2'}, 'output_aliases_local': False, 'local_poststate': 'source', 'source_immutable': True, 'exact_values': True} != {'output': {'shape': [8192, 6144], 'stride': [6144, 1], 'dtype': 'torch.bfloat16', 'device': 'cuda:2'}, 'output_aliases_local': True, 'local_poststate': 'reduced', 'source_immutable': True, 'exact_values': True}", "rank": 2, "scheduled_start_arrival_ns_by_rank": [744934143671229, 744934143794335, 744934143892787, 744934143789524], "scheduled_start_target_ns": 744934148892787, "start_record_bracket_ns": [744934148893635, 744934148930091]}, {"error": "AssertionError: candidate destructive/alias ABI differs from reference: {'output': {'shape': [8192, 6144], 'stride': [6144, 1], 'dtype': 'torch.bfloat16', 'device': 'cuda:3'}, 'output_aliases_local': False, 'local_poststate': 'source', 'source_immutable': True, 'exact_values': True} != {'output': {'shape': [8192, 6144], 'stride': [6144, 1], 'dtype': 'torch.bfloat16', 'device': 'cuda:3'}, 'output_aliases_local': True, 'local_poststate': 'reduced', 'source_immutable': True, 'exact_values': True}", "rank": 3, "scheduled_start_arrival_ns_by_rank": [744934143671229, 744934143794335, 744934143892787, 744934143789524], "scheduled_start_target_ns": 744934148892787, "start_record_bracket_ns": [744934148894245, 744934148937881]}]
+[rank1]: Traceback (most recent call last):
+[rank1]:   File "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/serving_native/tp_allreduce_runner.py", line 2066, in <module>
+[rank1]:     raise SystemExit(run_task(parse_args()))
+[rank1]:                      ^^^^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/serving_native/tp_allreduce_runner.py", line 1735, in run_task
+[rank1]:     _, candidate_contract, _ = _invoke(
+[rank1]:                                ^^^^^^^^
+[rank1]:   File "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/serving_native/tp_allreduce_runner.py", line 923, in _invoke
+[rank1]:     gathered = _gather_status_or_raise(runtime, label=label, local=local)
+[rank1]:                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank1]:   File "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/serving_native/tp_allreduce_runner.py", line 730, in _gather_status_or_raise
+[rank1]:     raise SharedValidationError(
+[rank1]: SharedValidationError: candidate correctness failed collectively: [{"error": "AssertionError: candidate destructive/alias ABI differs from reference: {'output': {'shape': [8192, 6144], 'stride': [6144, 1], 'dtype': 'torch.bfloat16', 'device': 'cuda:0'}, 'output_aliases_local': False, 'local_poststate': 'source', 'source_immutable': True, 'exact_values': True} != {'output': {'shape': [8192, 6144], 'stride': [6144, 1], 'dtype': 'torch.bfloat16', 'device': 'cuda:0'}, 'output_aliases_local': True, 'local_poststate': 'reduced', 'source_immutable': True, 'exact_values': True}", "rank": 0, "scheduled_start_arrival_ns_by_rank": [744934143671229, 744934143794335, 744934143892787, 744934143789524], "scheduled_start_target_ns": 744934148892787, "start_record_bracket_ns": [744934148895007, 744934148949861]}, {"error": "AssertionError: candidate destructive/alias ABI differs from reference: {'output': {'shape': [8192, 6144], 'stride': [6144, 1], 'dtype': 'torch.bfloat16', 'device': 'cuda:1'}, 'output_aliases_local': False, 'local_poststate': 'source', 'source_immutable': True, 'exact_values': True} != {'output': {'shape': [8192, 6144], 'stride': [6144, 1], 'dtype': 'torch.bfloat16', 'device': 'cuda:1'}, 'output_aliases_local': True, 'local_poststate': 'reduced', 'source_immutable': True, 'exact_values': True}", "rank": 1, "scheduled_start_arrival_ns_by_rank": [744934143671229, 744934143794335, 744934143892787, 744934143789524], "scheduled_start_target_ns": 744934148892787, "start_record_bracket_ns": [744934148894164, 744934148941645]}, {"error": "AssertionError: candidate destructive/alias ABI differs from reference: {'output': {'shape': [8192, 6144], 'stride': [6144, 1], 'dtype': 'torch.bfloat16', 'device': 'cuda:2'}, 'output_aliases_local': False, 'local_poststate': 'source', 'source_immutable': True, 'exact_values': True} != {'output': {'shape': [8192, 6144], 'stride': [6144, 1], 'dtype': 'torch.bfloat16', 'device': 'cuda:2'}, 'output_aliases_local': True, 'local_poststate': 'reduced', 'source_immutable': True, 'exact_values': True}", "rank": 2, "scheduled_start_arrival_ns_by_rank": [744934143671229, 744934143794335, 744934143892787, 744934143789524], "scheduled_start_target_ns": 744934148892787, "start_record_bracket_ns": [744934148893635, 744934148930091]}, {"error": "AssertionError: candidate destructive/alias ABI differs from reference: {'output': {'shape': [8192, 6144], 'stride': [6144, 1], 'dtype': 'torch.bfloat16', 'device': 'cuda:3'}, 'output_aliases_local': False, 'local_poststate': 'source', 'source_immutable': True, 'exact_values': True} != {'output': {'shape': [8192, 6144], 'stride': [6144, 1], 'dtype': 'torch.bfloat16', 'device': 'cuda:3'}, 'output_aliases_local': True, 'local_poststate': 'reduced', 'source_immutable': True, 'exact_values': True}", "rank": 3, "scheduled_start_arrival_ns_by_rank": [744934143671229, 744934143794335, 744934143892787, 744934143789524], "scheduled_start_target_ns": 744934148892787, "start_record_bracket_ns": [744934148894245, 744934148937881]}]
+[rank3]: Traceback (most recent call last):
+[rank3]:   File "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/serving_native/tp_allreduce_runner.py", line 2066, in <module>
+[rank3]:     raise SystemExit(run_task(parse_args()))
+[rank3]:                      ^^^^^^^^^^^^^^^^^^^^^^
+[rank3]:   File "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/serving_native/tp_allreduce_runner.py", line 1735, in run_task
+[rank3]:     _, candidate_contract, _ = _invoke(
+[rank3]:                                ^^^^^^^^
+[rank3]:   File "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/serving_native/tp_allreduce_runner.py", line 923, in _invoke
+[rank3]:     gathered = _gather_status_or_raise(runtime, label=label, local=local)
+[rank3]:                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank3]:   File "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/serving_native/tp_allreduce_runner.py", line 730, in _gather_status_or_raise
+[rank3]:     raise SharedValidationError(
+[rank3]: SharedValidationError: candidate correctness failed collectively: [{"error": "AssertionError: candidate destructive/alias ABI differs from reference: {'output': {'shape': [8192, 6144], 'stride': [6144, 1], 'dtype': 'torch.bfloat16', 'device': 'cuda:0'}, 'output_aliases_local': False, 'local_poststate': 'source', 'source_immutable': True, 'exact_values': True} != {'output': {'shape': [8192, 6144], 'stride': [6144, 1], 'dtype': 'torch.bfloat16', 'device': 'cuda:0'}, 'output_aliases_local': True, 'local_poststate': 'reduced', 'source_immutable': True, 'exact_values': True}", "rank": 0, "scheduled_start_arrival_ns_by_rank": [744934143671229, 744934143794335, 744934143892787, 744934143789524], "scheduled_start_target_ns": 744934148892787, "start_record_bracket_ns": [744934148895007, 744934148949861]}, {"error": "AssertionError: candidate destructive/alias ABI differs from reference: {'output': {'shape': [8192, 6144], 'stride': [6144, 1], 'dtype': 'torch.bfloat16', 'device': 'cuda:1'}, 'output_aliases_local': False, 'local_poststate': 'source', 'source_immutable': True, 'exact_values': True} != {'output': {'shape': [8192, 6144], 'stride': [6144, 1], 'dtype': 'torch.bfloat16', 'device': 'cuda:1'}, 'output_aliases_local': True, 'local_poststate': 'reduced', 'source_immutable': True, 'exact_values': True}", "rank": 1, "scheduled_start_arrival_ns_by_rank": [744934143671229, 744934143794335, 744934143892787, 744934143789524], "scheduled_start_target_ns": 744934148892787, "start_record_bracket_ns": [744934148894164, 744934148941645]}, {"error": "AssertionError: candidate destructive/alias ABI differs from reference: {'output': {'shape': [8192, 6144], 'stride': [6144, 1], 'dtype': 'torch.bfloat16', 'device': 'cuda:2'}, 'output_aliases_local': False, 'local_poststate': 'source', 'source_immutable': True, 'exact_values': True} != {'output': {'shape': [8192, 6144], 'stride': [6144, 1], 'dtype': 'torch.bfloat16', 'device': 'cuda:2'}, 'output_aliases_local': True, 'local_poststate': 'reduced', 'source_immutable': True, 'exact_values': True}", "rank": 2, "scheduled_start_arrival_ns_by_rank": [744934143671229, 744934143794335, 744934143892787, 744934143789524], "scheduled_start_target_ns": 744934148892787, "start_record_bracket_ns": [744934148893635, 744934148930091]}, {"error": "AssertionError: candidate destructive/alias ABI differs from reference: {'output': {'shape': [8192, 6144], 'stride': [6144, 1], 'dtype': 'torch.bfloat16', 'device': 'cuda:3'}, 'output_aliases_local': False, 'local_poststate': 'source', 'source_immutable': True, 'exact_values': True} != {'output': {'shape': [8192, 6144], 'stride': [6144, 1], 'dtype': 'torch.bfloat16', 'device': 'cuda:3'}, 'output_aliases_local': True, 'local_poststate': 'reduced', 'source_immutable': True, 'exact_values': True}", "rank": 3, "scheduled_start_arrival_ns_by_rank": [744934143671229, 744934143794335, 744934143892787, 744934143789524], "scheduled_start_target_ns": 744934148892787, "start_record_bracket_ns": [744934148894245, 744934148937881]}]
+[rank2]: Traceback (most recent call last):
+[rank2]:   File "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/serving_native/tp_allreduce_runner.py", line 2066, in <module>
+[rank2]:     raise SystemExit(run_task(parse_args()))
+[rank2]:                      ^^^^^^^^^^^^^^^^^^^^^^
+[rank2]:   File "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/serving_native/tp_allreduce_runner.py", line 1735, in run_task
+[rank2]:     _, candidate_contract, _ = _invoke(
+[rank2]:                                ^^^^^^^^
+[rank2]:   File "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/serving_native/tp_allreduce_runner.py", line 923, in _invoke
+[rank2]:     gathered = _gather_status_or_raise(runtime, label=label, local=local)
+[rank2]:                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank2]:   File "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/serving_native/tp_allreduce_runner.py", line 730, in _gather_status_or_raise
+[rank2]:     raise SharedValidationError(
+[rank2]: SharedValidationError: candidate correctness failed collectively: [{"error": "AssertionError: candidate destructive/alias ABI differs from reference: {'output': {'shape': [8192, 6144], 'stride': [6144, 1], 'dtype': 'torch.bfloat16', 'device': 'cuda:0'}, 'output_aliases_local': False, 'local_poststate': 'source', 'source_immutable': True, 'exact_values': True} != {'output': {'shape': [8192, 6144], 'stride': [6144, 1], 'dtype': 'torch.bfloat16', 'device': 'cuda:0'}, 'output_aliases_local': True, 'local_poststate': 'reduced', 'source_immutable': True, 'exact_values': True}", "rank": 0, "scheduled_start_arrival_ns_by_rank": [744934143671229, 744934143794335, 744934143892787, 744934143789524], "scheduled_start_target_ns": 744934148892787, "start_record_bracket_ns": [744934148895007, 744934148949861]}, {"error": "AssertionError: candidate destructive/alias ABI differs from reference: {'output': {'shape': [8192, 6144], 'stride': [6144, 1], 'dtype': 'torch.bfloat16', 'device': 'cuda:1'}, 'output_aliases_local': False, 'local_poststate': 'source', 'source_immutable': True, 'exact_values': True} != {'output': {'shape': [8192, 6144], 'stride': [6144, 1], 'dtype': 'torch.bfloat16', 'device': 'cuda:1'}, 'output_aliases_local': True, 'local_poststate': 'reduced', 'source_immutable': True, 'exact_values': True}", "rank": 1, "scheduled_start_arrival_ns_by_rank": [744934143671229, 744934143794335, 744934143892787, 744934143789524], "scheduled_start_target_ns": 744934148892787, "start_record_bracket_ns": [744934148894164, 744934148941645]}, {"error": "AssertionError: candidate destructive/alias ABI differs from reference: {'output': {'shape': [8192, 6144], 'stride': [6144, 1], 'dtype': 'torch.bfloat16', 'device': 'cuda:2'}, 'output_aliases_local': False, 'local_poststate': 'source', 'source_immutable': True, 'exact_values': True} != {'output': {'shape': [8192, 6144], 'stride': [6144, 1], 'dtype': 'torch.bfloat16', 'device': 'cuda:2'}, 'output_aliases_local': True, 'local_poststate': 'reduced', 'source_immutable': True, 'exact_values': True}", "rank": 2, "scheduled_start_arrival_ns_by_rank": [744934143671229, 744934143794335, 744934143892787, 744934143789524], "scheduled_start_target_ns": 744934148892787, "start_record_bracket_ns": [744934148893635, 744934148930091]}, {"error": "AssertionError: candidate destructive/alias ABI differs from reference: {'output': {'shape': [8192, 6144], 'stride': [6144, 1], 'dtype': 'torch.bfloat16', 'device': 'cuda:3'}, 'output_aliases_local': False, 'local_poststate': 'source', 'source_immutable': True, 'exact_values': True} != {'output': {'shape': [8192, 6144], 'stride': [6144, 1], 'dtype': 'torch.bfloat16', 'device': 'cuda:3'}, 'output_aliases_local': True, 'local_poststate': 'reduced', 'source_immutable': True, 'exact_values': True}", "rank": 3, "scheduled_start_arrival_ns_by_rank": [744934143671229, 744934143794335, 744934143892787, 744934143789524], "scheduled_start_target_ns": 744934148892787, "start_record_bracket_ns": [744934148894245, 744934148937881]}]
+W0722 19:33:54.028000 2098127 /mnt/OS-oKqEXySb/home/qinhaiyan/miniconda3/envs/sglang/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/api.py:1012] Sending process 2098613 closing signal SIGTERM
+W0722 19:33:54.029000 2098127 /mnt/OS-oKqEXySb/home/qinhaiyan/miniconda3/envs/sglang/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/api.py:1012] Sending process 2098614 closing signal SIGTERM
+W0722 19:33:54.029000 2098127 /mnt/OS-oKqEXySb/home/qinhaiyan/miniconda3/envs/sglang/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/api.py:1012] Sending process 2098616 closing signal SIGTERM
+E0722 19:33:54.320000 2098127 /mnt/OS-oKqEXySb/home/qinhaiyan/miniconda3/envs/sglang/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/api.py:986] failed (exitcode: 1) local_rank: 2 (pid: 2098615) of binary: /home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/.venv/bin/python
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/.venv/lib/python3.12/site-packages/torch/distributed/run.py", line 994, in <module>
+    main()
+  File "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/.venv/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+    return f(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^
+  File "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/.venv/lib/python3.12/site-packages/torch/distributed/run.py", line 990, in main
+    run(args)
+  File "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/.venv/lib/python3.12/site-packages/torch/distributed/run.py", line 981, in run
+    elastic_launch(
+  File "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/.venv/lib/python3.12/site-packages/torch/distributed/launcher/api.py", line 170, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/.venv/lib/python3.12/site-packages/torch/distributed/launcher/api.py", line 317, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/serving_native/tp_allreduce_runner.py FAILED
+------------------------------------------------------------
+Failures:
+[1]:
+  time      : 2026-07-22_19:33:54
+  host      : dry-vm-embraces-fin-03.datacrunch.io
+  rank      : 0 (local_rank: 0)
+  exitcode  : 1 (pid: 2098613)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[2]:
+  time      : 2026-07-22_19:33:54
+  host      : dry-vm-embraces-fin-03.datacrunch.io
+  rank      : 1 (local_rank: 1)
+  exitcode  : 1 (pid: 2098614)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[3]:
+  time      : 2026-07-22_19:33:54
+  host      : dry-vm-embraces-fin-03.datacrunch.io
+  rank      : 3 (local_rank: 3)
+  exitcode  : 1 (pid: 2098616)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2026-07-22_19:33:54
+  host      : dry-vm-embraces-fin-03.datacrunch.io
+  rank      : 2 (local_rank: 2)
+  exitcode  : 1 (pid: 2098615)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================

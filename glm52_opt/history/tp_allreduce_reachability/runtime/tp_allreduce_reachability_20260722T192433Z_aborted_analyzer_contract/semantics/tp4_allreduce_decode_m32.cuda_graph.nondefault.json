@@ -1,0 +1,2203 @@
+{
+  "all_reduce_trace": {
+    "enabled": false,
+    "evidence_valid": null,
+    "failure_counts_by_rank": null,
+    "measurement_instrumented": false,
+    "paths_by_rank": null,
+    "replay_limitation": "Python observes eager dispatch or CUDA graph capture only; CUDA graph replay does not re-enter this hook. Correlate stable kernel names in an Nsight Systems trace to prove replay execution."
+  },
+  "allreduce": {
+    "candidate_capture_context_by_rank": null,
+    "candidate_contract_by_rank": null,
+    "exact_oracle": "hash[row,col]=(37*(row%127)+17*(col%127)+13*(row%127)*(col%127))%127; base_variant=((hash+shift)%127)-63 for shifts [0,31]; source=base+2*rank-(world_size-1); expected=world_size*base",
+    "message_bytes": 393216,
+    "reference_contract_by_rank": [
+      {
+        "exact_values": true,
+        "local_poststate": "reduced",
+        "output": {
+          "device": "cuda:0",
+          "dtype": "torch.bfloat16",
+          "shape": [
+            32,
+            6144
+          ],
+          "stride": [
+            6144,
+            1
+          ]
+        },
+        "output_aliases_local": true,
+        "source_immutable": true
+      },
+      {
+        "exact_values": true,
+        "local_poststate": "reduced",
+        "output": {
+          "device": "cuda:1",
+          "dtype": "torch.bfloat16",
+          "shape": [
+            32,
+            6144
+          ],
+          "stride": [
+            6144,
+            1
+          ]
+        },
+        "output_aliases_local": true,
+        "source_immutable": true
+      },
+      {
+        "exact_values": true,
+        "local_poststate": "reduced",
+        "output": {
+          "device": "cuda:2",
+          "dtype": "torch.bfloat16",
+          "shape": [
+            32,
+            6144
+          ],
+          "stride": [
+            6144,
+            1
+          ]
+        },
+        "output_aliases_local": true,
+        "source_immutable": true
+      },
+      {
+        "exact_values": true,
+        "local_poststate": "reduced",
+        "output": {
+          "device": "cuda:3",
+          "dtype": "torch.bfloat16",
+          "shape": [
+            32,
+            6144
+          ],
+          "stride": [
+            6144,
+            1
+          ]
+        },
+        "output_aliases_local": true,
+        "source_immutable": true
+      }
+    ],
+    "reference_dispatch_by_rank": [
+      {
+        "communicators": {
+          "custom": {
+            "algorithm": "ONE_SHOT_PUSH",
+            "class": "sglang.srt.distributed.device_communicators.custom_all_reduce_v2.CustomAllReduceV2",
+            "fields": {
+              "config": "ModeConfig(one_shot_push_threshold=2097152, one_shot_pull_threshold=2097152)",
+              "disabled": "False",
+              "max_size": "16777216",
+              "override_algo": "None",
+              "rank": "0",
+              "tms_cudagraph": "False",
+              "world_size": "4"
+            },
+            "python_id": 124837265198544,
+            "should_custom_ar": {
+              "value": true
+            }
+          },
+          "pymscclpp": {
+            "should_mscclpp_allreduce": {
+              "value": false
+            }
+          },
+          "pynccl": {
+            "class": "sglang.srt.distributed.device_communicators.pynccl.PyNcclCommunicator",
+            "fields": {
+              "disabled": "False",
+              "rank": "0",
+              "world_size": "4"
+            },
+            "python_id": 124837202000736,
+            "symmetric_pool_enabled": {
+              "value": false
+            }
+          },
+          "quick": {
+            "should_quick_allreduce": {
+              "value": false
+            }
+          },
+          "torch_symmetric_memory": {
+            "should_torch_symm_mem_allreduce": {
+              "value": false
+            }
+          }
+        },
+        "dtype": "torch.bfloat16",
+        "execution_mode": "cuda_graph",
+        "group_name": "tp:0",
+        "group_ranks": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "local_size": 0,
+        "message_bytes": 393216,
+        "phase": "reference_capture",
+        "predicted_reference_algorithm": "ONE_SHOT_PUSH",
+        "predicted_reference_backend": "custom_all_reduce_outplace",
+        "rank": 0,
+        "shape": [
+          32,
+          6144
+        ],
+        "stream": {
+          "cuda_stream": 104823331188080,
+          "requested": "nondefault"
+        },
+        "stride": [
+          6144,
+          1
+        ],
+        "world_size": 4
+      },
+      {
+        "communicators": {
+          "custom": {
+            "algorithm": "ONE_SHOT_PUSH",
+            "class": "sglang.srt.distributed.device_communicators.custom_all_reduce_v2.CustomAllReduceV2",
+            "fields": {
+              "config": "ModeConfig(one_shot_push_threshold=2097152, one_shot_pull_threshold=2097152)",
+              "disabled": "False",
+              "max_size": "16777216",
+              "override_algo": "None",
+              "rank": "1",
+              "tms_cudagraph": "False",
+              "world_size": "4"
+            },
+            "python_id": 129374814123984,
+            "should_custom_ar": {
+              "value": true
+            }
+          },
+          "pymscclpp": {
+            "should_mscclpp_allreduce": {
+              "value": false
+            }
+          },
+          "pynccl": {
+            "class": "sglang.srt.distributed.device_communicators.pynccl.PyNcclCommunicator",
+            "fields": {
+              "disabled": "False",
+              "rank": "1",
+              "world_size": "4"
+            },
+            "python_id": 129374813949344,
+            "symmetric_pool_enabled": {
+              "value": false
+            }
+          },
+          "quick": {
+            "should_quick_allreduce": {
+              "value": false
+            }
+          },
+          "torch_symmetric_memory": {
+            "should_torch_symm_mem_allreduce": {
+              "value": false
+            }
+          }
+        },
+        "dtype": "torch.bfloat16",
+        "execution_mode": "cuda_graph",
+        "group_name": "tp:0",
+        "group_ranks": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "local_size": 0,
+        "message_bytes": 393216,
+        "phase": "reference_capture",
+        "predicted_reference_algorithm": "ONE_SHOT_PUSH",
+        "predicted_reference_backend": "custom_all_reduce_outplace",
+        "rank": 1,
+        "shape": [
+          32,
+          6144
+        ],
+        "stream": {
+          "cuda_stream": 101879464908112,
+          "requested": "nondefault"
+        },
+        "stride": [
+          6144,
+          1
+        ],
+        "world_size": 4
+      },
+      {
+        "communicators": {
+          "custom": {
+            "algorithm": "ONE_SHOT_PUSH",
+            "class": "sglang.srt.distributed.device_communicators.custom_all_reduce_v2.CustomAllReduceV2",
+            "fields": {
+              "config": "ModeConfig(one_shot_push_threshold=2097152, one_shot_pull_threshold=2097152)",
+              "disabled": "False",
+              "max_size": "16777216",
+              "override_algo": "None",
+              "rank": "2",
+              "tms_cudagraph": "False",
+              "world_size": "4"
+            },
+            "python_id": 137809561948800,
+            "should_custom_ar": {
+              "value": true
+            }
+          },
+          "pymscclpp": {
+            "should_mscclpp_allreduce": {
+              "value": false
+            }
+          },
+          "pynccl": {
+            "class": "sglang.srt.distributed.device_communicators.pynccl.PyNcclCommunicator",
+            "fields": {
+              "disabled": "False",
+              "rank": "2",
+              "world_size": "4"
+            },
+            "python_id": 137809533105840,
+            "symmetric_pool_enabled": {
+              "value": false
+            }
+          },
+          "quick": {
+            "should_quick_allreduce": {
+              "value": false
+            }
+          },
+          "torch_symmetric_memory": {
+            "should_torch_symm_mem_allreduce": {
+              "value": false
+            }
+          }
+        },
+        "dtype": "torch.bfloat16",
+        "execution_mode": "cuda_graph",
+        "group_name": "tp:0",
+        "group_ranks": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "local_size": 0,
+        "message_bytes": 393216,
+        "phase": "reference_capture",
+        "predicted_reference_algorithm": "ONE_SHOT_PUSH",
+        "predicted_reference_backend": "custom_all_reduce_outplace",
+        "rank": 2,
+        "shape": [
+          32,
+          6144
+        ],
+        "stream": {
+          "cuda_stream": 100156872179760,
+          "requested": "nondefault"
+        },
+        "stride": [
+          6144,
+          1
+        ],
+        "world_size": 4
+      },
+      {
+        "communicators": {
+          "custom": {
+            "algorithm": "ONE_SHOT_PUSH",
+            "class": "sglang.srt.distributed.device_communicators.custom_all_reduce_v2.CustomAllReduceV2",
+            "fields": {
+              "config": "ModeConfig(one_shot_push_threshold=2097152, one_shot_pull_threshold=2097152)",
+              "disabled": "False",
+              "max_size": "16777216",
+              "override_algo": "None",
+              "rank": "3",
+              "tms_cudagraph": "False",
+              "world_size": "4"
+            },
+            "python_id": 138578791763408,
+            "should_custom_ar": {
+              "value": true
+            }
+          },
+          "pymscclpp": {
+            "should_mscclpp_allreduce": {
+              "value": false
+            }
+          },
+          "pynccl": {
+            "class": "sglang.srt.distributed.device_communicators.pynccl.PyNcclCommunicator",
+            "fields": {
+              "disabled": "False",
+              "rank": "3",
+              "world_size": "4"
+            },
+            "python_id": 138578660571760,
+            "symmetric_pool_enabled": {
+              "value": false
+            }
+          },
+          "quick": {
+            "should_quick_allreduce": {
+              "value": false
+            }
+          },
+          "torch_symmetric_memory": {
+            "should_torch_symm_mem_allreduce": {
+              "value": false
+            }
+          }
+        },
+        "dtype": "torch.bfloat16",
+        "execution_mode": "cuda_graph",
+        "group_name": "tp:0",
+        "group_ranks": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "local_size": 0,
+        "message_bytes": 393216,
+        "phase": "reference_capture",
+        "predicted_reference_algorithm": "ONE_SHOT_PUSH",
+        "predicted_reference_backend": "custom_all_reduce_outplace",
+        "rank": 3,
+        "shape": [
+          32,
+          6144
+        ],
+        "stream": {
+          "cuda_stream": 106826622678976,
+          "requested": "nondefault"
+        },
+        "stride": [
+          6144,
+          1
+        ],
+        "world_size": 4
+      }
+    ]
+  },
+  "candidate": null,
+  "correctness": {
+    "alternating_input_variants": 2,
+    "candidate_state_guarded": false,
+    "exact_full_checks": "before and after timing",
+    "exact_full_tensor_consumer": "every warmup and measured sample",
+    "exact_position_probe": "every warmup and measured sample",
+    "passed": true,
+    "validation_errors_aggregated_over_tp_cpu_group": true
+  },
+  "disposition": "tp4_reference_characterization_only",
+  "environment": {
+    "device": {
+      "capability": [
+        10,
+        0
+      ],
+      "name": "NVIDIA B200",
+      "rank": 0,
+      "total_memory": 191490555904
+    },
+    "device_by_rank": [
+      {
+        "capability": [
+          10,
+          0
+        ],
+        "name": "NVIDIA B200",
+        "rank": 0,
+        "total_memory": 191490555904
+      },
+      {
+        "capability": [
+          10,
+          0
+        ],
+        "name": "NVIDIA B200",
+        "rank": 1,
+        "total_memory": 191490555904
+      },
+      {
+        "capability": [
+          10,
+          0
+        ],
+        "name": "NVIDIA B200",
+        "rank": 2,
+        "total_memory": 191490555904
+      },
+      {
+        "capability": [
+          10,
+          0
+        ],
+        "name": "NVIDIA B200",
+        "rank": 3,
+        "total_memory": 191490555904
+      }
+    ],
+    "env": {
+      "CUDA_VISIBLE_DEVICES": "0,1,2,3",
+      "NCCL_ALGO": null,
+      "NCCL_PROTO": null,
+      "SGLANG_ALL_REDUCE_TRACE": null,
+      "SGLANG_GLM52_OPT": "0",
+      "SGLANG_OPT_USE_CUSTOM_ALL_REDUCE_V2": null,
+      "SGLANG_ROOT": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/sglang"
+    },
+    "kernel_harness_git": {
+      "branch": "goal/glm52-prod-24-tp_allreduce_reachability",
+      "dirty": false,
+      "root": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness",
+      "sha": "bea4a8cd294a84f2d305cd023eb3fed281de4b1e",
+      "status": []
+    },
+    "packages": {
+      "flashinfer": {
+        "path": "/mnt/OS-oKqEXySb/home/qinhaiyan/miniconda3/envs/sglang/lib/python3.12/site-packages/flashinfer/__init__.py",
+        "version": "0.6.12"
+      },
+      "sgl_kernel": {
+        "path": "/mnt/OS-oKqEXySb/home/qinhaiyan/miniconda3/envs/sglang/lib/python3.12/site-packages/sgl_kernel/__init__.py",
+        "version": "0.4.4"
+      },
+      "sglang": {
+        "path": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/sglang/python/sglang/__init__.py",
+        "version": "0.5.15"
+      },
+      "torch": {
+        "cuda": "13.0",
+        "nccl": [
+          2,
+          28,
+          9
+        ],
+        "path": "/mnt/OS-oKqEXySb/home/qinhaiyan/miniconda3/envs/sglang/lib/python3.12/site-packages/torch/__init__.py",
+        "version": "2.11.0+cu130"
+      },
+      "triton": {
+        "path": "/mnt/OS-oKqEXySb/home/qinhaiyan/miniconda3/envs/sglang/lib/python3.12/site-packages/triton/__init__.py",
+        "version": "3.6.0"
+      }
+    },
+    "python": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/.venv/bin/python",
+    "python_version": "3.12.13 | packaged by Anaconda, Inc. | (main, Jul  9 2026, 14:38:16) [GCC 14.3.0]",
+    "sglang_git": {
+      "branch": "goal/glm52-prod-24-tp_allreduce_reachability",
+      "dirty": false,
+      "root": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/sglang",
+      "sha": "a91928c6f713d69722176a8d13781367e9b78dc4",
+      "status": []
+    }
+  },
+  "execution": {
+    "cuda_stream": 104823331188080,
+    "default_to_execution_waits_outside_timing": 5,
+    "mode": "cuda_graph",
+    "nvtx_measurement_range": "serving_native/tp4_allreduce_decode_m32/cuda_graph/nondefault/reference",
+    "nvtx_rank_synchronization": "rank 0 push after a TP CPU-group barrier; all ranks wait at a second barrier before measurement and before rank 0 pop",
+    "stream": "nondefault"
+  },
+  "gate": {
+    "candidate_present": false,
+    "metric": "paired ready-region rank-max p50 speedup",
+    "minimum_speedup": 1.03,
+    "passed": null,
+    "performance_eligible": true,
+    "stock_fallback_active": true
+  },
+  "production_acceptance": "This direct TP4 callable is not proof of the GLM serving caller/ABI and cannot be relabeled as TP8 evidence.",
+  "raw_samples": {
+    "alignment_policy": {
+      "accepted_pair_attempts": 10,
+      "admission_fields": [
+        "scheduled_start_arrival_ns_by_rank",
+        "scheduled_start_target_ns_by_rank",
+        "start_record_bracket_ns_by_rank",
+        "start_record_envelope_span_ns"
+      ],
+      "initial_input_variant": 0,
+      "latency_fields_excluded": true,
+      "max_pair_attempts": 10,
+      "next_input_variant": 0,
+      "rejected_pair_attempts": 0,
+      "requested_logical_pairs": 10,
+      "start_record_envelope_limit_ns": 500000,
+      "total_pair_attempts": 10
+    },
+    "candidate": null,
+    "measured_order": [
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ]
+    ],
+    "measurement_attempts": [
+      {
+        "accepted": true,
+        "attempt_id": 0,
+        "logical_pair_index": 0,
+        "order": [
+          "reference"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 0,
+        "samples": {
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.03654399886727333,
+              "rank_max_ms": 0.05663999915122986,
+              "rank_ms": [
+                0.03654399886727333,
+                0.03936000168323517,
+                0.05663999915122986,
+                0.03759999945759773
+              ]
+            },
+            "pair_attempt_id": 0,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.16655999422073364,
+              "rank_max_ms": 0.16655999422073364,
+              "rank_ms": [
+                0.16655999422073364,
+                0.14591999351978302,
+                0.13062399625778198,
+                0.15503999590873718
+              ]
+            },
+            "sample_index": 0,
+            "scheduled_start_arrival_ns_by_rank": [
+              744546350441160,
+              744546350089239,
+              744546350258079,
+              744546350140532
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              744546355441160,
+              744546355441160,
+              744546355441160,
+              744546355441160
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                744546355443622,
+                744546355482019
+              ],
+              [
+                744546355442022,
+                744546355480094
+              ],
+              [
+                744546355441682,
+                744546355463454
+              ],
+              [
+                744546355442149,
+                744546355482683
+              ]
+            ],
+            "start_record_envelope_span_ns": 41001,
+            "variant": 0
+          }
+        },
+        "variant": 0
+      },
+      {
+        "accepted": true,
+        "attempt_id": 1,
+        "logical_pair_index": 1,
+        "order": [
+          "reference"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 0,
+        "samples": {
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.07068800181150436,
+              "rank_max_ms": 0.08473599702119827,
+              "rank_ms": [
+                0.07068800181150436,
+                0.07667200267314911,
+                0.08473599702119827,
+                0.0488319993019104
+              ]
+            },
+            "pair_attempt_id": 1,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.16153599321842194,
+              "rank_max_ms": 0.22844800353050232,
+              "rank_ms": [
+                0.16153599321842194,
+                0.15516799688339233,
+                0.15254400670528412,
+                0.22844800353050232
+              ]
+            },
+            "sample_index": 1,
+            "scheduled_start_arrival_ns_by_rank": [
+              744546359986578,
+              744546359743892,
+              744546359737518,
+              744546360161674
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              744546365161674,
+              744546365161674,
+              744546365161674,
+              744546365161674
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                744546365162512,
+                744546365216610
+              ],
+              [
+                744546365162059,
+                744546365210940
+              ],
+              [
+                744546365162181,
+                744546365203786
+              ],
+              [
+                744546365162917,
+                744546365240240
+              ]
+            ],
+            "start_record_envelope_span_ns": 78181,
+            "variant": 1
+          }
+        },
+        "variant": 1
+      },
+      {
+        "accepted": true,
+        "attempt_id": 2,
+        "logical_pair_index": 2,
+        "order": [
+          "reference"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 0,
+        "samples": {
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.03807999938726425,
+              "rank_max_ms": 0.05238400027155876,
+              "rank_ms": [
+                0.03807999938726425,
+                0.04553600028157234,
+                0.05238400027155876,
+                0.03500799834728241
+              ]
+            },
+            "pair_attempt_id": 2,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.16972799599170685,
+              "rank_max_ms": 0.1709119975566864,
+              "rank_ms": [
+                0.16972799599170685,
+                0.14982399344444275,
+                0.15113599598407745,
+                0.1709119975566864
+              ]
+            },
+            "sample_index": 2,
+            "scheduled_start_arrival_ns_by_rank": [
+              744546369332712,
+              744546369556569,
+              744546369926343,
+              744546369661423
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              744546374926343,
+              744546374926343,
+              744546374926343,
+              744546374926343
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                744546374927291,
+                744546374961639
+              ],
+              [
+                744546374926731,
+                744546374957347
+              ],
+              [
+                744546374926912,
+                744546374949810
+              ],
+              [
+                744546374927166,
+                744546374965568
+              ]
+            ],
+            "start_record_envelope_span_ns": 38837,
+            "variant": 0
+          }
+        },
+        "variant": 0
+      },
+      {
+        "accepted": true,
+        "attempt_id": 3,
+        "logical_pair_index": 3,
+        "order": [
+          "reference"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 0,
+        "samples": {
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.05299200117588043,
+              "rank_max_ms": 0.07337599992752075,
+              "rank_ms": [
+                0.05299200117588043,
+                0.05782400071620941,
+                0.07337599992752075,
+                0.04105599969625473
+              ]
+            },
+            "pair_attempt_id": 3,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.20051200687885284,
+              "rank_max_ms": 0.20051200687885284,
+              "rank_ms": [
+                0.20051200687885284,
+                0.16687999665737152,
+                0.16550399363040924,
+                0.19228799641132355
+              ]
+            },
+            "sample_index": 3,
+            "scheduled_start_arrival_ns_by_rank": [
+              744546379227980,
+              744546379068233,
+              744546379012010,
+              744546379395812
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              744546384395812,
+              744546384395812,
+              744546384395812,
+              744546384395812
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                744546384397419,
+                744546384441941
+              ],
+              [
+                744546384396274,
+                744546384437045
+              ],
+              [
+                744546384396445,
+                744546384422194
+              ],
+              [
+                744546384396726,
+                744546384450977
+              ]
+            ],
+            "start_record_envelope_span_ns": 54703,
+            "variant": 1
+          }
+        },
+        "variant": 1
+      },
+      {
+        "accepted": true,
+        "attempt_id": 4,
+        "logical_pair_index": 4,
+        "order": [
+          "reference"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 0,
+        "samples": {
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.062111999839544296,
+              "rank_max_ms": 0.062111999839544296,
+              "rank_ms": [
+                0.062111999839544296,
+                0.04867200180888176,
+                0.059776000678539276,
+                0.03705599904060364
+              ]
+            },
+            "pair_attempt_id": 4,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.14556799829006195,
+              "rank_max_ms": 0.1982720047235489,
+              "rank_ms": [
+                0.14556799829006195,
+                0.1727679967880249,
+                0.17452800273895264,
+                0.1982720047235489
+              ]
+            },
+            "sample_index": 4,
+            "scheduled_start_arrival_ns_by_rank": [
+              744546388565548,
+              744546388640866,
+              744546388502815,
+              744546388848355
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              744546393848355,
+              744546393848355,
+              744546393848355,
+              744546393848355
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                744546393848760,
+                744546393870898
+              ],
+              [
+                744546393848879,
+                744546393886015
+              ],
+              [
+                744546393848985,
+                744546393874721
+              ],
+              [
+                744546393849168,
+                744546393894860
+              ]
+            ],
+            "start_record_envelope_span_ns": 46100,
+            "variant": 0
+          }
+        },
+        "variant": 0
+      },
+      {
+        "accepted": true,
+        "attempt_id": 5,
+        "logical_pair_index": 5,
+        "order": [
+          "reference"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 0,
+        "samples": {
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.05711999908089638,
+              "rank_max_ms": 0.07052800059318542,
+              "rank_ms": [
+                0.05711999908089638,
+                0.056063998490571976,
+                0.07052800059318542,
+                0.03996799886226654
+              ]
+            },
+            "pair_attempt_id": 5,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.16704000532627106,
+              "rank_max_ms": 0.18646399676799774,
+              "rank_ms": [
+                0.16704000532627106,
+                0.15721599757671356,
+                0.1560640037059784,
+                0.18646399676799774
+              ]
+            },
+            "sample_index": 5,
+            "scheduled_start_arrival_ns_by_rank": [
+              744546399400450,
+              744546398994757,
+              744546398896585,
+              744546399471001
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              744546404471001,
+              744546404471001,
+              744546404471001,
+              744546404471001
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                744546404471943,
+                744546404507256
+              ],
+              [
+                744546404471550,
+                744546404509150
+              ],
+              [
+                744546404471609,
+                744546404496209
+              ],
+              [
+                744546404472200,
+                744546404523564
+              ]
+            ],
+            "start_record_envelope_span_ns": 52014,
+            "variant": 1
+          }
+        },
+        "variant": 1
+      },
+      {
+        "accepted": true,
+        "attempt_id": 6,
+        "logical_pair_index": 6,
+        "order": [
+          "reference"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 0,
+        "samples": {
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.05238400027155876,
+              "rank_max_ms": 0.36979201436042786,
+              "rank_ms": [
+                0.05238400027155876,
+                0.34544000029563904,
+                0.36979201436042786,
+                0.3494400084018707
+              ]
+            },
+            "pair_attempt_id": 6,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.2520959973335266,
+              "rank_max_ms": 0.3800320029258728,
+              "rank_ms": [
+                0.2520959973335266,
+                0.3551360070705414,
+                0.3800320029258728,
+                0.35916799306869507
+              ]
+            },
+            "sample_index": 6,
+            "scheduled_start_arrival_ns_by_rank": [
+              744546409463693,
+              744546409491638,
+              744546408841582,
+              744546409270520
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              744546414491638,
+              744546414491638,
+              744546414491638,
+              744546414491638
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                744546414522700,
+                744546414835382
+              ],
+              [
+                744546414492571,
+                744546414541722
+              ],
+              [
+                744546414492163,
+                744546414522734
+              ],
+              [
+                744546414492104,
+                744546414541263
+              ]
+            ],
+            "start_record_envelope_span_ns": 343278,
+            "variant": 0
+          }
+        },
+        "variant": 0
+      },
+      {
+        "accepted": true,
+        "attempt_id": 7,
+        "logical_pair_index": 7,
+        "order": [
+          "reference"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 0,
+        "samples": {
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.04371200129389763,
+              "rank_max_ms": 0.06604799628257751,
+              "rank_ms": [
+                0.04371200129389763,
+                0.05116799846291542,
+                0.06604799628257751,
+                0.039264000952243805
+              ]
+            },
+            "pair_attempt_id": 7,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.19891199469566345,
+              "rank_max_ms": 0.19891199469566345,
+              "rank_ms": [
+                0.19891199469566345,
+                0.15590399503707886,
+                0.15488000214099884,
+                0.17718400061130524
+              ]
+            },
+            "sample_index": 7,
+            "scheduled_start_arrival_ns_by_rank": [
+              744546419884451,
+              744546420560338,
+              744546420510914,
+              744546420568077
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              744546425568077,
+              744546425568077,
+              744546425568077,
+              744546425568077
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                744546425571131,
+                744546425614773
+              ],
+              [
+                744546425568545,
+                744546425607545
+              ],
+              [
+                744546425568680,
+                744546425593191
+              ],
+              [
+                744546425569068,
+                744546425617724
+              ]
+            ],
+            "start_record_envelope_span_ns": 49179,
+            "variant": 1
+          }
+        },
+        "variant": 1
+      },
+      {
+        "accepted": true,
+        "attempt_id": 8,
+        "logical_pair_index": 8,
+        "order": [
+          "reference"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 0,
+        "samples": {
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.05020799860358238,
+              "rank_max_ms": 0.06831999868154526,
+              "rank_ms": [
+                0.05020799860358238,
+                0.055615998804569244,
+                0.06831999868154526,
+                0.04064000025391579
+              ]
+            },
+            "pair_attempt_id": 8,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.18121600151062012,
+              "rank_max_ms": 0.22044800221920013,
+              "rank_ms": [
+                0.18121600151062012,
+                0.18512000143527985,
+                0.1841599941253662,
+                0.22044800221920013
+              ]
+            },
+            "sample_index": 8,
+            "scheduled_start_arrival_ns_by_rank": [
+              744546430503651,
+              744546430764153,
+              744546430680947,
+              744546431056969
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              744546436056969,
+              744546436056969,
+              744546436056969,
+              744546436056969
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                744546436057680,
+                744546436097715
+              ],
+              [
+                744546436057538,
+                744546436097257
+              ],
+              [
+                744546436057592,
+                744546436083793
+              ],
+              [
+                744546436057932,
+                744546436109190
+              ]
+            ],
+            "start_record_envelope_span_ns": 51652,
+            "variant": 0
+          }
+        },
+        "variant": 0
+      },
+      {
+        "accepted": true,
+        "attempt_id": 9,
+        "logical_pair_index": 9,
+        "order": [
+          "reference"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 0,
+        "samples": {
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.061664000153541565,
+              "rank_max_ms": 0.07760000228881836,
+              "rank_ms": [
+                0.061664000153541565,
+                0.045152001082897186,
+                0.07760000228881836,
+                0.040352001786231995
+              ]
+            },
+            "pair_attempt_id": 9,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.17260800302028656,
+              "rank_max_ms": 0.18726399540901184,
+              "rank_ms": [
+                0.17260800302028656,
+                0.17535999417304993,
+                0.1541759967803955,
+                0.18726399540901184
+              ]
+            },
+            "sample_index": 9,
+            "scheduled_start_arrival_ns_by_rank": [
+              744546441336869,
+              744546441288173,
+              744546441169679,
+              744546441533611
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              744546446533611,
+              744546446533611,
+              744546446533611,
+              744546446533611
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                744546446534653,
+                744546446574302
+              ],
+              [
+                744546446534757,
+                744546446584903
+              ],
+              [
+                744546446534222,
+                744546446559201
+              ],
+              [
+                744546446534625,
+                744546446592650
+              ]
+            ],
+            "start_record_envelope_span_ns": 58428,
+            "variant": 1
+          }
+        },
+        "variant": 1
+      }
+    ],
+    "rank_order": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "reference": [
+      {
+        "collective_only": {
+          "local_ms": 0.03654399886727333,
+          "rank_max_ms": 0.05663999915122986,
+          "rank_ms": [
+            0.03654399886727333,
+            0.03936000168323517,
+            0.05663999915122986,
+            0.03759999945759773
+          ]
+        },
+        "pair_attempt_id": 0,
+        "pair_retry_ordinal": 0,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.16655999422073364,
+          "rank_max_ms": 0.16655999422073364,
+          "rank_ms": [
+            0.16655999422073364,
+            0.14591999351978302,
+            0.13062399625778198,
+            0.15503999590873718
+          ]
+        },
+        "sample_index": 0,
+        "scheduled_start_arrival_ns_by_rank": [
+          744546350441160,
+          744546350089239,
+          744546350258079,
+          744546350140532
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          744546355441160,
+          744546355441160,
+          744546355441160,
+          744546355441160
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            744546355443622,
+            744546355482019
+          ],
+          [
+            744546355442022,
+            744546355480094
+          ],
+          [
+            744546355441682,
+            744546355463454
+          ],
+          [
+            744546355442149,
+            744546355482683
+          ]
+        ],
+        "start_record_envelope_span_ns": 41001,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.07068800181150436,
+          "rank_max_ms": 0.08473599702119827,
+          "rank_ms": [
+            0.07068800181150436,
+            0.07667200267314911,
+            0.08473599702119827,
+            0.0488319993019104
+          ]
+        },
+        "pair_attempt_id": 1,
+        "pair_retry_ordinal": 0,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.16153599321842194,
+          "rank_max_ms": 0.22844800353050232,
+          "rank_ms": [
+            0.16153599321842194,
+            0.15516799688339233,
+            0.15254400670528412,
+            0.22844800353050232
+          ]
+        },
+        "sample_index": 1,
+        "scheduled_start_arrival_ns_by_rank": [
+          744546359986578,
+          744546359743892,
+          744546359737518,
+          744546360161674
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          744546365161674,
+          744546365161674,
+          744546365161674,
+          744546365161674
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            744546365162512,
+            744546365216610
+          ],
+          [
+            744546365162059,
+            744546365210940
+          ],
+          [
+            744546365162181,
+            744546365203786
+          ],
+          [
+            744546365162917,
+            744546365240240
+          ]
+        ],
+        "start_record_envelope_span_ns": 78181,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.03807999938726425,
+          "rank_max_ms": 0.05238400027155876,
+          "rank_ms": [
+            0.03807999938726425,
+            0.04553600028157234,
+            0.05238400027155876,
+            0.03500799834728241
+          ]
+        },
+        "pair_attempt_id": 2,
+        "pair_retry_ordinal": 0,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.16972799599170685,
+          "rank_max_ms": 0.1709119975566864,
+          "rank_ms": [
+            0.16972799599170685,
+            0.14982399344444275,
+            0.15113599598407745,
+            0.1709119975566864
+          ]
+        },
+        "sample_index": 2,
+        "scheduled_start_arrival_ns_by_rank": [
+          744546369332712,
+          744546369556569,
+          744546369926343,
+          744546369661423
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          744546374926343,
+          744546374926343,
+          744546374926343,
+          744546374926343
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            744546374927291,
+            744546374961639
+          ],
+          [
+            744546374926731,
+            744546374957347
+          ],
+          [
+            744546374926912,
+            744546374949810
+          ],
+          [
+            744546374927166,
+            744546374965568
+          ]
+        ],
+        "start_record_envelope_span_ns": 38837,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.05299200117588043,
+          "rank_max_ms": 0.07337599992752075,
+          "rank_ms": [
+            0.05299200117588043,
+            0.05782400071620941,
+            0.07337599992752075,
+            0.04105599969625473
+          ]
+        },
+        "pair_attempt_id": 3,
+        "pair_retry_ordinal": 0,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.20051200687885284,
+          "rank_max_ms": 0.20051200687885284,
+          "rank_ms": [
+            0.20051200687885284,
+            0.16687999665737152,
+            0.16550399363040924,
+            0.19228799641132355
+          ]
+        },
+        "sample_index": 3,
+        "scheduled_start_arrival_ns_by_rank": [
+          744546379227980,
+          744546379068233,
+          744546379012010,
+          744546379395812
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          744546384395812,
+          744546384395812,
+          744546384395812,
+          744546384395812
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            744546384397419,
+            744546384441941
+          ],
+          [
+            744546384396274,
+            744546384437045
+          ],
+          [
+            744546384396445,
+            744546384422194
+          ],
+          [
+            744546384396726,
+            744546384450977
+          ]
+        ],
+        "start_record_envelope_span_ns": 54703,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.062111999839544296,
+          "rank_max_ms": 0.062111999839544296,
+          "rank_ms": [
+            0.062111999839544296,
+            0.04867200180888176,
+            0.059776000678539276,
+            0.03705599904060364
+          ]
+        },
+        "pair_attempt_id": 4,
+        "pair_retry_ordinal": 0,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.14556799829006195,
+          "rank_max_ms": 0.1982720047235489,
+          "rank_ms": [
+            0.14556799829006195,
+            0.1727679967880249,
+            0.17452800273895264,
+            0.1982720047235489
+          ]
+        },
+        "sample_index": 4,
+        "scheduled_start_arrival_ns_by_rank": [
+          744546388565548,
+          744546388640866,
+          744546388502815,
+          744546388848355
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          744546393848355,
+          744546393848355,
+          744546393848355,
+          744546393848355
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            744546393848760,
+            744546393870898
+          ],
+          [
+            744546393848879,
+            744546393886015
+          ],
+          [
+            744546393848985,
+            744546393874721
+          ],
+          [
+            744546393849168,
+            744546393894860
+          ]
+        ],
+        "start_record_envelope_span_ns": 46100,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.05711999908089638,
+          "rank_max_ms": 0.07052800059318542,
+          "rank_ms": [
+            0.05711999908089638,
+            0.056063998490571976,
+            0.07052800059318542,
+            0.03996799886226654
+          ]
+        },
+        "pair_attempt_id": 5,
+        "pair_retry_ordinal": 0,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.16704000532627106,
+          "rank_max_ms": 0.18646399676799774,
+          "rank_ms": [
+            0.16704000532627106,
+            0.15721599757671356,
+            0.1560640037059784,
+            0.18646399676799774
+          ]
+        },
+        "sample_index": 5,
+        "scheduled_start_arrival_ns_by_rank": [
+          744546399400450,
+          744546398994757,
+          744546398896585,
+          744546399471001
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          744546404471001,
+          744546404471001,
+          744546404471001,
+          744546404471001
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            744546404471943,
+            744546404507256
+          ],
+          [
+            744546404471550,
+            744546404509150
+          ],
+          [
+            744546404471609,
+            744546404496209
+          ],
+          [
+            744546404472200,
+            744546404523564
+          ]
+        ],
+        "start_record_envelope_span_ns": 52014,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.05238400027155876,
+          "rank_max_ms": 0.36979201436042786,
+          "rank_ms": [
+            0.05238400027155876,
+            0.34544000029563904,
+            0.36979201436042786,
+            0.3494400084018707
+          ]
+        },
+        "pair_attempt_id": 6,
+        "pair_retry_ordinal": 0,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.2520959973335266,
+          "rank_max_ms": 0.3800320029258728,
+          "rank_ms": [
+            0.2520959973335266,
+            0.3551360070705414,
+            0.3800320029258728,
+            0.35916799306869507
+          ]
+        },
+        "sample_index": 6,
+        "scheduled_start_arrival_ns_by_rank": [
+          744546409463693,
+          744546409491638,
+          744546408841582,
+          744546409270520
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          744546414491638,
+          744546414491638,
+          744546414491638,
+          744546414491638
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            744546414522700,
+            744546414835382
+          ],
+          [
+            744546414492571,
+            744546414541722
+          ],
+          [
+            744546414492163,
+            744546414522734
+          ],
+          [
+            744546414492104,
+            744546414541263
+          ]
+        ],
+        "start_record_envelope_span_ns": 343278,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.04371200129389763,
+          "rank_max_ms": 0.06604799628257751,
+          "rank_ms": [
+            0.04371200129389763,
+            0.05116799846291542,
+            0.06604799628257751,
+            0.039264000952243805
+          ]
+        },
+        "pair_attempt_id": 7,
+        "pair_retry_ordinal": 0,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.19891199469566345,
+          "rank_max_ms": 0.19891199469566345,
+          "rank_ms": [
+            0.19891199469566345,
+            0.15590399503707886,
+            0.15488000214099884,
+            0.17718400061130524
+          ]
+        },
+        "sample_index": 7,
+        "scheduled_start_arrival_ns_by_rank": [
+          744546419884451,
+          744546420560338,
+          744546420510914,
+          744546420568077
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          744546425568077,
+          744546425568077,
+          744546425568077,
+          744546425568077
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            744546425571131,
+            744546425614773
+          ],
+          [
+            744546425568545,
+            744546425607545
+          ],
+          [
+            744546425568680,
+            744546425593191
+          ],
+          [
+            744546425569068,
+            744546425617724
+          ]
+        ],
+        "start_record_envelope_span_ns": 49179,
+        "variant": 1
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.05020799860358238,
+          "rank_max_ms": 0.06831999868154526,
+          "rank_ms": [
+            0.05020799860358238,
+            0.055615998804569244,
+            0.06831999868154526,
+            0.04064000025391579
+          ]
+        },
+        "pair_attempt_id": 8,
+        "pair_retry_ordinal": 0,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.18121600151062012,
+          "rank_max_ms": 0.22044800221920013,
+          "rank_ms": [
+            0.18121600151062012,
+            0.18512000143527985,
+            0.1841599941253662,
+            0.22044800221920013
+          ]
+        },
+        "sample_index": 8,
+        "scheduled_start_arrival_ns_by_rank": [
+          744546430503651,
+          744546430764153,
+          744546430680947,
+          744546431056969
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          744546436056969,
+          744546436056969,
+          744546436056969,
+          744546436056969
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            744546436057680,
+            744546436097715
+          ],
+          [
+            744546436057538,
+            744546436097257
+          ],
+          [
+            744546436057592,
+            744546436083793
+          ],
+          [
+            744546436057932,
+            744546436109190
+          ]
+        ],
+        "start_record_envelope_span_ns": 51652,
+        "variant": 0
+      },
+      {
+        "collective_only": {
+          "local_ms": 0.061664000153541565,
+          "rank_max_ms": 0.07760000228881836,
+          "rank_ms": [
+            0.061664000153541565,
+            0.045152001082897186,
+            0.07760000228881836,
+            0.040352001786231995
+          ]
+        },
+        "pair_attempt_id": 9,
+        "pair_retry_ordinal": 0,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.17260800302028656,
+          "rank_max_ms": 0.18726399540901184,
+          "rank_ms": [
+            0.17260800302028656,
+            0.17535999417304993,
+            0.1541759967803955,
+            0.18726399540901184
+          ]
+        },
+        "sample_index": 9,
+        "scheduled_start_arrival_ns_by_rank": [
+          744546441336869,
+          744546441288173,
+          744546441169679,
+          744546441533611
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          744546446533611,
+          744546446533611,
+          744546446533611,
+          744546446533611
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            744546446534653,
+            744546446574302
+          ],
+          [
+            744546446534757,
+            744546446584903
+          ],
+          [
+            744546446534222,
+            744546446559201
+          ],
+          [
+            744546446534625,
+            744546446592650
+          ]
+        ],
+        "start_record_envelope_span_ns": 58428,
+        "variant": 1
+      }
+    ],
+    "warmup_order": [
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ],
+      [
+        "reference"
+      ]
+    ],
+    "warmup_variants": [
+      1,
+      0,
+      1
+    ]
+  },
+  "readiness_probe": {
+    "dtype": "torch.bfloat16",
+    "full_tensor_consumer": "preallocated BF16 negation output",
+    "full_tensor_validation": "exact on every warmup and measured sample",
+    "num_elements": 60,
+    "positions": [
+      [
+        0,
+        0
+      ],
+      [
+        0,
+        1
+      ],
+      [
+        0,
+        2
+      ],
+      [
+        0,
+        3
+      ],
+      [
+        0,
+        2048
+      ],
+      [
+        0,
+        3072
+      ],
+      [
+        0,
+        6140
+      ],
+      [
+        0,
+        6141
+      ],
+      [
+        0,
+        6142
+      ],
+      [
+        0,
+        6143
+      ],
+      [
+        1,
+        0
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        1,
+        3
+      ],
+      [
+        1,
+        2048
+      ],
+      [
+        1,
+        3072
+      ],
+      [
+        1,
+        6140
+      ],
+      [
+        1,
+        6141
+      ],
+      [
+        1,
+        6142
+      ],
+      [
+        1,
+        6143
+      ],
+      [
+        10,
+        0
+      ],
+      [
+        10,
+        1
+      ],
+      [
+        10,
+        2
+      ],
+      [
+        10,
+        3
+      ],
+      [
+        10,
+        2048
+      ],
+      [
+        10,
+        3072
+      ],
+      [
+        10,
+        6140
+      ],
+      [
+        10,
+        6141
+      ],
+      [
+        10,
+        6142
+      ],
+      [
+        10,
+        6143
+      ],
+      [
+        16,
+        0
+      ],
+      [
+        16,
+        1
+      ],
+      [
+        16,
+        2
+      ],
+      [
+        16,
+        3
+      ],
+      [
+        16,
+        2048
+      ],
+      [
+        16,
+        3072
+      ],
+      [
+        16,
+        6140
+      ],
+      [
+        16,
+        6141
+      ],
+      [
+        16,
+        6142
+      ],
+      [
+        16,
+        6143
+      ],
+      [
+        30,
+        0
+      ],
+      [
+        30,
+        1
+      ],
+      [
+        30,
+        2
+      ],
+      [
+        30,
+        3
+      ],
+      [
+        30,
+        2048
+      ],
+      [
+        30,
+        3072
+      ],
+      [
+        30,
+        6140
+      ],
+      [
+        30,
+        6141
+      ],
+      [
+        30,
+        6142
+      ],
+      [
+        30,
+        6143
+      ],
+      [
+        31,
+        0
+      ],
+      [
+        31,
+        1
+      ],
+      [
+        31,
+        2
+      ],
+      [
+        31,
+        3
+      ],
+      [
+        31,
+        2048
+      ],
+      [
+        31,
+        3072
+      ],
+      [
+        31,
+        6140
+      ],
+      [
+        31,
+        6141
+      ],
+      [
+        31,
+        6142
+      ],
+      [
+        31,
+        6143
+      ]
+    ],
+    "validation": "exact on every warmup and measured sample"
+  },
+  "reference": {
+    "collective_only": {
+      "median_ms": 0.06942399963736534,
+      "min_ms": 0.05238400027155876,
+      "p95_ms": 0.08473599702119827
+    },
+    "gate_metric": "ready_region.rank_max_ms",
+    "readiness_probe_overhead_median_ms": 0.12283200211822987,
+    "ready_region": {
+      "median_ms": 0.19859199970960617,
+      "min_ms": 0.16655999422073364,
+      "p95_ms": 0.22844800353050232
+    }
+  },
+  "reference_policy": "SGLANG_GLM52_OPT=0 production GroupCoordinator path",
+  "result_path": "/tmp/tp_allreduce_reachability_20260722T192433Z/semantics/tp4_allreduce_decode_m32.cuda_graph.nondefault.json",
+  "schema_version": 2,
+  "scope": "tp4_allreduce_diagnostic_only",
+  "timing_contract": {
+    "alignment_retry_admission": "scheduled arrivals, common targets, and start-record brackets only; collective and ready-region latency are excluded",
+    "collective_only": "start event through event recorded immediately after run()",
+    "gate_metric": "ready_region rank-max paired p50",
+    "rank_start_alignment": "selected stream synchronized after restoration; TP CPU-group all-gather selects a common same-host monotonic deadline 5 ms after latest arrival; ranks busy-wait; host timestamps bracket every start-event record call; a host-only 500 us envelope predicate allows at most 10 physical attempts for the whole logical A/B pair; the exact input variant alternates on every physical pair",
+    "ready_region": "start event through full-tensor same-stream negation and position-sensitive gather",
+    "restoration": "variant source-to-local copy and consumer/probe poison occur before every start event"
+  },
+  "workload": {
+    "distributed": true,
+    "family": "allreduce",
+    "name": "tp4_allreduce_decode_m32",
+    "notes": "TP4/DP4 decode bucket: local M=32; sum reduction. Standalone diagnostic; production caller/ABI not yet proven.",
+    "params": {
+      "dtype": "bfloat16",
+      "hidden": 6144,
+      "local_tokens": 32
+    },
+    "phase": "decode",
+    "source_symbol": "sglang.srt.distributed.parallel_state.GroupCoordinator.all_reduce",
+    "world_size": 4
+  }
+}

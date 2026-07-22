@@ -201,17 +201,24 @@ def _canonical_abi_mismatch_failures(log_text: str) -> list[list[dict[str, Any]]
         if not isinstance(failures, list) or len(failures) != 4:
             raise ValueError(f"expected four collective failures, got {failures!r}")
         by_rank: dict[int, dict[str, Any]] = {}
+        expected_fields = {
+            "error",
+            "rank",
+            "scheduled_start_arrival_ns_by_rank",
+            "scheduled_start_target_ns",
+            "start_record_bracket_ns",
+        }
         for failure in failures:
             if (
                 not isinstance(failure, dict)
-                or not {"error", "rank"} <= set(failure)
-                or not set(failure) <= {"error", "rank", "start_record_bracket_ns"}
+                or set(failure) != expected_fields
             ):
                 raise ValueError(f"unexpected collective failure record: {failure!r}")
             rank = failure.get("rank")
             error = failure.get("error")
             if (
                 not isinstance(rank, int)
+                or isinstance(rank, bool)
                 or rank in by_rank
                 or not isinstance(error, str)
                 or not error.startswith(
@@ -219,17 +226,49 @@ def _canonical_abi_mismatch_failures(log_text: str) -> list[list[dict[str, Any]]
                 )
             ):
                 raise ValueError(f"unexpected collective ABI failure: {failure!r}")
+            arrivals = failure.get("scheduled_start_arrival_ns_by_rank")
+            target = failure.get("scheduled_start_target_ns")
             bracket = failure.get("start_record_bracket_ns")
-            if bracket is not None and (
+            if (
+                not isinstance(arrivals, list)
+                or len(arrivals) != 4
+                or any(
+                    not isinstance(value, int)
+                    or isinstance(value, bool)
+                    or value <= 0
+                    for value in arrivals
+                )
+                or not isinstance(target, int)
+                or isinstance(target, bool)
+                or target != max(arrivals) + SCHEDULED_START_LEAD_NS
+            ):
+                raise ValueError(
+                    f"invalid failed-attempt scheduled start: {failure!r}"
+                )
+            if (
                 not isinstance(bracket, list)
                 or len(bracket) != 2
-                or any(not isinstance(value, int) for value in bracket)
+                or any(
+                    not isinstance(value, int) or isinstance(value, bool)
+                    for value in bracket
+                )
                 or bracket[0] > bracket[1]
+                or bracket[0] < target
             ):
                 raise ValueError(f"invalid failed-attempt start bracket: {failure!r}")
             by_rank[rank] = failure
         if set(by_rank) != set(range(4)):
             raise ValueError(f"collective ABI failure rank set mismatch: {by_rank!r}")
+        common_arrivals = by_rank[0]["scheduled_start_arrival_ns_by_rank"]
+        common_target = by_rank[0]["scheduled_start_target_ns"]
+        if any(
+            failure["scheduled_start_arrival_ns_by_rank"] != common_arrivals
+            or failure["scheduled_start_target_ns"] != common_target
+            for failure in by_rank.values()
+        ):
+            raise ValueError(
+                f"collective ABI failure start metadata differs by rank: {by_rank!r}"
+            )
         records.append([by_rank[rank] for rank in range(4)])
     if not records:
         raise ValueError("canonical collective ABI-mismatch failure is absent")
@@ -1684,12 +1723,26 @@ class Analyzer:
                 "selected stream synchronized after restoration; TP CPU-group "
                 "all-gather selects a common same-host monotonic deadline 5 ms "
                 "after latest arrival; ranks busy-wait; host timestamps bracket "
-                "every start-event record call"
+                "every start-event record call; a host-only 500 us envelope "
+                "predicate allows at most 10 physical attempts for the whole "
+                "logical A/B pair; the exact input variant alternates on every "
+                "physical pair"
+            ),
+            "alignment_retry_admission": (
+                "scheduled arrivals, common targets, and start-record brackets "
+                "only; collective and ready-region latency are excluded"
             ),
         }
         if not isinstance(timing, dict):
             self.error("missing_timing_contract", location, repr(timing))
         else:
+            if set(timing) != set(expected_timing):
+                self.error(
+                    "timing_contract_mismatch",
+                    location,
+                    "expected exactly "
+                    f"{sorted(expected_timing)!r}, got {sorted(timing)!r}",
+                )
             for key, expected in expected_timing.items():
                 if timing.get(key) != expected:
                     self.error(

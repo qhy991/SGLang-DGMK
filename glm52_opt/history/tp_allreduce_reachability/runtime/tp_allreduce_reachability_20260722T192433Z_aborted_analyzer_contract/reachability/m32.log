@@ -1,0 +1,1030 @@
+started_utc=2026-07-22T19:25:05.533375541Z
+command= env SGLANG_ALL_REDUCE_TRACE=/tmp/tp_allreduce_reachability_20260722T192433Z/reachability/m32.\{rank\}.\{pid\}.jsonl /home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/serving_native/run.sh tp4_allreduce_decode_m32 --execution-mode cuda_graph --stream nondefault --warmup 0 --repeat 1 --output /tmp/tp_allreduce_reachability_20260722T192433Z/reachability/m32.result.json
+timeout_seconds=1800
+
+*****************************************
+Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+*****************************************
+/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/.venv/lib/python3.12/site-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+  return func(*args, **kwargs)
+[rank0]:[W722 19:25:20.713250560 ProcessGroupNCCL.cpp:5188] Guessing device ID based on global rank. This can cause a hang if rank to GPU mapping is heterogeneous. You can specify device_id in init_process_group()
+{
+  "all_reduce_trace": {
+    "enabled": true,
+    "errors_by_rank": [],
+    "evidence_valid": true,
+    "failure_counts_by_rank": [
+      {
+        "counts": {},
+        "rank": 0
+      },
+      {
+        "counts": {},
+        "rank": 1
+      },
+      {
+        "counts": {},
+        "rank": 2
+      },
+      {
+        "counts": {},
+        "rank": 3
+      }
+    ],
+    "invalid_reasons": [],
+    "measurement_instrumented": true,
+    "paths_by_rank": [
+      {
+        "path": "/tmp/tp_allreduce_reachability_20260722T192433Z/reachability/m32.0.1977723.jsonl",
+        "rank": 0
+      },
+      {
+        "path": "/tmp/tp_allreduce_reachability_20260722T192433Z/reachability/m32.1.1977725.jsonl",
+        "rank": 1
+      },
+      {
+        "path": "/tmp/tp_allreduce_reachability_20260722T192433Z/reachability/m32.2.1977727.jsonl",
+        "rank": 2
+      },
+      {
+        "path": "/tmp/tp_allreduce_reachability_20260722T192433Z/reachability/m32.3.1977728.jsonl",
+        "rank": 3
+      }
+    ],
+    "replay_limitation": "Python observes eager dispatch or CUDA graph capture only; CUDA graph replay does not re-enter this hook. Correlate stable kernel names in an Nsight Systems trace to prove replay execution."
+  },
+  "allreduce": {
+    "candidate_capture_context_by_rank": null,
+    "candidate_contract_by_rank": null,
+    "exact_oracle": "hash[row,col]=(37*(row%127)+17*(col%127)+13*(row%127)*(col%127))%127; base_variant=((hash+shift)%127)-63 for shifts [0,31]; source=base+2*rank-(world_size-1); expected=world_size*base",
+    "message_bytes": 393216,
+    "reference_contract_by_rank": [
+      {
+        "exact_values": true,
+        "local_poststate": "reduced",
+        "output": {
+          "device": "cuda:0",
+          "dtype": "torch.bfloat16",
+          "shape": [
+            32,
+            6144
+          ],
+          "stride": [
+            6144,
+            1
+          ]
+        },
+        "output_aliases_local": true,
+        "source_immutable": true
+      },
+      {
+        "exact_values": true,
+        "local_poststate": "reduced",
+        "output": {
+          "device": "cuda:1",
+          "dtype": "torch.bfloat16",
+          "shape": [
+            32,
+            6144
+          ],
+          "stride": [
+            6144,
+            1
+          ]
+        },
+        "output_aliases_local": true,
+        "source_immutable": true
+      },
+      {
+        "exact_values": true,
+        "local_poststate": "reduced",
+        "output": {
+          "device": "cuda:2",
+          "dtype": "torch.bfloat16",
+          "shape": [
+            32,
+            6144
+          ],
+          "stride": [
+            6144,
+            1
+          ]
+        },
+        "output_aliases_local": true,
+        "source_immutable": true
+      },
+      {
+        "exact_values": true,
+        "local_poststate": "reduced",
+        "output": {
+          "device": "cuda:3",
+          "dtype": "torch.bfloat16",
+          "shape": [
+            32,
+            6144
+          ],
+          "stride": [
+            6144,
+            1
+          ]
+        },
+        "output_aliases_local": true,
+        "source_immutable": true
+      }
+    ],
+    "reference_dispatch_by_rank": [
+      {
+        "communicators": {
+          "custom": {
+            "algorithm": "ONE_SHOT_PUSH",
+            "class": "sglang.srt.distributed.device_communicators.custom_all_reduce_v2.CustomAllReduceV2",
+            "fields": {
+              "config": "ModeConfig(one_shot_push_threshold=2097152, one_shot_pull_threshold=2097152)",
+              "disabled": "False",
+              "max_size": "16777216",
+              "override_algo": "None",
+              "rank": "0",
+              "tms_cudagraph": "False",
+              "world_size": "4"
+            },
+            "python_id": 138329426257216,
+            "should_custom_ar": {
+              "value": true
+            }
+          },
+          "pymscclpp": {
+            "should_mscclpp_allreduce": {
+              "value": false
+            }
+          },
+          "pynccl": {
+            "class": "sglang.srt.distributed.device_communicators.pynccl.PyNcclCommunicator",
+            "fields": {
+              "disabled": "False",
+              "rank": "0",
+              "world_size": "4"
+            },
+            "python_id": 138329426261680,
+            "symmetric_pool_enabled": {
+              "value": false
+            }
+          },
+          "quick": {
+            "should_quick_allreduce": {
+              "value": false
+            }
+          },
+          "torch_symmetric_memory": {
+            "should_torch_symm_mem_allreduce": {
+              "value": false
+            }
+          }
+        },
+        "dtype": "torch.bfloat16",
+        "execution_mode": "cuda_graph",
+        "group_name": "tp:0",
+        "group_ranks": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "local_size": 0,
+        "message_bytes": 393216,
+        "phase": "reference_capture",
+        "predicted_reference_algorithm": "ONE_SHOT_PUSH",
+        "predicted_reference_backend": "custom_all_reduce_outplace",
+        "rank": 0,
+        "shape": [
+          32,
+          6144
+        ],
+        "stream": {
+          "cuda_stream": 99856129312256,
+          "requested": "nondefault"
+        },
+        "stride": [
+          6144,
+          1
+        ],
+        "world_size": 4
+      },
+      {
+        "communicators": {
+          "custom": {
+            "algorithm": "ONE_SHOT_PUSH",
+            "class": "sglang.srt.distributed.device_communicators.custom_all_reduce_v2.CustomAllReduceV2",
+            "fields": {
+              "config": "ModeConfig(one_shot_push_threshold=2097152, one_shot_pull_threshold=2097152)",
+              "disabled": "False",
+              "max_size": "16777216",
+              "override_algo": "None",
+              "rank": "1",
+              "tms_cudagraph": "False",
+              "world_size": "4"
+            },
+            "python_id": 130341187810992,
+            "should_custom_ar": {
+              "value": true
+            }
+          },
+          "pymscclpp": {
+            "should_mscclpp_allreduce": {
+              "value": false
+            }
+          },
+          "pynccl": {
+            "class": "sglang.srt.distributed.device_communicators.pynccl.PyNcclCommunicator",
+            "fields": {
+              "disabled": "False",
+              "rank": "1",
+              "world_size": "4"
+            },
+            "python_id": 130341187810176,
+            "symmetric_pool_enabled": {
+              "value": false
+            }
+          },
+          "quick": {
+            "should_quick_allreduce": {
+              "value": false
+            }
+          },
+          "torch_symmetric_memory": {
+            "should_torch_symm_mem_allreduce": {
+              "value": false
+            }
+          }
+        },
+        "dtype": "torch.bfloat16",
+        "execution_mode": "cuda_graph",
+        "group_name": "tp:0",
+        "group_ranks": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "local_size": 0,
+        "message_bytes": 393216,
+        "phase": "reference_capture",
+        "predicted_reference_algorithm": "ONE_SHOT_PUSH",
+        "predicted_reference_backend": "custom_all_reduce_outplace",
+        "rank": 1,
+        "shape": [
+          32,
+          6144
+        ],
+        "stream": {
+          "cuda_stream": 103951538707024,
+          "requested": "nondefault"
+        },
+        "stride": [
+          6144,
+          1
+        ],
+        "world_size": 4
+      },
+      {
+        "communicators": {
+          "custom": {
+            "algorithm": "ONE_SHOT_PUSH",
+            "class": "sglang.srt.distributed.device_communicators.custom_all_reduce_v2.CustomAllReduceV2",
+            "fields": {
+              "config": "ModeConfig(one_shot_push_threshold=2097152, one_shot_pull_threshold=2097152)",
+              "disabled": "False",
+              "max_size": "16777216",
+              "override_algo": "None",
+              "rank": "2",
+              "tms_cudagraph": "False",
+              "world_size": "4"
+            },
+            "python_id": 140548112768256,
+            "should_custom_ar": {
+              "value": true
+            }
+          },
+          "pymscclpp": {
+            "should_mscclpp_allreduce": {
+              "value": false
+            }
+          },
+          "pynccl": {
+            "class": "sglang.srt.distributed.device_communicators.pynccl.PyNcclCommunicator",
+            "fields": {
+              "disabled": "False",
+              "rank": "2",
+              "world_size": "4"
+            },
+            "python_id": 140548112419920,
+            "symmetric_pool_enabled": {
+              "value": false
+            }
+          },
+          "quick": {
+            "should_quick_allreduce": {
+              "value": false
+            }
+          },
+          "torch_symmetric_memory": {
+            "should_torch_symm_mem_allreduce": {
+              "value": false
+            }
+          }
+        },
+        "dtype": "torch.bfloat16",
+        "execution_mode": "cuda_graph",
+        "group_name": "tp:0",
+        "group_ranks": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "local_size": 0,
+        "message_bytes": 393216,
+        "phase": "reference_capture",
+        "predicted_reference_algorithm": "ONE_SHOT_PUSH",
+        "predicted_reference_backend": "custom_all_reduce_outplace",
+        "rank": 2,
+        "shape": [
+          32,
+          6144
+        ],
+        "stream": {
+          "cuda_stream": 95755316561520,
+          "requested": "nondefault"
+        },
+        "stride": [
+          6144,
+          1
+        ],
+        "world_size": 4
+      },
+      {
+        "communicators": {
+          "custom": {
+            "algorithm": "ONE_SHOT_PUSH",
+            "class": "sglang.srt.distributed.device_communicators.custom_all_reduce_v2.CustomAllReduceV2",
+            "fields": {
+              "config": "ModeConfig(one_shot_push_threshold=2097152, one_shot_pull_threshold=2097152)",
+              "disabled": "False",
+              "max_size": "16777216",
+              "override_algo": "None",
+              "rank": "3",
+              "tms_cudagraph": "False",
+              "world_size": "4"
+            },
+            "python_id": 130636468709632,
+            "should_custom_ar": {
+              "value": true
+            }
+          },
+          "pymscclpp": {
+            "should_mscclpp_allreduce": {
+              "value": false
+            }
+          },
+          "pynccl": {
+            "class": "sglang.srt.distributed.device_communicators.pynccl.PyNcclCommunicator",
+            "fields": {
+              "disabled": "False",
+              "rank": "3",
+              "world_size": "4"
+            },
+            "python_id": 130636469205328,
+            "symmetric_pool_enabled": {
+              "value": false
+            }
+          },
+          "quick": {
+            "should_quick_allreduce": {
+              "value": false
+            }
+          },
+          "torch_symmetric_memory": {
+            "should_torch_symm_mem_allreduce": {
+              "value": false
+            }
+          }
+        },
+        "dtype": "torch.bfloat16",
+        "execution_mode": "cuda_graph",
+        "group_name": "tp:0",
+        "group_ranks": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "local_size": 0,
+        "message_bytes": 393216,
+        "phase": "reference_capture",
+        "predicted_reference_algorithm": "ONE_SHOT_PUSH",
+        "predicted_reference_backend": "custom_all_reduce_outplace",
+        "rank": 3,
+        "shape": [
+          32,
+          6144
+        ],
+        "stream": {
+          "cuda_stream": 97413123743504,
+          "requested": "nondefault"
+        },
+        "stride": [
+          6144,
+          1
+        ],
+        "world_size": 4
+      }
+    ]
+  },
+  "candidate": null,
+  "correctness": {
+    "alternating_input_variants": 2,
+    "candidate_state_guarded": false,
+    "exact_full_checks": "before and after timing",
+    "exact_full_tensor_consumer": "every warmup and measured sample",
+    "exact_position_probe": "every warmup and measured sample",
+    "passed": true,
+    "validation_errors_aggregated_over_tp_cpu_group": true
+  },
+  "disposition": "instrumented_tp4_reachability_only",
+  "environment": {
+    "device": {
+      "capability": [
+        10,
+        0
+      ],
+      "name": "NVIDIA B200",
+      "rank": 0,
+      "total_memory": 191490555904
+    },
+    "device_by_rank": [
+      {
+        "capability": [
+          10,
+          0
+        ],
+        "name": "NVIDIA B200",
+        "rank": 0,
+        "total_memory": 191490555904
+      },
+      {
+        "capability": [
+          10,
+          0
+        ],
+        "name": "NVIDIA B200",
+        "rank": 1,
+        "total_memory": 191490555904
+      },
+      {
+        "capability": [
+          10,
+          0
+        ],
+        "name": "NVIDIA B200",
+        "rank": 2,
+        "total_memory": 191490555904
+      },
+      {
+        "capability": [
+          10,
+          0
+        ],
+        "name": "NVIDIA B200",
+        "rank": 3,
+        "total_memory": 191490555904
+      }
+    ],
+    "env": {
+      "CUDA_VISIBLE_DEVICES": "0,1,2,3",
+      "NCCL_ALGO": null,
+      "NCCL_PROTO": null,
+      "SGLANG_ALL_REDUCE_TRACE": "/tmp/tp_allreduce_reachability_20260722T192433Z/reachability/m32.{rank}.{pid}.jsonl",
+      "SGLANG_GLM52_OPT": "0",
+      "SGLANG_OPT_USE_CUSTOM_ALL_REDUCE_V2": null,
+      "SGLANG_ROOT": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/sglang"
+    },
+    "kernel_harness_git": {
+      "branch": "goal/glm52-prod-24-tp_allreduce_reachability",
+      "dirty": false,
+      "root": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness",
+      "sha": "bea4a8cd294a84f2d305cd023eb3fed281de4b1e",
+      "status": []
+    },
+    "packages": {
+      "flashinfer": {
+        "path": "/mnt/OS-oKqEXySb/home/qinhaiyan/miniconda3/envs/sglang/lib/python3.12/site-packages/flashinfer/__init__.py",
+        "version": "0.6.12"
+      },
+      "sgl_kernel": {
+        "path": "/mnt/OS-oKqEXySb/home/qinhaiyan/miniconda3/envs/sglang/lib/python3.12/site-packages/sgl_kernel/__init__.py",
+        "version": "0.4.4"
+      },
+      "sglang": {
+        "path": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/sglang/python/sglang/__init__.py",
+        "version": "0.5.15"
+      },
+      "torch": {
+        "cuda": "13.0",
+        "nccl": [
+          2,
+          28,
+          9
+        ],
+        "path": "/mnt/OS-oKqEXySb/home/qinhaiyan/miniconda3/envs/sglang/lib/python3.12/site-packages/torch/__init__.py",
+        "version": "2.11.0+cu130"
+      },
+      "triton": {
+        "path": "/mnt/OS-oKqEXySb/home/qinhaiyan/miniconda3/envs/sglang/lib/python3.12/site-packages/triton/__init__.py",
+        "version": "3.6.0"
+      }
+    },
+    "python": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/.venv/bin/python",
+    "python_version": "3.12.13 | packaged by Anaconda, Inc. | (main, Jul  9 2026, 14:38:16) [GCC 14.3.0]",
+    "sglang_git": {
+      "branch": "goal/glm52-prod-24-tp_allreduce_reachability",
+      "dirty": false,
+      "root": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/sglang",
+      "sha": "a91928c6f713d69722176a8d13781367e9b78dc4",
+      "status": []
+    }
+  },
+  "execution": {
+    "cuda_stream": 99856129312256,
+    "default_to_execution_waits_outside_timing": 5,
+    "mode": "cuda_graph",
+    "nvtx_measurement_range": "serving_native/tp4_allreduce_decode_m32/cuda_graph/nondefault/reference",
+    "nvtx_rank_synchronization": "rank 0 push after a TP CPU-group barrier; all ranks wait at a second barrier before measurement and before rank 0 pop",
+    "stream": "nondefault"
+  },
+  "gate": {
+    "blocker": "trace instrumentation makes performance evidence ineligible",
+    "candidate_present": false,
+    "metric": "paired ready-region rank-max p50 speedup",
+    "minimum_speedup": 1.03,
+    "passed": null,
+    "performance_eligible": false,
+    "stock_fallback_active": true
+  },
+  "production_acceptance": "This direct TP4 callable is not proof of the GLM serving caller/ABI and cannot be relabeled as TP8 evidence.",
+  "raw_samples": {
+    "alignment_policy": {
+      "accepted_pair_attempts": 1,
+      "admission_fields": [
+        "scheduled_start_arrival_ns_by_rank",
+        "scheduled_start_target_ns_by_rank",
+        "start_record_bracket_ns_by_rank",
+        "start_record_envelope_span_ns"
+      ],
+      "initial_input_variant": 1,
+      "latency_fields_excluded": true,
+      "max_pair_attempts": 10,
+      "next_input_variant": 0,
+      "rejected_pair_attempts": 0,
+      "requested_logical_pairs": 1,
+      "start_record_envelope_limit_ns": 500000,
+      "total_pair_attempts": 1
+    },
+    "candidate": null,
+    "measured_order": [
+      [
+        "reference"
+      ]
+    ],
+    "measurement_attempts": [
+      {
+        "accepted": true,
+        "attempt_id": 0,
+        "logical_pair_index": 0,
+        "order": [
+          "reference"
+        ],
+        "rejection_reasons": [],
+        "retry_ordinal": 0,
+        "samples": {
+          "reference": {
+            "collective_only": {
+              "local_ms": 0.14268800616264343,
+              "rank_max_ms": 0.14268800616264343,
+              "rank_ms": [
+                0.14268800616264343,
+                0.014208000153303146,
+                0.11984000355005264,
+                0.11740799993276596
+              ]
+            },
+            "pair_attempt_id": 0,
+            "pair_retry_ordinal": 0,
+            "position": 0,
+            "readiness_probe_exact": true,
+            "ready_region": {
+              "local_ms": 0.17535999417304993,
+              "rank_max_ms": 0.25577598810195923,
+              "rank_ms": [
+                0.17535999417304993,
+                0.25577598810195923,
+                0.1992959976196289,
+                0.18960000574588776
+              ]
+            },
+            "sample_index": 0,
+            "scheduled_start_arrival_ns_by_rank": [
+              744423693920458,
+              744423694472453,
+              744423694464151,
+              744423694341517
+            ],
+            "scheduled_start_target_ns_by_rank": [
+              744423699472453,
+              744423699472453,
+              744423699472453,
+              744423699472453
+            ],
+            "start_record_bracket_ns_by_rank": [
+              [
+                744423699472876,
+                744423699501808
+              ],
+              [
+                744423699478046,
+                744423699523668
+              ],
+              [
+                744423699473468,
+                744423699525950
+              ],
+              [
+                744423699473338,
+                744423699522766
+              ]
+            ],
+            "start_record_envelope_span_ns": 53074,
+            "variant": 1
+          }
+        },
+        "variant": 1
+      }
+    ],
+    "rank_order": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "reference": [
+      {
+        "collective_only": {
+          "local_ms": 0.14268800616264343,
+          "rank_max_ms": 0.14268800616264343,
+          "rank_ms": [
+            0.14268800616264343,
+            0.014208000153303146,
+            0.11984000355005264,
+            0.11740799993276596
+          ]
+        },
+        "pair_attempt_id": 0,
+        "pair_retry_ordinal": 0,
+        "position": 0,
+        "readiness_probe_exact": true,
+        "ready_region": {
+          "local_ms": 0.17535999417304993,
+          "rank_max_ms": 0.25577598810195923,
+          "rank_ms": [
+            0.17535999417304993,
+            0.25577598810195923,
+            0.1992959976196289,
+            0.18960000574588776
+          ]
+        },
+        "sample_index": 0,
+        "scheduled_start_arrival_ns_by_rank": [
+          744423693920458,
+          744423694472453,
+          744423694464151,
+          744423694341517
+        ],
+        "scheduled_start_target_ns_by_rank": [
+          744423699472453,
+          744423699472453,
+          744423699472453,
+          744423699472453
+        ],
+        "start_record_bracket_ns_by_rank": [
+          [
+            744423699472876,
+            744423699501808
+          ],
+          [
+            744423699478046,
+            744423699523668
+          ],
+          [
+            744423699473468,
+            744423699525950
+          ],
+          [
+            744423699473338,
+            744423699522766
+          ]
+        ],
+        "start_record_envelope_span_ns": 53074,
+        "variant": 1
+      }
+    ],
+    "warmup_order": [],
+    "warmup_variants": []
+  },
+  "readiness_probe": {
+    "dtype": "torch.bfloat16",
+    "full_tensor_consumer": "preallocated BF16 negation output",
+    "full_tensor_validation": "exact on every warmup and measured sample",
+    "num_elements": 60,
+    "positions": [
+      [
+        0,
+        0
+      ],
+      [
+        0,
+        1
+      ],
+      [
+        0,
+        2
+      ],
+      [
+        0,
+        3
+      ],
+      [
+        0,
+        2048
+      ],
+      [
+        0,
+        3072
+      ],
+      [
+        0,
+        6140
+      ],
+      [
+        0,
+        6141
+      ],
+      [
+        0,
+        6142
+      ],
+      [
+        0,
+        6143
+      ],
+      [
+        1,
+        0
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        1,
+        3
+      ],
+      [
+        1,
+        2048
+      ],
+      [
+        1,
+        3072
+      ],
+      [
+        1,
+        6140
+      ],
+      [
+        1,
+        6141
+      ],
+      [
+        1,
+        6142
+      ],
+      [
+        1,
+        6143
+      ],
+      [
+        10,
+        0
+      ],
+      [
+        10,
+        1
+      ],
+      [
+        10,
+        2
+      ],
+      [
+        10,
+        3
+      ],
+      [
+        10,
+        2048
+      ],
+      [
+        10,
+        3072
+      ],
+      [
+        10,
+        6140
+      ],
+      [
+        10,
+        6141
+      ],
+      [
+        10,
+        6142
+      ],
+      [
+        10,
+        6143
+      ],
+      [
+        16,
+        0
+      ],
+      [
+        16,
+        1
+      ],
+      [
+        16,
+        2
+      ],
+      [
+        16,
+        3
+      ],
+      [
+        16,
+        2048
+      ],
+      [
+        16,
+        3072
+      ],
+      [
+        16,
+        6140
+      ],
+      [
+        16,
+        6141
+      ],
+      [
+        16,
+        6142
+      ],
+      [
+        16,
+        6143
+      ],
+      [
+        30,
+        0
+      ],
+      [
+        30,
+        1
+      ],
+      [
+        30,
+        2
+      ],
+      [
+        30,
+        3
+      ],
+      [
+        30,
+        2048
+      ],
+      [
+        30,
+        3072
+      ],
+      [
+        30,
+        6140
+      ],
+      [
+        30,
+        6141
+      ],
+      [
+        30,
+        6142
+      ],
+      [
+        30,
+        6143
+      ],
+      [
+        31,
+        0
+      ],
+      [
+        31,
+        1
+      ],
+      [
+        31,
+        2
+      ],
+      [
+        31,
+        3
+      ],
+      [
+        31,
+        2048
+      ],
+      [
+        31,
+        3072
+      ],
+      [
+        31,
+        6140
+      ],
+      [
+        31,
+        6141
+      ],
+      [
+        31,
+        6142
+      ],
+      [
+        31,
+        6143
+      ]
+    ],
+    "validation": "exact on every warmup and measured sample"
+  },
+  "reference": {
+    "collective_only": {
+      "median_ms": 0.14268800616264343,
+      "min_ms": 0.14268800616264343,
+      "p95_ms": 0.14268800616264343
+    },
+    "gate_metric": "ready_region.rank_max_ms",
+    "readiness_probe_overhead_median_ms": 0.1130879819393158,
+    "ready_region": {
+      "median_ms": 0.25577598810195923,
+      "min_ms": 0.25577598810195923,
+      "p95_ms": 0.25577598810195923
+    }
+  },
+  "reference_policy": "SGLANG_GLM52_OPT=0 production GroupCoordinator path",
+  "result_path": "/tmp/tp_allreduce_reachability_20260722T192433Z/reachability/m32.result.json",
+  "schema_version": 2,
+  "scope": "tp4_allreduce_diagnostic_only",
+  "timing_contract": {
+    "alignment_retry_admission": "scheduled arrivals, common targets, and start-record brackets only; collective and ready-region latency are excluded",
+    "collective_only": "start event through event recorded immediately after run()",
+    "gate_metric": "ready_region rank-max paired p50",
+    "rank_start_alignment": "selected stream synchronized after restoration; TP CPU-group all-gather selects a common same-host monotonic deadline 5 ms after latest arrival; ranks busy-wait; host timestamps bracket every start-event record call; a host-only 500 us envelope predicate allows at most 10 physical attempts for the whole logical A/B pair; the exact input variant alternates on every physical pair",
+    "ready_region": "start event through full-tensor same-stream negation and position-sensitive gather",
+    "restoration": "variant source-to-local copy and consumer/probe poison occur before every start event"
+  },
+  "workload": {
+    "distributed": true,
+    "family": "allreduce",
+    "name": "tp4_allreduce_decode_m32",
+    "notes": "TP4/DP4 decode bucket: local M=32; sum reduction. Standalone diagnostic; production caller/ABI not yet proven.",
+    "params": {
+      "dtype": "bfloat16",
+      "hidden": 6144,
+      "local_tokens": 32
+    },
+    "phase": "decode",
+    "source_symbol": "sglang.srt.distributed.parallel_state.GroupCoordinator.all_reduce",
+    "world_size": 4
+  }
+}

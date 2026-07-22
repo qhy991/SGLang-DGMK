@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "classification": "clean_campaign_rejected_by_required_analyzer_contract_gate",
+  "campaign_root": "/tmp/tp_allreduce_reachability_20260722T192433Z",
+  "source": {
+    "kernel_harness_sha": "bea4a8cd294a84f2d305cd023eb3fed281de4b1e",
+    "sglang_sha": "a91928c6f713d69722176a8d13781367e9b78dc4",
+    "worktrees_clean_at_campaign_start": true
+  },
+  "automatic_status": {
+    "ledger": "status.tsv",
+    "recorded_steps": 42,
+    "required_failures": [
+      "paired/m16_c10d_abi_resolution",
+      "paired/m32_c10d_abi_resolution",
+      "paired/prefill_c10d_abi_resolution"
+    ],
+    "derived_campaign_exit_code": 1,
+    "exit_code_basis": "The interactive locked command returned 1; status.tsv does not persist the outer exit. Independently, the committed run_locked_tp4_campaign.sh required-phase guard deterministically exits 1 when any required row has a nonzero exit, and all three resolver rows are 1.",
+    "stopped_before": [
+      "backend_scout",
+      "producer_abi",
+      "nsight_systems_profiles",
+      "after_state"
+    ]
+  },
+  "cause": {
+    "classification": "verified_source_contract_drift",
+    "timing_contract": "Analyzer expected the pre-retry rank_start_alignment string and did not require alignment_retry_admission.",
+    "failure_record_contract": "Analyzer allowed only rank/error/start bracket, while current runner failures also persist all scheduled arrivals and the derived common target."
+  },
+  "fix_under_validation": {
+    "analyzer_sha256": "c1edee87cb2a2224449f68e17696cc8dc5a6b32295f470cc9dac633d24d1ffc3",
+    "test_sha256": "942d257cce320b7f43fbbaedd6202903c1b9382643f7c9079193c9cc3bdd4737",
+    "cpu_tests": "15/15 passed",
+    "validation_commands": {
+      "interpreter": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/.venv/bin/python (Python 3.12.13; analyzer is CPU-only)",
+      "cwd": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/sglang",
+      "unit_tests": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/.venv/bin/python glm52_opt/history/tp_allreduce_reachability/test_analyze_tp4_campaign.py",
+      "offline_replay_template": "/home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness/.venv/bin/python glm52_opt/history/tp_allreduce_reachability/analyze_tp4_campaign.py <relocated-archive> --resolve-c10d <m16|m32|prefill> --harness-root /home/qinhaiyan/glm52-goal-runs/24-tp_allreduce_reachability/kernel-harness",
+      "comparison": "cmp each replay stdout with offline_fixed_analyzer_replay/<shape>_c10d_selection.json"
+    },
+    "offline_replay": {
+      "m16": {"valid": true, "selected": "inplace", "failed": "outplace"},
+      "m32": {"valid": true, "selected": "inplace", "failed": "outplace"},
+      "prefill": {"valid": true, "selected": "inplace", "failed": "outplace"}
+    }
+  },
+  "eligibility": {
+    "performance_eligible": false,
+    "campaign_complete": false,
+    "stock_fallback_active": true,
+    "topology": "TP4 diagnostic only; not TP8/DP8/EP8 production evidence"
+  }
+}
