@@ -35,8 +35,8 @@ from sglang.test.kits.attention_unittest.runner_modes.speculative_draft_runner i
     run_dsa_eagle_draft_cuda_graph_runner_case,
 )
 
-register_cuda_ci(est_time=25, stage="base-b", runner_config="4-gpu-b200")
-register_cuda_ci(est_time=25, stage="base-b", runner_config="1-gpu-large")
+register_cuda_ci(est_time=50, stage="base-b", runner_config="4-gpu-b200")
+register_cuda_ci(est_time=50, stage="base-b", runner_config="1-gpu-large")
 
 
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
@@ -294,6 +294,25 @@ class TestDSAAttentionBackendCorrectness(CustomTestCase):
         prefix_lens=(128,),
     )
 
+    # Goal 22 production ABI: TP8/DP8 makes attention TP=1, so each DP rank
+    # presents all 64 Q heads to the SM100 head64 V32 instantiation. M is the
+    # local decode batch and must not be divided by DP. Every request has an
+    # 8192-token paged prefix while the indexer selects exactly 2048 physical
+    # token slots from it. Other tests in this file retain the <64-head cases
+    # that exercise `_forward_flashmla_kv`'s zero-padding path.
+    PRODUCTION_FLASHMLA_KV_DECODE_CASES = tuple(
+        DSAAttentionCase(
+            name=f"dsa_flashmla_kv_production_m{batch}",
+            backend="dsa",
+            forward_mode=ForwardMode.DECODE,
+            num_heads=64,
+            num_kv_heads=1,
+            page_size=DSA_PAGE_SIZE,
+            prefix_lens=(8192,) * batch,
+        )
+        for batch in (16, 32)
+    )
+
     def test_sparse_fp8_prefill_cases(self):
         for impl in DSA_PREFILL_IMPL_VARIANTS:
             with self.subTest(impl=impl):
@@ -313,6 +332,47 @@ class TestDSAAttentionBackendCorrectness(CustomTestCase):
             with self.subTest(impl=impl):
                 run_dsa_sparse_fp8_decode_case(
                     self, self.FP8_DECODE_CASE, dsa_decode_backend=impl
+                )
+
+    def test_production_flashmla_kv_decode_cases(self):
+        for case in self.PRODUCTION_FLASHMLA_KV_DECODE_CASES:
+            with self.subTest(case=case.name):
+                run_dsa_sparse_attention_case(
+                    self,
+                    case,
+                    max_context_len=8192,
+                    dsa_decode_backend="flashmla_kv",
+                    fp8_kv_cache=True,
+                    softmax_scale=(192 + 64) ** -0.5,
+                    model_head_dim=192,
+                    model_qk_nope_head_dim=192,
+                    model_v_head_dim=256,
+                    index_topk=2048,
+                    index_pattern="affine",
+                    loc_layout="interleaved_pages",
+                    require_fused_topk=True,
+                )
+
+    def test_production_flashmla_kv_cuda_graph_metadata_lifecycle_cases(self):
+        # This runner exercises SGLang's capture/replay metadata lifecycle but
+        # invokes the forward eagerly.  The Goal 22 evidence harness separately
+        # captures the production FlashMLA call in a real torch.cuda.CUDAGraph.
+        for case in self.PRODUCTION_FLASHMLA_KV_DECODE_CASES:
+            with self.subTest(case=case.name):
+                run_dsa_sparse_cuda_graph_decode_case(
+                    self,
+                    case,
+                    max_context_len=8192,
+                    dsa_decode_backend="flashmla_kv",
+                    fp8_kv_cache=True,
+                    softmax_scale=(192 + 64) ** -0.5,
+                    model_head_dim=192,
+                    model_qk_nope_head_dim=192,
+                    model_v_head_dim=256,
+                    index_topk=2048,
+                    index_pattern="affine",
+                    loc_layout="interleaved_pages",
+                    require_fused_topk=True,
                 )
 
     # Tilelang sparse cases — dedicated topk=2048 fixture.

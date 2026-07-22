@@ -221,19 +221,21 @@ class TinyDSAModelConfig:
         qk_nope_head_dim: int | None = None,
         qk_rope_head_dim: int = 0,
         kv_lora_rank: int | None = None,
+        v_head_dim: int | None = None,
         index_topk: int = DSA_INDEX_TOPK,
     ):
         qk_nope_head_dim = (
             qk_nope_head_dim if qk_nope_head_dim is not None else head_dim
         )
         kv_lora_rank = kv_lora_rank if kv_lora_rank is not None else qk_nope_head_dim
+        v_head_dim = v_head_dim if v_head_dim is not None else kv_lora_rank
         num_kv_heads = num_kv_heads if num_kv_heads is not None else num_heads
         self.context_len = context_len
         self.hidden_size = hidden_size
         self.num_attention_heads = num_heads
         self.num_key_value_heads = num_kv_heads
         self.head_dim = head_dim
-        self.v_head_dim = kv_lora_rank
+        self.v_head_dim = v_head_dim
         self.qk_nope_head_dim = qk_nope_head_dim
         self.qk_rope_head_dim = qk_rope_head_dim
         self.kv_lora_rank = kv_lora_rank
@@ -253,6 +255,7 @@ class TinyDSAModelConfig:
             qk_nope_head_dim=qk_nope_head_dim,
             qk_rope_head_dim=qk_rope_head_dim,
             kv_lora_rank=kv_lora_rank,
+            v_head_dim=v_head_dim,
             index_head_dim=DSA_INDEX_HEAD_DIM,
             index_n_heads=1,
             index_topk=index_topk,
@@ -487,6 +490,7 @@ class ProjectedDSASparseAttention(nn.Module):
         num_heads: int,
         qk_nope_head_dim: int,
         qk_rope_head_dim: int,
+        softmax_scale: float | None,
         dtype: torch.dtype,
         device: str,
     ):
@@ -535,7 +539,11 @@ class ProjectedDSASparseAttention(nn.Module):
         self.attn = RadixAttention(
             num_heads=num_heads,
             head_dim=self.head_dim,
-            scaling=self.head_dim**-0.5,
+            scaling=(
+                self.head_dim**-0.5
+                if softmax_scale is None
+                else float(softmax_scale)
+            ),
             num_kv_heads=1,
             layer_id=0,
             v_head_dim=qk_nope_head_dim,
@@ -714,6 +722,9 @@ def _make_dsa_sparse_topk_rows(
       production for long prefixes).
     - ``head_tail``: first `topk/2` keys + last `topk/2` keys. Forces a
       genuinely sparse layout that drops the middle of the KV window.
+    - ``affine``: a coprime modular walk over the complete logical context.
+      This gives the production-size test broad page coverage without sorting
+      the selected locations into an artificially contiguous window.
     """
     rows = []
     for req_idx, input_len in enumerate(case.input_lens):
@@ -741,11 +752,60 @@ def _make_dsa_sparse_topk_rows(
                 head = list(range(0, min(half, key_count)))
                 tail = list(range(max(half, key_count - half), key_count))
                 row = sorted(set(head) | set(tail))
+            elif pattern == "affine":
+                import math
+
+                stride = max(1, key_count // 2)
+                while math.gcd(stride, key_count) != 1:
+                    stride -= 1
+                row = [
+                    (slot * stride) % key_count
+                    for slot in range(min(index_topk, key_count))
+                ]
             else:
                 raise ValueError(f"unknown topk index pattern: {pattern!r}")
             row.extend([-1] * (index_topk - len(row)))
             rows.append(row)
     return rows
+
+
+def _materialize_dsa_sparse_topk_indices(
+    backend,
+    case: DSAAttentionCase,
+    topk_rows: list[list[int]],
+    *,
+    loc_fn,
+    device: str,
+) -> torch.Tensor:
+    """Match the index representation consumed by the selected DSA path.
+
+    The production fused-topk path has already translated request-relative
+    positions to physical token-pool slots before attention.  These fixtures
+    bypass the indexer, so reproduce that translation with the same ``loc_fn``
+    that populated the paged KV cache.  Unfused backends still expect logical
+    positions and perform the page-table transform themselves.
+    """
+    if not backend.use_fused_topk:
+        return torch.tensor(topk_rows, dtype=torch.int32, device=device)
+    if loc_fn is None:
+        raise RuntimeError("fused DSA top-k fixture requires its KV-cache loc_fn")
+
+    physical_rows: list[list[int]] = []
+    row_idx = 0
+    for req_idx, input_len in enumerate(case.input_lens):
+        for _ in range(input_len):
+            physical_rows.append(
+                [
+                    -1 if logical_idx < 0 else loc_fn(req_idx, logical_idx)
+                    for logical_idx in topk_rows[row_idx]
+                ]
+            )
+            row_idx += 1
+    if row_idx != len(topk_rows):
+        raise RuntimeError(
+            f"top-k row count mismatch: consumed {row_idx}, got {len(topk_rows)}"
+        )
+    return torch.tensor(physical_rows, dtype=torch.int32, device=device)
 
 
 def _populate_dsa_sparse_prefix_kv(
@@ -804,9 +864,14 @@ def build_dsa_sparse_attention_fixture(
     dsa_prefill_backend: str = "flashmla_auto",
     dsa_decode_backend: str = "flashmla_kv",
     fp8_kv_cache: bool = False,
+    softmax_scale: float | None = None,
+    model_head_dim: int | None = None,
+    model_qk_nope_head_dim: int | None = None,
+    model_v_head_dim: int | None = None,
     index_topk: int = DSA_SPARSE_INDEX_TOPK,
     index_pattern: str = "trailing",
     loc_layout: str = "shuffled_pages",
+    require_fused_topk: bool = False,
 ) -> DSASparseAttentionFixture:
     max_context_len = max(max_context_len, max(case.seq_lens))
     if max_context_len % case.page_size:
@@ -818,16 +883,21 @@ def build_dsa_sparse_attention_fixture(
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
 
-    head_dim = DSA_SPARSE_QK_NOPE_HEAD_DIM + DSA_SPARSE_QK_ROPE_HEAD_DIM
+    absorbed_head_dim = (
+        DSA_SPARSE_QK_NOPE_HEAD_DIM + DSA_SPARSE_QK_ROPE_HEAD_DIM
+    )
     model_config = TinyDSAModelConfig(
         num_heads=case.num_heads,
         num_kv_heads=case.num_kv_heads,
-        head_dim=head_dim,
+        head_dim=model_head_dim or absorbed_head_dim,
         hidden_size=hidden_size,
         context_len=max_context_len,
-        qk_nope_head_dim=DSA_SPARSE_QK_NOPE_HEAD_DIM,
+        qk_nope_head_dim=(
+            model_qk_nope_head_dim or DSA_SPARSE_QK_NOPE_HEAD_DIM
+        ),
         qk_rope_head_dim=DSA_SPARSE_QK_ROPE_HEAD_DIM,
         kv_lora_rank=DSA_SPARSE_QK_NOPE_HEAD_DIM,
+        v_head_dim=model_v_head_dim,
         index_topk=index_topk,
     )
     runner = DSAMockModelRunner(
@@ -836,7 +906,7 @@ def build_dsa_sparse_attention_fixture(
         dtype=dtype,
         device=device,
         max_context_len=max_context_len,
-        head_dim=head_dim,
+        head_dim=absorbed_head_dim,
         disable_cuda_graph=disable_cuda_graph,
         disable_piecewise_cuda_graph=disable_piecewise_cuda_graph,
         runner_batch_size=runner_batch_size,
@@ -848,12 +918,17 @@ def build_dsa_sparse_attention_fixture(
         backend = ATTENTION_BACKENDS[case.backend](runner)
     except (AssertionError, ImportError, ModuleNotFoundError) as exc:
         testcase.skipTest(f"{case.backend} backend is not available: {exc}")
+    if require_fused_topk and not backend.use_fused_topk:
+        raise AssertionError(
+            "production FlashMLA fixture requires fused top-k physical indices"
+        )
 
     actual_module = ProjectedDSASparseAttention(
         hidden_size=hidden_size,
         num_heads=case.num_heads,
         qk_nope_head_dim=DSA_SPARSE_QK_NOPE_HEAD_DIM,
         qk_rope_head_dim=DSA_SPARSE_QK_ROPE_HEAD_DIM,
+        softmax_scale=softmax_scale,
         dtype=dtype,
         device=device,
     )
@@ -885,6 +960,9 @@ def build_dsa_sparse_attention_fixture(
         device=device,
         loc_fn=loc_fn,
     )
+    # Capture/replay preparation must rematerialize fused top-k indices with
+    # exactly the same logical-to-physical mapping used for this batch.
+    forward_batch._dsa_sparse_loc_fn = loc_fn
     _populate_dsa_sparse_prefix_kv(
         actual_module,
         case,
@@ -896,7 +974,13 @@ def build_dsa_sparse_attention_fixture(
     topk_rows = _make_dsa_sparse_topk_rows(
         case, index_topk=index_topk, pattern=index_pattern
     )
-    topk_indices = torch.tensor(topk_rows, dtype=torch.int32, device=device)
+    topk_indices = _materialize_dsa_sparse_topk_indices(
+        backend,
+        case,
+        topk_rows,
+        loc_fn=loc_fn,
+        device=device,
+    )
 
     return DSASparseAttentionFixture(
         case=case,
@@ -950,7 +1034,7 @@ def expected_dsa_fixture_output(fixture: DSAAttentionFixture) -> torch.Tensor:
     )
 
 
-def run_dsa_sparse_fixture_eager(
+def run_dsa_sparse_fixture_raw_eager(
     fixture: DSASparseAttentionFixture, testcase
 ) -> torch.Tensor:
     module = fixture.actual_module
@@ -972,13 +1056,20 @@ def run_dsa_sparse_fixture_eager(
             q_rope=q_rope,
             topk_indices=fixture.topk_indices,
         )
-        attn_output = attn_output.reshape(
-            -1, fixture.case.num_heads * module.qk_nope_head_dim
+        return attn_output.reshape(
+            -1, fixture.case.num_heads, module.qk_nope_head_dim
         )
-        return module.o_proj(attn_output)
 
 
-def expected_dsa_sparse_fixture_output(
+def run_dsa_sparse_fixture_eager(
+    fixture: DSASparseAttentionFixture, testcase
+) -> torch.Tensor:
+    module = fixture.actual_module
+    raw = run_dsa_sparse_fixture_raw_eager(fixture, testcase)
+    return module.o_proj(raw.reshape(raw.shape[0], -1))
+
+
+def expected_dsa_sparse_fixture_raw_output(
     fixture: DSASparseAttentionFixture,
 ) -> torch.Tensor:
     module = fixture.actual_module
@@ -1009,10 +1100,18 @@ def expected_dsa_sparse_fixture_output(
             scores = torch.einsum("hd,kd->hk", query, keys) * module.attn.scaling
             probs = torch.softmax(scores, dim=-1)
             out = torch.einsum("hk,kd->hd", probs, values)
-            outputs.append(out.reshape(-1))
+            outputs.append(out)
             q_idx += 1
 
-    return module.o_proj(torch.stack(outputs, dim=0).to(dtype))
+    return torch.stack(outputs, dim=0).to(dtype)
+
+
+def expected_dsa_sparse_fixture_output(
+    fixture: DSASparseAttentionFixture,
+) -> torch.Tensor:
+    module = fixture.actual_module
+    raw = expected_dsa_sparse_fixture_raw_output(fixture)
+    return module.o_proj(raw.reshape(raw.shape[0], -1))
 
 
 def run_dsa_attention_case(
@@ -1052,9 +1151,14 @@ def run_dsa_sparse_attention_case(
     dsa_prefill_backend: str = "flashmla_auto",
     dsa_decode_backend: str = "flashmla_kv",
     fp8_kv_cache: bool = False,
+    softmax_scale: float | None = None,
+    model_head_dim: int | None = None,
+    model_qk_nope_head_dim: int | None = None,
+    model_v_head_dim: int | None = None,
     index_topk: int = DSA_SPARSE_INDEX_TOPK,
     index_pattern: str = "trailing",
     loc_layout: str = "shuffled_pages",
+    require_fused_topk: bool = False,
 ) -> None:
     fixture = build_dsa_sparse_attention_fixture(
         testcase,
@@ -1066,14 +1170,24 @@ def run_dsa_sparse_attention_case(
         dsa_prefill_backend=dsa_prefill_backend,
         dsa_decode_backend=dsa_decode_backend,
         fp8_kv_cache=fp8_kv_cache,
+        softmax_scale=softmax_scale,
+        model_head_dim=model_head_dim,
+        model_qk_nope_head_dim=model_qk_nope_head_dim,
+        model_v_head_dim=model_v_head_dim,
         index_topk=index_topk,
         index_pattern=index_pattern,
         loc_layout=loc_layout,
+        require_fused_topk=require_fused_topk,
     )
-    actual = run_dsa_sparse_fixture_eager(fixture, testcase)
-    expected = expected_dsa_sparse_fixture_output(fixture)
     atol = DSA_SPARSE_FP8_ATOL if fp8_kv_cache else DSA_SPARSE_ATOL
     rtol = DSA_SPARSE_FP8_RTOL if fp8_kv_cache else DSA_SPARSE_RTOL
+    raw_actual = run_dsa_sparse_fixture_raw_eager(fixture, testcase)
+    raw_expected = expected_dsa_sparse_fixture_raw_output(fixture)
+    torch.testing.assert_close(raw_actual, raw_expected, atol=atol, rtol=rtol)
+    actual = fixture.actual_module.o_proj(raw_actual.reshape(raw_actual.shape[0], -1))
+    expected = fixture.actual_module.o_proj(
+        raw_expected.reshape(raw_expected.shape[0], -1)
+    )
     torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
 
 
@@ -1725,6 +1839,8 @@ def make_dsa_sparse_random_inputs(
         case.num_input_tokens, hidden_size, dtype=dtype, device=device
     )
     topk_rows = _make_dsa_sparse_topk_rows(case, index_topk=fixture.index_topk)
+    # This logical placeholder is rematerialized after the capture batch has
+    # selected its own loc_fn in ``prepare_dsa_sparse_runner_inputs``.
     topk_indices = torch.tensor(topk_rows, dtype=torch.int32, device=device)
     return {
         "input_hidden": input_hidden,
@@ -1760,15 +1876,28 @@ def prepare_dsa_sparse_runner_inputs(
     fixture.case = case
     fixture.forward_batch = batch
     fixture.input_hidden = inputs["input_hidden"]
-    fixture.topk_indices = inputs["topk_indices"]
     if "topk_rows" in inputs:
         fixture.topk_rows = inputs["topk_rows"]
+    loc_fn = getattr(batch, "_dsa_sparse_loc_fn", None)
+    inputs["topk_indices"] = _materialize_dsa_sparse_topk_indices(
+        fixture.backend,
+        case,
+        fixture.topk_rows,
+        loc_fn=loc_fn,
+        device=fixture.runner.device,
+    )
+    fixture.topk_indices = inputs["topk_indices"]
+    active_prefix_hidden = [
+        prefix[: case.prefix_lens[req_idx]]
+        for req_idx, prefix in enumerate(fixture.prefix_hidden)
+    ]
     _populate_dsa_sparse_prefix_kv(
         fixture.actual_module,
         case,
         fixture.runner,
-        fixture.prefix_hidden,
+        active_prefix_hidden,
         max_context_len=max_context_len,
+        loc_fn=loc_fn,
     )
 
 

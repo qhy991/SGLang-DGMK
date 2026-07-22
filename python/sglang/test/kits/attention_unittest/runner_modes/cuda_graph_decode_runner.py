@@ -827,6 +827,14 @@ def run_dsa_sparse_cuda_graph_decode_case(
     cuda_graph_capture_batch_size: int | None = None,
     dsa_decode_backend: str = "flashmla_kv",
     fp8_kv_cache: bool = False,
+    softmax_scale: float | None = None,
+    model_head_dim: int | None = None,
+    model_qk_nope_head_dim: int | None = None,
+    model_v_head_dim: int | None = None,
+    index_topk: int = 128,
+    index_pattern: str = "trailing",
+    loc_layout: str = "shuffled_pages",
+    require_fused_topk: bool = False,
 ):
     """DSA sparse-topk CUDA-graph decode replay (`flashmla_kv` path).
     Sparse decode uses cached MLA latent KV (written by
@@ -840,13 +848,17 @@ def run_dsa_sparse_cuda_graph_decode_case(
             "(the sparse `flashmla_kv` path is the natural CG decode target)."
         )
     capture_batch_size = cuda_graph_capture_batch_size or case.batch_size
-    if max_context_len is None:
-        max_context_len = max(case.seq_lens) if case.seq_lens else DSA_PAGE_SIZE
-        # Round up to page_size multiple.
-        if max_context_len % case.page_size:
-            max_context_len = (
-                (max_context_len + case.page_size - 1) // case.page_size
-            ) * case.page_size
+    # A decode case's sequence length includes the newly decoded token.  Apply
+    # the same page-rounded capacity normalization as the fixture builder even
+    # when a caller supplied a smaller prefix-only value (for example 8192).
+    max_context_len = max(
+        max_context_len or DSA_PAGE_SIZE,
+        max(case.seq_lens) if case.seq_lens else DSA_PAGE_SIZE,
+    )
+    if max_context_len % case.page_size:
+        max_context_len = (
+            (max_context_len + case.page_size - 1) // case.page_size
+        ) * case.page_size
     from ..attention_methods.dsa_attention import (
         DSA_SPARSE_FP8_ATOL,
         DSA_SPARSE_FP8_RTOL,
@@ -856,10 +868,41 @@ def run_dsa_sparse_cuda_graph_decode_case(
         atol, rtol = DSA_SPARSE_FP8_ATOL, DSA_SPARSE_FP8_RTOL
     else:
         atol, rtol = DSA_SPARSE_ATOL, DSA_SPARSE_RTOL
+    from ..attention_methods.dense_attention import make_loc_fn
+
+    def make_forward_batch_with_layout(
+        graph_case,
+        runner,
+        *,
+        max_context_len,
+        device,
+    ):
+        loc_fn = make_loc_fn(
+            loc_layout,
+            batch_size=graph_case.batch_size,
+            seq_lens=graph_case.seq_lens,
+            prefix_lens=graph_case.prefix_lens,
+            page_size=graph_case.page_size,
+            max_context_len=max_context_len,
+            seed=5026 + len(graph_case.name),
+        )
+        batch = _make_dsa_forward_batch(
+            graph_case,
+            runner,
+            max_context_len=max_context_len,
+            device=device,
+            loc_fn=loc_fn,
+        )
+        # The prepare hook uses the identical mapping when writing prefix KV.
+        # This keeps metadata-lifecycle replay on the requested fragmented
+        # layout instead of silently reverting to contiguous physical slots.
+        batch._dsa_sparse_loc_fn = loc_fn
+        return batch
+
     adapter = CudaGraphDecodeAdapter(
         build_fixture=build_dsa_sparse_attention_fixture,
         make_case=make_dsa_sparse_case_with_prefix_lens,
-        make_forward_batch=_make_dsa_forward_batch,
+        make_forward_batch=make_forward_batch_with_layout,
         fixture_inputs=dsa_sparse_fixture_inputs,
         make_capture_inputs=make_dsa_sparse_random_inputs,
         make_replay_inputs=make_dsa_sparse_replay_inputs,
@@ -884,6 +927,14 @@ def run_dsa_sparse_cuda_graph_decode_case(
             device=device,
             dsa_decode_backend=dsa_decode_backend,
             fp8_kv_cache=fp8_kv_cache,
+            softmax_scale=softmax_scale,
+            model_head_dim=model_head_dim,
+            model_qk_nope_head_dim=model_qk_nope_head_dim,
+            model_v_head_dim=model_v_head_dim,
+            index_topk=index_topk,
+            index_pattern=index_pattern,
+            loc_layout=loc_layout,
+            require_fused_topk=require_fused_topk,
         ),
         capture_batch_size=capture_batch_size,
         max_context_len=max_context_len,
