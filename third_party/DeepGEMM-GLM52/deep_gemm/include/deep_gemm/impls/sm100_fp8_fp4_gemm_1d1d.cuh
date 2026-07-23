@@ -27,7 +27,8 @@ template <cute::UMMA::Major kMajorA, cute::UMMA::Major kMajorB,
           uint32_t kNumMulticast, bool kIsMulticastOnA,
           uint32_t kNumSMs,
           bool kSwapAB, bool kEnsureZeroPadding,
-          GemmType kGemmType, bool kWithAccumulation, bool kFuseScalePack, bool kProfile,
+          GemmType kGemmType, bool kWithAccumulation, bool kFuseScalePack,
+          bool kPackedScaleWarpLoad, bool kProfile,
           typename a_dtype_t, typename b_dtype_t, typename cd_dtype_t,
           typename epilogue_type_t>
 CUTLASS_GLOBAL void __launch_bounds__(kNumNonEpilogueThreads + kNumEpilogueThreads, 1)
@@ -44,6 +45,10 @@ sm100_fp8_fp4_gemm_1d1d_impl(int* grouped_layout,
                              const float* __restrict__ sfb_raw = nullptr,
                              int sfa_s0 = 0, int sfa_s1 = 0,
                              int sfb_s0 = 0, int sfb_s1 = 0,
+                             // Production packed UE8M0 operands. Only read when
+                             // kPackedScaleWarpLoad; nullptr otherwise.
+                             const uint32_t* __restrict__ sfa_packed = nullptr,
+                             const uint32_t* __restrict__ sfb_packed = nullptr,
                              // Opt-in span phase-decomposition probe (nullptr in production;
                              // 8 u64 %globaltimer slots per CTA: 0 kernel-start,
                              // 1 first-TMA-issue, 2 last-TMA-issue, 3 first-MMA-issue,
@@ -56,6 +61,10 @@ sm100_fp8_fp4_gemm_1d1d_impl(int* grouped_layout,
 
     // C/D type: BF16 and FP32 are supported, with or without accumulation
     DG_STATIC_ASSERT(cute::is_same_v<cd_dtype_t, float> or cute::is_same_v<cd_dtype_t, cutlass::bfloat16_t>, "Invalid C/D data dtype");
+    DG_STATIC_ASSERT(not (kFuseScalePack and kPackedScaleWarpLoad),
+                     "Scale-pack and packed-scale-warp-load paths are mutually exclusive");
+    DG_STATIC_ASSERT(not kPackedScaleWarpLoad or (BLOCK_M <= 32 and BLOCK_N == 128),
+                     "Packed scale warp load is specialized for GLM-5.2 decode tiles");
 
     // MMA Configs
     constexpr uint32_t LAYOUT_AD_M = 128;
@@ -141,7 +150,7 @@ sm100_fp8_fp4_gemm_1d1d_impl(int* grouped_layout,
     if (warp_idx == 0) {
         cute::prefetch_tma_descriptor(&tensor_map_a);
         cute::prefetch_tma_descriptor(&tensor_map_b);
-        if constexpr (not kFuseScalePack) {
+        if constexpr (not kFuseScalePack and not kPackedScaleWarpLoad) {
             cute::prefetch_tma_descriptor(&tensor_map_sfa);
             cute::prefetch_tma_descriptor(&tensor_map_sfb);
         }
@@ -290,7 +299,7 @@ sm100_fp8_fp4_gemm_1d1d_impl(int* grouped_layout,
 
                 // Issue SFA and SFB TMAs at certain stages
                 // No swizzling, so one TMA for one SF is enough
-                if constexpr (kFuseScalePack) {
+                if constexpr (kFuseScalePack or kPackedScaleWarpLoad) {
                     // GLM-5.2 fused UE8M0 pack: the SF smem is produced by warp 2 (the
                     // UTCCP transposer) directly from the raw f32 scale operands, using
                     // all 32 lanes and off THIS weight-stream producer's critical path.
@@ -486,6 +495,30 @@ sm100_fp8_fp4_gemm_1d1d_impl(int* grouped_layout,
         while (scheduler.get_next_block(m_block_idx, n_block_idx)) {
             const auto num_total_k_blocks = math::ceil_div(scheduler.current_shape_k, BLOCK_K);
             for (uint32_t k_block_idx = 0; k_block_idx < num_total_k_blocks; advance_pipeline(k_block_idx)) {
+                // Start the two packed-scale global reads before waiting for
+                // A/B TMA. The values remain in registers while the producer
+                // completes, overlapping their scoreboard latency with the
+                // main data movement instead of extending the consumer path.
+                uint32_t packed_sfa_word = 0;
+                uint32_t packed_sfb_word = 0;
+                if constexpr (kPackedScaleWarpLoad) {
+                    if (k_block_idx % kNumSFAStagesPerLoad == 0 and lane_idx < BLOCK_M) {
+                        const uint32_t base_m = m_block_idx * BLOCK_M;
+                        const uint32_t ar = min(base_m + lane_idx, shape_m - 1u);
+                        const uint32_t kgrp = k_block_idx / kNumSFAStagesPerLoad;
+                        packed_sfa_word =
+                            sfa_packed[static_cast<long>(ar) * sfa_s0 +
+                                       static_cast<long>(kgrp) * sfa_s1];
+                    }
+                    if (k_block_idx % kNumSFBStagesPerLoad == 0 and lane_idx == 0) {
+                        const uint32_t wr = n_block_idx * BLOCK_N;
+                        const uint32_t kgrp = k_block_idx / kNumSFBStagesPerLoad;
+                        packed_sfb_word =
+                            sfb_packed[static_cast<long>(wr) * sfb_s0 +
+                                       static_cast<long>(kgrp) * sfb_s1];
+                    }
+                }
+
                 // Wait TMA arrival
                 full_barriers[stage_idx]->wait(phase);
 
@@ -551,6 +584,31 @@ sm100_fp8_fp4_gemm_1d1d_impl(int* grouped_layout,
                                 smem_sfb[stage_idx][j] = acc;
                             }
                         }
+                    }
+                    __syncwarp();
+                }
+                if constexpr (kPackedScaleWarpLoad) {
+                    // The production ABI is the exact TMA-ready layout:
+                    // [MN, ceil(K / gran_k / 4)] int32 with stride(0)==1.
+                    // Each int32 is already the four UE8M0 bytes consumed by
+                    // UTCCP, so warp 2 only has to stage it before the existing
+                    // transpose/fence/barrier sequence.
+                    if (k_block_idx % kNumSFAStagesPerLoad == 0) {
+                        if (lane_idx < BLOCK_M)
+                            smem_sfa[stage_idx][lane_idx] = packed_sfa_word;
+                    }
+
+                    if (k_block_idx % kNumSFBStagesPerLoad == 0) {
+                        // The production transform expands each blockwise
+                        // weight scale across 128 N rows. Lane 0 fetched the
+                        // uniform word while A/B TMA was in flight; broadcast
+                        // it once, then one aligned uint4 store per lane fills
+                        // the tile (one global load and 32 vector stores).
+                        packed_sfb_word =
+                            __shfl_sync(0xFFFFFFFFu, packed_sfb_word, 0);
+                        reinterpret_cast<uint4*>(smem_sfb[stage_idx])[lane_idx] =
+                            make_uint4(packed_sfb_word, packed_sfb_word,
+                                       packed_sfb_word, packed_sfb_word);
                     }
                     __syncwarp();
                 }

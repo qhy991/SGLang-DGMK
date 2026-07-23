@@ -177,6 +177,16 @@ try:
 
     fp8_gemm_nt_fused = fp8_fp4_gemm_nt_fused
 
+    def fp8_fp4_gemm_nt_packed_warp(a, b, d, c=None, compiled_dims='nk'):
+        # GLM-5.2 production ABI: int32 TMA-aligned packed UE8M0 scales are
+        # staged by warp 2 inside the GEMM. No unpack/repack adapter is launched.
+        (a_data, a_sf), (b_data, b_sf) = _parse_tensor_or_tuple(a), _parse_tensor_or_tuple(b)
+        _C.fp8_fp4_gemm_nt_packed_warp(
+            a_data, a_sf, b_data, b_sf, d, c, compiled_dims
+        )
+
+    fp8_gemm_nt_packed_warp = fp8_fp4_gemm_nt_packed_warp
+
     def fp8_fp4_gemm_nt_prof(a, b, d, prof, fuse_scale_pack, c=None, compiled_dims='nk'):
         # Diagnostic-only span phase probe: fuse_scale_pack True=fused (raw f32 SF),
         # False=baseline/pre-pack (packed int32 SF). `prof` is int64 [num_ctas, 8].

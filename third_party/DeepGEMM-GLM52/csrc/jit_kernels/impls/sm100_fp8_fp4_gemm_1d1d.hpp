@@ -40,6 +40,12 @@ public:
         bool fuse_scale_pack = false;
         const float* sfa_raw = nullptr;
         const float* sfb_raw = nullptr;
+        // Production GLM-5.2 already supplies TMA-aligned packed UE8M0 words.
+        // This opt-in path lets warp 2 stage them with ordinary global loads,
+        // removing scale TMA work from the single producer warp.
+        bool packed_scale_warp_load = false;
+        const uint32_t* sfa_packed = nullptr;
+        const uint32_t* sfb_packed = nullptr;
         int sfa_s0 = 0, sfa_s1 = 0, sfb_s0 = 0, sfb_s1 = 0;
         // Opt-in span phase-decomposition probe (8 u64 slots per CTA; nullptr in production).
         unsigned long long* prof = nullptr;
@@ -66,7 +72,7 @@ static void __instantiate_kernel() {{
         {},
         {},
         {},
-        {}, {}, {}, {},
+        {}, {}, {}, {}, {},
         {}, {}, {},
         {}
     >);
@@ -85,7 +91,10 @@ static void __instantiate_kernel() {{
         args.gemm_config.layout.get_cluster_size(), args.gemm_config.layout.cluster_n > 1,
         args.gemm_config.launch_config.num_sms,
         args.gemm_config.layout.swap_ab, args.gemm_desc.ensure_zero_padding,
-        to_string(args.gemm_desc.gemm_type), args.gemm_desc.with_accumulation, (args.fuse_scale_pack ? "true" : "false"), (args.prof != nullptr ? "true" : "false"),
+        to_string(args.gemm_desc.gemm_type), args.gemm_desc.with_accumulation,
+        (args.fuse_scale_pack ? "true" : "false"),
+        (args.packed_scale_warp_load ? "true" : "false"),
+        (args.prof != nullptr ? "true" : "false"),
         to_string(args.gemm_desc.a_dtype), to_string(args.gemm_desc.b_dtype), to_string(args.gemm_desc.cd_dtype),
         get_default_epilogue_type(args.epilogue_type));
     }
@@ -98,6 +107,7 @@ static void __instantiate_kernel() {{
             args.tensor_map_sfa, args.tensor_map_sfb,
             args.tensor_map_cd,
             args.sfa_raw, args.sfb_raw, args.sfa_s0, args.sfa_s1, args.sfb_s0, args.sfb_s1,
+            args.sfa_packed, args.sfb_packed,
             args.prof));
     }
 };
@@ -112,7 +122,9 @@ static void sm100_fp8_fp4_gemm_1d1d(const torch::Tensor& a, const torch::Tensor&
                                     const std::string& compiled_dims,
                                     const std::optional<std::string>& epilogue_type = std::nullopt,
                                     const bool& fuse_scale_pack = false,
+                                    const bool& packed_scale_warp_load = false,
                                     unsigned long long* prof = nullptr) {
+    DG_HOST_ASSERT(not (fuse_scale_pack and packed_scale_warp_load));
     const auto desc = GemmDesc {
         .gemm_type = GemmType::Normal,
         .kernel_type = KernelType::Kernel1D1D,
@@ -147,9 +159,10 @@ static void sm100_fp8_fp4_gemm_1d1d(const torch::Tensor& a, const torch::Tensor&
     // the kernel the raw f32 SF operands (packed on-device). The SF tensor maps are
     // unused in this path (guarded in the kernel), so reuse `tensor_map_a` as a valid
     // placeholder to keep the descriptor argument well-formed.
-    const auto tensor_map_sfa = fuse_scale_pack ? tensor_map_a
+    const auto bypass_scale_tma = fuse_scale_pack or packed_scale_warp_load;
+    const auto tensor_map_sfa = bypass_scale_tma ? tensor_map_a
         : make_tma_sf_desc(cute::UMMA::Major::MN, sfa, m, k, config.layout.block_m, gran_k_a, 1, 0);
-    const auto tensor_map_sfb = fuse_scale_pack ? tensor_map_a
+    const auto tensor_map_sfb = bypass_scale_tma ? tensor_map_a
         : make_tma_sf_desc(cute::UMMA::Major::MN, sfb, n, k, config.layout.block_n, gran_k_b, 1, 0);
 
     // Launch
@@ -173,10 +186,15 @@ static void sm100_fp8_fp4_gemm_1d1d(const torch::Tensor& a, const torch::Tensor&
         .fuse_scale_pack = fuse_scale_pack,
         .sfa_raw = fuse_scale_pack ? sfa.data_ptr<float>() : nullptr,
         .sfb_raw = fuse_scale_pack ? sfb.data_ptr<float>() : nullptr,
-        .sfa_s0 = fuse_scale_pack ? static_cast<int>(sfa.stride(0)) : 0,
-        .sfa_s1 = fuse_scale_pack ? static_cast<int>(sfa.stride(1)) : 0,
-        .sfb_s0 = fuse_scale_pack ? static_cast<int>(sfb.stride(0)) : 0,
-        .sfb_s1 = fuse_scale_pack ? static_cast<int>(sfb.stride(1)) : 0,
+        .packed_scale_warp_load = packed_scale_warp_load,
+        .sfa_packed = packed_scale_warp_load
+            ? reinterpret_cast<const uint32_t*>(sfa.data_ptr<int32_t>()) : nullptr,
+        .sfb_packed = packed_scale_warp_load
+            ? reinterpret_cast<const uint32_t*>(sfb.data_ptr<int32_t>()) : nullptr,
+        .sfa_s0 = bypass_scale_tma ? static_cast<int>(sfa.stride(0)) : 0,
+        .sfa_s1 = bypass_scale_tma ? static_cast<int>(sfa.stride(1)) : 0,
+        .sfb_s0 = bypass_scale_tma ? static_cast<int>(sfb.stride(0)) : 0,
+        .sfb_s1 = bypass_scale_tma ? static_cast<int>(sfb.stride(1)) : 0,
         .prof = prof
     };
     const auto code = SM100FP8FP4Gemm1D1DRuntime::generate(args);

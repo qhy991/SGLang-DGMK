@@ -40,11 +40,24 @@ def ensure_stock_deep_gemm():
     return mod
 
 
+def _mirror_runtime_config(stock, fork) -> None:
+    """Keep the isolated module's launch policy identical to production."""
+    for getter_name, setter_name in (
+        ("get_num_sms", "set_num_sms"),
+        ("get_tc_util", "set_tc_util"),
+        ("get_pdl", "set_pdl"),
+    ):
+        stock_getter = getattr(stock, getter_name, None)
+        fork_setter = getattr(fork, setter_name, None)
+        if callable(stock_getter) and callable(fork_setter):
+            fork_setter(stock_getter())
+
+
 @lru_cache(maxsize=1)
 def get_experimental_deep_gemm():
     if not deepgemm_variant():
         return None
-    ensure_stock_deep_gemm()
+    stock = ensure_stock_deep_gemm()
     manifest = _read_manifest()
     pkg_dir = Path(manifest["package_dir"]).resolve()
     jit_cache = Path(manifest["jit_cache_dir"]).resolve()
@@ -58,7 +71,9 @@ def get_experimental_deep_gemm():
         "deep_gemm_experimental" in sys.modules
         and getattr(sys.modules["deep_gemm_experimental"], "_C", None) is not None
     ):
-        return sys.modules["deep_gemm_experimental"]
+        module = sys.modules["deep_gemm_experimental"]
+        _mirror_runtime_config(stock, module)
+        return module
 
     spec = importlib.util.spec_from_file_location(
         "deep_gemm_experimental",
@@ -72,9 +87,21 @@ def get_experimental_deep_gemm():
     module.__path__ = [str(pkg_dir)]  # type: ignore[attr-defined]
     module.__package__ = "deep_gemm_experimental"
     spec.loader.exec_module(module)
+
+    # Match the production runtime configuration. DeepGEMM defaults a fresh
+    # module to 128 SMs, while SGLang configures stock DeepGEMM to the full
+    # device count (148 on B200). Leaving the side-by-side module at its default
+    # changes the grid and invalidates both the comparison and serving policy.
+    _mirror_runtime_config(stock, module)
     return module
 
 
 def has_fused_fp8_gemm_nt() -> bool:
     mod = get_experimental_deep_gemm()
     return mod is not None and hasattr(mod, "fp8_gemm_nt_fused")
+
+
+def has_packed_warp_fp8_gemm_nt() -> bool:
+    """Whether the overlay exposes the production packed-UE8M0 q_b entry."""
+    mod = get_experimental_deep_gemm()
+    return mod is not None and hasattr(mod, "fp8_gemm_nt_packed_warp")

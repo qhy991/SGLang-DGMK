@@ -217,24 +217,8 @@ struct SM100ArchSpec {
     }
 
     static LaunchConfig get_launch_config(const GemmDesc& desc, const Layout& layout) {
-        // GLM-5.2 decode shapes (e.g. q_b M=16/32, N=16384) often select a
-        // single-wave layout whose tile count is below the device SM count
-        // (128 tiles on 148 SMs). Launching the idle SMs dilutes occupancy and
-        // adds persistent-scheduler overhead without extra parallel work.
-        // Clamp the launch SM count to the useful last-wave utilization,
-        // keeping multicast/cluster and even-SM constraints intact.
-        int num_sms = desc.num_sms;
-        const auto layout_info = get_layout_info(desc, layout);
-        if (layout_info.num_waves == 1) {
-            const int cluster = layout.get_cluster_size();
-            int useful = layout_info.last_wave_util;
-            if (cluster > 0)
-                useful = (useful / cluster) * cluster;
-            if (useful >= cluster and useful < num_sms and useful % 2 == 0)
-                num_sms = useful;
-        }
         return {
-            num_sms,
+            desc.num_sms,
             layout.get_cluster_size(),
             256,
             32, 128, 128, 128

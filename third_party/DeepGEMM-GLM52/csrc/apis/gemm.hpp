@@ -167,7 +167,53 @@ static void fp8_fp4_gemm_nt_fused(const std::pair<torch::Tensor, torch::Tensor>&
     sm100_fp8_fp4_gemm_1d1d(a.first, a.second, b.first, b.second, c, d, m, n, k,
                             /*gran_k_a=*/128, /*gran_k_b=*/128,
                             major_a, major_b, compiled_dims, std::nullopt, /*fuse_scale_pack=*/true,
+                            /*packed_scale_warp_load=*/false,
                             prof.has_value() ? reinterpret_cast<unsigned long long*>(prof->data_ptr()) : nullptr);
+}
+
+// GLM-5.2 production packed-UE8M0 experiment. Unlike the historical fused
+// entry above, this consumes the exact SGLang/DeepGEMM packed int32 scale ABI
+// and launches no adapter or preprocessing kernel. Warp 2 stages the packed
+// words with ordinary loads while warp 0 is dedicated to A/B TMA production.
+static void fp8_fp4_gemm_nt_packed_warp(
+        const std::pair<torch::Tensor, torch::Tensor>& a,
+        const std::pair<torch::Tensor, torch::Tensor>& b,
+        const torch::Tensor& d,
+        const std::optional<torch::Tensor>& c,
+        const std::string& compiled_dims) {
+    const auto major_a = get_major_type_ab(a.first);
+    const auto major_b = get_major_type_ab(b.first);
+    DG_HOST_ASSERT(major_a == cute::UMMA::Major::K and major_b == cute::UMMA::Major::K);
+    check_major_type_cd(d);
+
+    const auto arch_major = device_runtime->get_arch_major();
+    const auto [m, k] = check_ab_fp8_fp4(a.first, major_a, arch_major);
+    const auto [n, k_] = check_ab_fp8_fp4(b.first, major_b, arch_major);
+    const auto [m_, n_] = get_shape<2>(d);
+    DG_HOST_ASSERT(m == m_ and n == n_ and k == k_);
+    DG_HOST_ASSERT(d.scalar_type() == torch::kBFloat16 or d.scalar_type() == torch::kFloat);
+    DG_HOST_ASSERT(arch_major == 10 and "Packed scale warp load is SM100-only");
+    DG_HOST_ASSERT(a.first.scalar_type() == torch::kFloat8_e4m3fn and
+                   b.first.scalar_type() == torch::kFloat8_e4m3fn and
+                   "Packed scale warp load supports fp8 e4m3 operands only");
+    DG_HOST_ASSERT(a.second.scalar_type() == torch::kInt and
+                   b.second.scalar_type() == torch::kInt);
+    DG_HOST_ASSERT(a.second.dim() == 2 and b.second.dim() == 2);
+    DG_HOST_ASSERT(static_cast<int>(a.second.size(0)) == m and
+                   static_cast<int>(b.second.size(0)) == n);
+    DG_HOST_ASSERT(static_cast<int>(a.second.size(1)) == math::ceil_div(k, 512) and
+                   static_cast<int>(b.second.size(1)) == math::ceil_div(k, 512));
+    DG_HOST_ASSERT(a.second.stride(0) == 1 and b.second.stride(0) == 1 and
+                   "Packed scale warp load expects DeepGEMM MN-major scale layout");
+
+    if (early_return(m, n, k, d, c))
+        return;
+
+    sm100_fp8_fp4_gemm_1d1d(a.first, a.second, b.first, b.second, c, d, m, n, k,
+                            /*gran_k_a=*/128, /*gran_k_b=*/128,
+                            major_a, major_b, compiled_dims, std::nullopt,
+                            /*fuse_scale_pack=*/false,
+                            /*packed_scale_warp_load=*/true);
 }
 
 // GLM-5.2 diagnostic-only: profile the SM100 1D1D GEMM span phases for BOTH the
@@ -199,7 +245,7 @@ static void fp8_fp4_gemm_nt_prof(const std::pair<torch::Tensor, torch::Tensor>& 
     sm100_fp8_fp4_gemm_1d1d(a.first, a.second, b.first, b.second, c, d, m, n, k,
                             /*gran_k_a=*/128, /*gran_k_b=*/128,
                             major_a, major_b, compiled_dims, std::nullopt,
-                            fuse_scale_pack, prof_ptr);
+                            fuse_scale_pack, /*packed_scale_warp_load=*/false, prof_ptr);
 }
 
 static void fp8_fp4_gemm_nn(const std::pair<torch::Tensor, torch::Tensor>& a,

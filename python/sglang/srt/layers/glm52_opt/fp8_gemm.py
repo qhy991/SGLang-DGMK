@@ -2,7 +2,8 @@
 
 Routing policy (aligned with llm_flops DECODE/PREFILL winners):
 
-- ``q_b_proj`` (decode): DeepGEMM-GLM52 ``fp8_gemm_nt_fused`` when overlay is loaded
+- ``q_b_proj`` (decode): DeepGEMM-GLM52 ``fp8_gemm_nt_packed_warp`` for the
+  production int32 packed-UE8M0 ABI; historical f32 inputs retain the fused path
 - ``o_proj`` (decode): native packed-UE8M0 + ``fp8_gemm_nt`` (matches o_proj_decode_hbm35)
 - All other registered ``fp8_gemm`` ops: load archive ``candidate.run`` (Triton / pack)
 
@@ -21,6 +22,7 @@ import deep_gemm
 from sglang.srt.layers.glm52_opt.experimental_deepgemm import (
     get_experimental_deep_gemm,
     has_fused_fp8_gemm_nt,
+    has_packed_warp_fp8_gemm_nt,
 )
 from sglang.srt.layers.glm52_opt.config import allow_abi_adapter
 from sglang.srt.layers.glm52_opt.kernels.scale_pack import pack_scales
@@ -44,7 +46,9 @@ def _unpack_weight_scale_f32(
     return _unpack_ue8m0_scale_for_triton(w_scale, weight_shape, block_size)
 
 
-def _unpack_act_scale_f32(x_scale: torch.Tensor, m: int, k: int, block_k: int) -> torch.Tensor:
+def _unpack_act_scale_f32(
+    x_scale: torch.Tensor, m: int, k: int, block_k: int
+) -> torch.Tensor:
     """Unpack per-token UE8M0 int32 scales to f32 [M, K//block_k] for Triton candidates."""
     if x_scale.dtype != torch.int32:
         return x_scale
@@ -99,8 +103,27 @@ def _run_q_b_fused(
         )
         return
     x_packed, w_packed = pack_scales(x_scale, w_scale)
-    deep_gemm.fp8_gemm_nt(
-        (x_fp8, x_packed), (w_fp8, w_packed), out, compiled_dims="nk"
+    deep_gemm.fp8_gemm_nt((x_fp8, x_packed), (w_fp8, w_packed), out, compiled_dims="nk")
+
+
+def _run_q_b_packed_warp(
+    x_fp8: torch.Tensor,
+    w_fp8: torch.Tensor,
+    x_scale: torch.Tensor,
+    w_scale: torch.Tensor,
+    out: torch.Tensor,
+) -> None:
+    """Run the exact production packed-scale ABI without an adapter launch."""
+    fork = get_experimental_deep_gemm()
+    if fork is None or not hasattr(fork, "fp8_gemm_nt_packed_warp"):
+        raise RuntimeError("experimental DeepGEMM packed-warp entry is unavailable")
+    fork.fp8_gemm_nt_packed_warp(
+        (x_fp8, x_scale),
+        (w_fp8, w_scale),
+        out,
+        # Match the stock production call first; fixed-N/K specialization is
+        # evaluated as a separate experiment and must earn its own oracle.
+        compiled_dims="",
     )
 
 
@@ -183,23 +206,43 @@ def run_fp8_gemm(
     phase: str = "decode",
 ) -> Tuple[bool, str]:
     """Run optimized FP8 GEMM. Returns (ok, path) where path is
-    native_fork | native_packed | archive | packed_fallback | packed_default.
+    native_packed_warp | native_fork | native_packed | archive |
+    packed_fallback | packed_default.
     """
     packed_scales = x_scale.dtype == torch.int32 or w_scale.dtype == torch.int32
 
-    # 1) q_b decode only: the historical fork consumes raw f32 scales.  Do not
-    # silently unpack production UE8M0 scales unless this legacy adapter is
-    # explicitly enabled: its conversion kernels were absent from the harness
-    # score but are paid on every serving invocation.
-    if (
-        op_name in _NATIVE_FORK_OPS
-        and phase == "decode"
-        and has_fused_fp8_gemm_nt()
-    ):
-        if packed_scales and not allow_abi_adapter():
-            return False, "packed_abi_requires_adapter"
-        _run_q_b_fused(x_fp8, w_fp8, x_scale, w_scale, out)
-        return True, "native_fork"
+    # 1) q_b decode only. Production supplies BOTH scales in DeepGEMM's
+    # non-contiguous int32 MN-major packed layout. The packed-warp entry consumes
+    # that ABI directly and is fail-closed: missing overlay, mixed dtypes, or a
+    # rejected shape returns to the caller, which invokes stock DeepGEMM.
+    if op_name in _NATIVE_FORK_OPS and phase == "decode":
+        packed_pair = x_scale.dtype == torch.int32 and w_scale.dtype == torch.int32
+        if packed_pair:
+            try:
+                if not has_packed_warp_fp8_gemm_nt():
+                    return False, "packed_warp_unavailable"
+                _run_q_b_packed_warp(x_fp8, w_fp8, x_scale, w_scale, out)
+                return True, "native_packed_warp"
+            except Exception as exc:
+                logger.warning(
+                    "glm52_opt packed q_b path failed (%s); falling back to stock",
+                    exc,
+                )
+                return False, "packed_warp_error"
+        if packed_scales:
+            return False, "packed_abi_mixed_dtypes"
+
+        # Historical raw-f32 experiment remains available for offline replay,
+        # but production never reaches it through an unpack adapter.
+        try:
+            if has_fused_fp8_gemm_nt():
+                _run_q_b_fused(x_fp8, w_fp8, x_scale, w_scale, out)
+                return True, "native_fork"
+        except Exception as exc:
+            logger.warning(
+                "glm52_opt f32 q_b path failed (%s); falling back to stock", exc
+            )
+            return False, "native_fork_error"
 
     # 2) o_proj: packed UE8M0 (decode + prefill; matches o_proj_decode_hbm35)
     if op_name in _NATIVE_PACKED_OPS:

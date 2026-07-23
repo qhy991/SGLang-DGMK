@@ -251,6 +251,21 @@ void dg_fp8_fp4_gemm_nt_fused(TensorView a, TensorView a_sf,
                                 convert_to_torch_tensor(d), c_opt, compiled_dims, prof_opt);
 }
 
+// GLM-5.2 native packed-UE8M0 path: no scale-layout adapter or extra launch.
+void dg_fp8_fp4_gemm_nt_packed_warp(TensorView a, TensorView a_sf,
+                                    TensorView b, TensorView b_sf,
+                                    TensorView d,
+                                    Optional<TensorView> c,
+                                    std::string compiled_dims) {
+    auto c_opt = c.has_value()
+        ? std::optional<torch::Tensor>(convert_to_torch_tensor(c.value()))
+        : std::nullopt;
+    gemm::fp8_fp4_gemm_nt_packed_warp(
+        std::make_pair(convert_to_torch_tensor(a), convert_to_torch_tensor(a_sf)),
+        std::make_pair(convert_to_torch_tensor(b), convert_to_torch_tensor(b_sf)),
+        convert_to_torch_tensor(d), c_opt, compiled_dims);
+}
+
 // Diagnostic-only: span phase probe for baseline (fuse=false) and fused (fuse=true).
 void dg_fp8_fp4_gemm_nt_prof(TensorView a, TensorView a_sf,
                              TensorView b, TensorView b_sf,
@@ -523,6 +538,7 @@ void dg_k_grouped_fp8_gemm_nt_contiguous(TensorView a, TensorView a_sf,
 
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(fp8_fp4_gemm_nt, dg_fp8_fp4_gemm_nt);
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(fp8_fp4_gemm_nt_fused, dg_fp8_fp4_gemm_nt_fused);
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(fp8_fp4_gemm_nt_packed_warp, dg_fp8_fp4_gemm_nt_packed_warp);
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(fp8_fp4_gemm_nt_prof, dg_fp8_fp4_gemm_nt_prof);
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(fp8_fp4_gemm_nn, dg_fp8_fp4_gemm_nn);
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(fp8_fp4_gemm_tn, dg_fp8_fp4_gemm_tn);
