@@ -1,4 +1,5 @@
 import logging
+import os
 from contextlib import contextmanager
 from typing import Any, Optional, Tuple
 
@@ -69,6 +70,35 @@ def grouped_gemm_nt_f8f8bf16_masked(
             glm52_compatible = _glm52_moe_dispatch_compatible(
                 overlap_args, recipe_a, recipe_b
             )
+
+            # The production GLM-5.2 NVFP4 W13 overlay has a separate,
+            # recipe-aware ABI guard and static M16/M32 policy. The same pinned
+            # source also supports the plan's packed-FP8 W13 ABI. It is tried
+            # before the historical separate gate/up archive dispatch so the
+            # fused production W13 remains the replacement boundary.
+            if os.environ.get("SGLANG_GLM52_OPT", "0").lower() in (
+                "1",
+                "true",
+                "yes",
+                "on",
+            ):
+                from sglang.srt.layers.glm52_opt.moe_w13_deepgemm import (
+                    try_dispatch_w13,
+                )
+
+                handled, overlay_result = try_dispatch_w13(
+                    lhs,
+                    rhs,
+                    out,
+                    masked_m,
+                    expected_m,
+                    overlap_args,
+                    recipe_a,
+                    recipe_b,
+                )
+                if handled:
+                    return overlay_result
+
             if glm52_compatible and try_dispatch_moe_masked(
                 lhs, rhs, out, masked_m, expected_m
             ):

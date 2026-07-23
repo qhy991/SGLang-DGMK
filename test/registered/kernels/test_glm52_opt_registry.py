@@ -3,14 +3,22 @@
 from __future__ import annotations
 
 import os
+from unittest.mock import patch
 
 os.environ.setdefault("SGLANG_GLM52_OPT", "1")
 os.environ.setdefault("SGLANG_GLM52_OPT_PROFILE", "full")
 
+import torch
+
 from sglang.srt.layers.glm52_opt.context import (
     get_forward_m,
+    op_context,
     prefix_to_op_name,
     set_forward_mode,
+)
+from sglang.srt.layers.glm52_opt.moe_w13_deepgemm import (
+    try_dispatch_w13,
+    w13_overlay_abi,
 )
 from sglang.srt.layers.glm52_opt.phase import infer_glm52_phase
 from sglang.srt.layers.glm52_opt.registry import lookup
@@ -115,6 +123,160 @@ def test_moe_swap_preserves_production_overlap_contract():
     assert not _glm52_moe_dispatch_compatible(object(), None, None)
     assert not _glm52_moe_dispatch_compatible(None, (1, 128), None)
     assert not _glm52_moe_dispatch_compatible(None, None, (1, 128))
+
+
+def _meta_w13_inputs():
+    lhs = (
+        torch.empty((32, 1024, 6144), device="meta", dtype=torch.float8_e4m3fn),
+        torch.empty((32, 1024, 12), device="meta", dtype=torch.int32),
+    )
+    rhs = (
+        torch.empty((32, 4096, 3072), device="meta", dtype=torch.int8),
+        torch.empty((32, 4096, 48), device="meta", dtype=torch.int32),
+    )
+    out = torch.empty((32, 1024, 4096), device="meta", dtype=torch.bfloat16)
+    masked_m = torch.empty((32,), device="meta", dtype=torch.int32)
+    return lhs, rhs, out, masked_m
+
+
+def test_w13_deepgemm_overlay_abi_guard():
+    lhs, rhs, out, _ = _meta_w13_inputs()
+    assert w13_overlay_abi(lhs, rhs, out, 4, None, (1, 128), (1, 32)) == "nvfp4"
+    assert w13_overlay_abi(lhs, rhs, out, 5, None, (1, 128), (1, 32)) == "nvfp4"
+    assert w13_overlay_abi(lhs, rhs, out, 4, object(), (1, 128), (1, 32)) is None
+    assert w13_overlay_abi(lhs, rhs, out, 4, None, (1, 32), (1, 32)) is None
+    wrong_rhs = (rhs[0][:, :2048], rhs[1][:, :2048])
+    assert w13_overlay_abi(lhs, wrong_rhs, out, 4, None, (1, 128), (1, 32)) is None
+
+    fp8_rhs = (
+        torch.empty((32, 4096, 6144), device="meta", dtype=torch.float8_e4m3fn),
+        torch.empty((32, 4096, 12), device="meta", dtype=torch.int32),
+    )
+    assert w13_overlay_abi(lhs, fp8_rhs, out, 4, None, None, None) == "fp8"
+    assert w13_overlay_abi(
+        lhs, fp8_rhs, out, 4, None, (1, 128), (1, 32)
+    ) is None
+
+
+def test_w13_nvfp4_static_bucket_dispatch():
+    lhs, rhs, out, masked_m = _meta_w13_inputs()
+    sentinel = object()
+
+    class FakeDeepGemm:
+        def fp8_m_grouped_gemm_nt_masked(self, *args, **kwargs):
+            if args[1][0].dtype == torch.int8:
+                assert kwargs["recipe_a"] == (1, 128)
+                assert kwargs["recipe_b"] == (1, 32)
+            else:
+                assert "recipe_a" not in kwargs
+                assert "recipe_b" not in kwargs
+            assert kwargs["compiled_dims"] == "nk"
+            assert kwargs["disable_ue8m0_cast"]
+            return sentinel
+
+    old_env = {
+        key: os.environ.get(key)
+        for key in (
+            "SGLANG_GLM52_OPT",
+            "SGLANG_GLM52_OPT_PROFILE",
+            "SGLANG_GLM52_OPT_OPS",
+            "SGLANG_GLM52_OPT_M_BUCKETS",
+            "SGLANG_GLM52_DEEPGEMM_VARIANT",
+        )
+    }
+    try:
+        os.environ["SGLANG_GLM52_OPT"] = "1"
+        os.environ["SGLANG_GLM52_OPT_PROFILE"] = "serving_safe"
+        os.environ["SGLANG_GLM52_OPT_OPS"] = "moe_gate_proj"
+        os.environ["SGLANG_GLM52_OPT_M_BUCKETS"] = "moe_gate_proj:16|32"
+        os.environ["SGLANG_GLM52_DEEPGEMM_VARIANT"] = "w13-bm32-a674bcf69"
+        with patch(
+            "sglang.srt.layers.glm52_opt.moe_w13_deepgemm.get_experimental_deep_gemm",
+            return_value=FakeDeepGemm(),
+        ):
+            set_forward_mode(None, 16)
+            with op_context("moe_gate_proj"):
+                handled, result = try_dispatch_w13(
+                    lhs,
+                    rhs,
+                    out,
+                    masked_m,
+                    4,
+                    None,
+                    (1, 128),
+                    (1, 32),
+                )
+                assert handled and result is sentinel
+
+                fp8_rhs = (
+                    torch.empty(
+                        (32, 4096, 6144),
+                        device="meta",
+                        dtype=torch.float8_e4m3fn,
+                    ),
+                    torch.empty(
+                        (32, 4096, 12), device="meta", dtype=torch.int32
+                    ),
+                )
+                handled, result = try_dispatch_w13(
+                    lhs,
+                    fp8_rhs,
+                    out,
+                    masked_m,
+                    4,
+                    None,
+                    None,
+                    None,
+                )
+                assert handled and result is sentinel
+
+                # Current SGLang source adds ``experts`` before division, so
+                # the reachable M=16 call uses expected_m=5.
+                handled, result = try_dispatch_w13(
+                    lhs,
+                    rhs,
+                    out,
+                    masked_m,
+                    5,
+                    None,
+                    (1, 128),
+                    (1, 32),
+                )
+                assert handled and result is sentinel
+
+                # Static bucket/expected-M mismatch fails closed.
+                handled, result = try_dispatch_w13(
+                    lhs,
+                    rhs,
+                    out,
+                    masked_m,
+                    8,
+                    None,
+                    (1, 128),
+                    (1, 32),
+                )
+                assert not handled and result is None
+
+            set_forward_mode(None, 32)
+            with op_context("moe_gate_proj"):
+                handled, result = try_dispatch_w13(
+                    lhs,
+                    rhs,
+                    out,
+                    masked_m,
+                    9,
+                    None,
+                    (1, 128),
+                    (1, 32),
+                )
+                assert handled and result is sentinel
+    finally:
+        set_forward_mode(None)
+        for key, value in old_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 def test_phase_defaults():
