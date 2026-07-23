@@ -29,6 +29,20 @@ _PINNED_OVERLAY_ID = (
 _EXPECTED_M_BY_BUCKET = {16: frozenset((4, 5)), 32: frozenset((8, 9))}
 
 
+def _matches_tensor(
+    tensor: torch.Tensor,
+    *,
+    shape: tuple[int, ...],
+    stride: tuple[int, ...],
+    dtype: torch.dtype,
+) -> bool:
+    return (
+        tuple(tensor.shape) == shape
+        and tuple(tensor.stride()) == stride
+        and tensor.dtype == dtype
+    )
+
+
 def w13_overlay_abi(
     lhs: Tuple[torch.Tensor, torch.Tensor],
     rhs: Tuple[torch.Tensor, torch.Tensor],
@@ -42,15 +56,26 @@ def w13_overlay_abi(
 
     if overlap_args is not None:
         return None
-    if tuple(lhs[0].shape) != (32, 1024, 6144):
+    if not _matches_tensor(
+        lhs[0],
+        shape=(32, 1024, 6144),
+        stride=(6291456, 6144, 1),
+        dtype=torch.float8_e4m3fn,
+    ):
         return None
-    if tuple(lhs[1].shape) != (32, 1024, 12):
+    if not _matches_tensor(
+        lhs[1],
+        shape=(32, 1024, 12),
+        stride=(12288, 1, 1024),
+        dtype=torch.int32,
+    ):
         return None
-    if tuple(out.shape) != (32, 1024, 4096):
-        return None
-    if lhs[0].dtype != torch.float8_e4m3fn:
-        return None
-    if lhs[1].dtype != torch.int32 or rhs[1].dtype != torch.int32:
+    if not _matches_tensor(
+        out,
+        shape=(32, 1024, 4096),
+        stride=(4194304, 4096, 1),
+        dtype=torch.bfloat16,
+    ):
         return None
     if not any(
         expected_m in values for values in _EXPECTED_M_BY_BUCKET.values()
@@ -58,17 +83,35 @@ def w13_overlay_abi(
         return None
 
     if (
-        tuple(rhs[0].shape) == (32, 4096, 6144)
-        and tuple(rhs[1].shape) == (32, 4096, 12)
-        and rhs[0].dtype == torch.float8_e4m3fn
+        _matches_tensor(
+            rhs[0],
+            shape=(32, 4096, 6144),
+            stride=(25165824, 6144, 1),
+            dtype=torch.float8_e4m3fn,
+        )
+        and _matches_tensor(
+            rhs[1],
+            shape=(32, 4096, 12),
+            stride=(49152, 1, 4096),
+            dtype=torch.int32,
+        )
         and recipe_a is None
         and recipe_b is None
     ):
         return "fp8"
     if (
-        tuple(rhs[0].shape) == (32, 4096, 3072)
-        and tuple(rhs[1].shape) == (32, 4096, 48)
-        and rhs[0].dtype == torch.int8
+        _matches_tensor(
+            rhs[0],
+            shape=(32, 4096, 3072),
+            stride=(12582912, 3072, 1),
+            dtype=torch.int8,
+        )
+        and _matches_tensor(
+            rhs[1],
+            shape=(32, 4096, 48),
+            stride=(196608, 1, 4096),
+            dtype=torch.int32,
+        )
         and recipe_a == (1, 128)
         and recipe_b == (1, 32)
     ):
@@ -91,6 +134,12 @@ def try_dispatch_w13(
     if not config.is_enabled():
         return False, None
     if config.deepgemm_variant() != _PINNED_VARIANT:
+        return False, None
+    if (
+        tuple(masked_m.shape) != (32,)
+        or tuple(masked_m.stride()) != (1,)
+        or masked_m.dtype != torch.int32
+    ):
         return False, None
     abi = w13_overlay_abi(
         lhs, rhs, out, expected_m, overlap_args, recipe_a, recipe_b

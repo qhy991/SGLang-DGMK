@@ -128,11 +128,21 @@ def test_moe_swap_preserves_production_overlap_contract():
 def _meta_w13_inputs():
     lhs = (
         torch.empty((32, 1024, 6144), device="meta", dtype=torch.float8_e4m3fn),
-        torch.empty((32, 1024, 12), device="meta", dtype=torch.int32),
+        torch.empty_strided(
+            (32, 1024, 12),
+            (12288, 1, 1024),
+            device="meta",
+            dtype=torch.int32,
+        ),
     )
     rhs = (
         torch.empty((32, 4096, 3072), device="meta", dtype=torch.int8),
-        torch.empty((32, 4096, 48), device="meta", dtype=torch.int32),
+        torch.empty_strided(
+            (32, 4096, 48),
+            (196608, 1, 4096),
+            device="meta",
+            dtype=torch.int32,
+        ),
     )
     out = torch.empty((32, 1024, 4096), device="meta", dtype=torch.bfloat16)
     masked_m = torch.empty((32,), device="meta", dtype=torch.int32)
@@ -147,10 +157,25 @@ def test_w13_deepgemm_overlay_abi_guard():
     assert w13_overlay_abi(lhs, rhs, out, 4, None, (1, 32), (1, 32)) is None
     wrong_rhs = (rhs[0][:, :2048], rhs[1][:, :2048])
     assert w13_overlay_abi(lhs, wrong_rhs, out, 4, None, (1, 128), (1, 32)) is None
+    wrong_lhs_scale = (
+        lhs[0],
+        torch.empty((32, 1024, 12), device="meta", dtype=torch.int32),
+    )
+    assert (
+        w13_overlay_abi(
+            wrong_lhs_scale, rhs, out, 4, None, (1, 128), (1, 32)
+        )
+        is None
+    )
 
     fp8_rhs = (
         torch.empty((32, 4096, 6144), device="meta", dtype=torch.float8_e4m3fn),
-        torch.empty((32, 4096, 12), device="meta", dtype=torch.int32),
+        torch.empty_strided(
+            (32, 4096, 12),
+            (49152, 1, 4096),
+            device="meta",
+            dtype=torch.int32,
+        ),
     )
     assert w13_overlay_abi(lhs, fp8_rhs, out, 4, None, None, None) == "fp8"
     assert w13_overlay_abi(
@@ -219,8 +244,11 @@ def test_w13_nvfp4_static_bucket_dispatch():
                         device="meta",
                         dtype=torch.float8_e4m3fn,
                     ),
-                    torch.empty(
-                        (32, 4096, 12), device="meta", dtype=torch.int32
+                    torch.empty_strided(
+                        (32, 4096, 12),
+                        (49152, 1, 4096),
+                        device="meta",
+                        dtype=torch.int32,
                     ),
                 )
                 handled, result = try_dispatch_w13(
@@ -256,6 +284,22 @@ def test_w13_nvfp4_static_bucket_dispatch():
                     out,
                     masked_m,
                     8,
+                    None,
+                    (1, 128),
+                    (1, 32),
+                )
+                assert not handled and result is None
+
+                # A non-contiguous mask is outside the captured production ABI.
+                wrong_mask = torch.empty_strided(
+                    (32,), (2,), device="meta", dtype=torch.int32
+                )
+                handled, result = try_dispatch_w13(
+                    lhs,
+                    rhs,
+                    out,
+                    wrong_mask,
+                    4,
                     None,
                     (1, 128),
                     (1, 32),
