@@ -210,6 +210,20 @@ struct SM100ArchSpec {
         int num_stages = std::min(
             (smem_capacity - smem_extra) / smem_per_stage,
             kNumMaxStages);
+
+        // GLM-5.2 attention O-projection prefill experiment. Nsight Compute
+        // attributes most issue stalls for this exact packed FP8 shape to
+        // transaction-barrier long scoreboards while the default six-stage
+        // kernel consumes 209 KiB of shared memory. Test whether relinquishing
+        // one stage reduces that pressure without changing the production ABI.
+        if (desc.gemm_type == GemmType::Normal and
+            desc.kernel_type == KernelType::Kernel1D1D and
+            desc.m == 4096 and desc.n == 6144 and desc.k == 16384 and
+            layout.swap_ab and layout.block_m == 240 and
+            layout.block_n == 128 and layout.block_k == 128 and
+            num_stages == 6) {
+            num_stages = 5;
+        }
         return {
             smem_extra + num_stages * smem_per_stage,
             num_stages
