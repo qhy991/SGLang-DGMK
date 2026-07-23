@@ -132,6 +132,12 @@ def profile_name() -> str:
     return os.environ.get("SGLANG_GLM52_OPT_PROFILE", "serving_safe").strip().lower()
 
 
+# Leaf/component winners archived for explicit e2e trials.  Never implied by
+# serving_safe.  See glm52_opt/history/e2e_candidates_20260723/INDEX.md.
+_E2E_DEFAULT_OPS = frozenset({"o_proj", "moe_gate_proj", "moe_down_proj"})
+_E2E_CONTIG_PSUM_OPS = frozenset({"moe_gate_proj", "moe_down_proj"})
+
+
 def opt_ops_allowlist() -> frozenset[str] | None:
     """Optional comma-separated decode op allowlist (SGLANG_GLM52_OPT_OPS).
 
@@ -143,6 +149,38 @@ def opt_ops_allowlist() -> frozenset[str] | None:
     if not raw:
         return None
     return frozenset(x.strip() for x in raw.split(",") if x.strip())
+
+
+def e2e_candidate_ops() -> frozenset[str]:
+    """Ops active under ``SGLANG_GLM52_OPT_PROFILE=e2e_candidates``.
+
+    Empty ``OPT_OPS`` selects the archived default set.  A non-empty allowlist
+    intersects that set so ablation cannot accidentally enable unrelated
+    historical archive swaps.
+    """
+    allow = opt_ops_allowlist()
+    if allow is None:
+        return _E2E_DEFAULT_OPS
+    return frozenset(op for op in allow if op in _E2E_DEFAULT_OPS)
+
+
+def contig_psum_kwargs(op_name: str) -> dict[str, object]:
+    """Kwargs for DeepGEMM contiguous grouped GEMM PSUM layout (goals 08/09).
+
+    Returns ``{}`` unless OPT is on, profile is ``e2e_candidates``, and ``op_name``
+    is an enabled MoE contig PSUM candidate.  Callers must also supply the
+    ``expert_start_loc`` endpoint tensor from ``ep_scatter`` as the layout.
+    """
+    if not is_enabled() or profile_name() != "e2e_candidates":
+        return {}
+    if op_name not in _E2E_CONTIG_PSUM_OPS or op_name not in e2e_candidate_ops():
+        return {}
+    return {
+        "compiled_dims": "nk",
+        "use_psum_layout": True,
+        "ensure_zero_padding": False,
+        "expected_m_for_psum_layout": 1024,
+    }
 
 
 def opt_m_buckets() -> dict[str, frozenset[int]]:

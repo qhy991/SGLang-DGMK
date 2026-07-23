@@ -94,6 +94,9 @@ class DeepGemmRunnerInput(RunnerInput):
     masked_m: Optional[torch.Tensor] = None
     expected_m: Optional[int] = None
     m_indices: Optional[torch.Tensor] = None
+    # Cumulative expert endpoints from ep_scatter; required for DeepGEMM PSUM
+    # layout trials under glm52_opt profile e2e_candidates (goals 08/09).
+    expert_start_loc: Optional[torch.Tensor] = None
 
     @property
     def runner_backend(self) -> MoeRunnerBackend:
@@ -214,13 +217,23 @@ class DeepGemmRunnerCore(MoeRunnerCore):
         if deep_gemm_wrapper.DEEPGEMM_NEED_TMA_ALIGNED_SCALES:
             hidden_states_scale = tma_align_input_scale(hidden_states_scale)
 
+        from sglang.srt.layers.glm52_opt.config import contig_psum_kwargs
+
+        w13_psum = contig_psum_kwargs("moe_gate_proj")
+        w13_layout = m_indices
+        if w13_psum and runner_input.expert_start_loc is not None:
+            w13_layout = runner_input.expert_start_loc
+        else:
+            w13_psum = {}
+
         deep_gemm_wrapper.grouped_gemm_nt_f8f8bf16_contig(
             (hidden_states, hidden_states_scale),
             w13_weight_fp8,
             gateup_output,
-            m_indices,
+            w13_layout,
             recipe_a=recipe_a,
             recipe_b=recipe_b,
+            **w13_psum,
         )
 
         dispose_tensor(hidden_states)
@@ -294,13 +307,21 @@ class DeepGemmRunnerCore(MoeRunnerCore):
         if deep_gemm_wrapper.DEEPGEMM_NEED_TMA_ALIGNED_SCALES:
             down_input_scale = tma_align_input_scale(down_input_scale)
 
+        w2_psum = contig_psum_kwargs("moe_down_proj")
+        w2_layout = m_indices
+        if w2_psum and runner_input.expert_start_loc is not None:
+            w2_layout = runner_input.expert_start_loc
+        else:
+            w2_psum = {}
+
         deep_gemm_wrapper.grouped_gemm_nt_f8f8bf16_contig(
             (down_input_fp8, down_input_scale),
             w2_weight_fp8,
             down_output,
-            m_indices,
+            w2_layout,
             recipe_a=recipe_a,
             recipe_b=recipe_b,
+            **w2_psum,
         )
 
         return down_output
@@ -877,6 +898,7 @@ def pre_permute_deepep_normal_to_deep_gemm(
         hidden_states_scale=input_tensor_scale,
         use_masked_gemm=False,
         m_indices=m_indices,
+        expert_start_loc=expert_start_loc,
     )
 
 

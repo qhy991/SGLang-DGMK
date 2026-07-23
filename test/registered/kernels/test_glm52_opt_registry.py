@@ -77,6 +77,46 @@ def test_serving_safe_requires_explicit_allowlist():
             os.environ["SGLANG_GLM52_OPT_OPS"] = old_ops
 
 
+def test_e2e_candidates_defaults_to_archived_leaf_winners():
+    from sglang.srt.layers.glm52_opt.config import contig_psum_kwargs
+
+    old_profile = os.environ.get("SGLANG_GLM52_OPT_PROFILE")
+    old_ops = os.environ.get("SGLANG_GLM52_OPT_OPS")
+    old_opt = os.environ.get("SGLANG_GLM52_OPT")
+    try:
+        os.environ["SGLANG_GLM52_OPT"] = "1"
+        os.environ["SGLANG_GLM52_OPT_PROFILE"] = "e2e_candidates"
+        os.environ.pop("SGLANG_GLM52_OPT_OPS", None)
+
+        assert lookup("o_proj", "decode", m=16) is not None
+        assert lookup("o_proj", "decode", m=32) is not None
+        # Historical archive swaps stay off unless listed in the e2e set.
+        assert lookup("q_b_proj", "decode") is None
+        assert lookup("fused_qkv_a_proj", "decode") is None
+
+        os.environ["SGLANG_GLM52_OPT_OPS"] = "o_proj"
+        assert lookup("o_proj", "decode") is not None
+        assert contig_psum_kwargs("moe_gate_proj") == {}
+        assert contig_psum_kwargs("moe_down_proj") == {}
+
+        os.environ.pop("SGLANG_GLM52_OPT_OPS", None)
+        w13 = contig_psum_kwargs("moe_gate_proj")
+        w2 = contig_psum_kwargs("moe_down_proj")
+        assert w13["use_psum_layout"] is True
+        assert w2["expected_m_for_psum_layout"] == 1024
+        assert contig_psum_kwargs("o_proj") == {}
+    finally:
+        for key, old_value in (
+            ("SGLANG_GLM52_OPT_PROFILE", old_profile),
+            ("SGLANG_GLM52_OPT_OPS", old_ops),
+            ("SGLANG_GLM52_OPT", old_opt),
+        ):
+            if old_value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = old_value
+
+
 def test_m_bucket_selectively_falls_back():
     old_profile = os.environ.get("SGLANG_GLM52_OPT_PROFILE")
     old_ops = os.environ.get("SGLANG_GLM52_OPT_OPS")

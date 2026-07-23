@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Callable, Literal, Optional
 
 from sglang.srt.layers.glm52_opt.config import (
+    e2e_candidate_ops,
     opt_m_buckets,
     opt_ops_allowlist,
     profile_name,
@@ -108,6 +109,7 @@ def _decode_table() -> dict[str, KernelSpec]:
     """Profile / allowlist gated decode registry.
 
     - serving_safe (default): no implicit swap; OPT_OPS selects explicit trials
+    - e2e_candidates: archived leaf winners for explicit e2e (default o_proj)
     - decode_max / full: all legacy decode swaps (optionally filtered by OPT_OPS)
     - q_b_only: only q_b_proj
     - SGLANG_GLM52_OPT_OPS=a,b: intersect with active table (ablation)
@@ -125,12 +127,19 @@ def _decode_table() -> dict[str, KernelSpec]:
             if allow is not None
             else {}
         )
+    elif name == "e2e_candidates":
+        # Prefill MoE PSUM is wired in the contig runner, not via this table.
+        table = {
+            op: _DECODE[op]
+            for op in sorted(e2e_candidate_ops())
+            if op in _DECODE
+        }
     elif name in ("decode_max", "full"):
         table = dict(_DECODE)
     else:
         table = {}
 
-    if allow is not None and name != "serving_safe":
+    if allow is not None and name not in ("serving_safe", "e2e_candidates"):
         table = {k: v for k, v in table.items() if k in allow}
     return table
 
@@ -149,11 +158,13 @@ def lookup(
     """
     if not op_name:
         return None
+    name = profile_name()
     if phase == "decode":
         spec = _decode_table().get(op_name)
-    elif profile_name() == "full":
+    elif name == "full":
         spec = _active_prefill().get(op_name)
     else:
+        # e2e_candidates MoE PSUM does not use KernelSpec lookup.
         return None
     if spec is None or not spec.enabled:
         return None
