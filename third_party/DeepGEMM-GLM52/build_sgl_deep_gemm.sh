@@ -30,7 +30,19 @@ if [[ ! -f "setup.py" || ! -d "sgl_deep_gemm" || ! -d "deep_gemm" || ! -d "csrc"
 fi
 
 echo "--- Initialising submodules ---"
-git submodule update --init --recursive
+if [[ -e "${ROOT_DIR}/.git" ]]; then
+    git submodule update --init --recursive
+elif [[ -f "${ROOT_DIR}/third-party/cutlass/include/cute/tensor.hpp" &&
+        -f "${ROOT_DIR}/third-party/fmt/include/fmt/format.h" ]]; then
+    # The SGLang vendor tree is intentionally exported without DeepGEMM's
+    # nested .git directory. Its dependencies are already materialized, and
+    # running `git submodule` here would incorrectly target SGLang's parent
+    # repository instead of this source tree.
+    echo "Using materialized vendored CUTLASS/fmt dependencies."
+else
+    echo "Error: DeepGEMM submodules are unavailable in the vendored source tree." >&2
+    exit 1
+fi
 
 echo "--- Linking CUTLASS headers into deep_gemm/include ---"
 ln -sfn "${ROOT_DIR}/third-party/cutlass/include/cutlass" "${ROOT_DIR}/deep_gemm/include/cutlass"
