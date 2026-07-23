@@ -163,6 +163,11 @@ def test_w13_nvfp4_static_bucket_dispatch():
     sentinel = object()
 
     class FakeDeepGemm:
+        __file__ = (
+            "/tmp/731e7c7a97d269e4b9f482ea18d0e709a948f293-"
+            "w13-a674bcf69/site/deep_gemm_experimental/__init__.py"
+        )
+
         def fp8_m_grouped_gemm_nt_masked(self, *args, **kwargs):
             if args[1][0].dtype == torch.int8:
                 assert kwargs["recipe_a"] == (1, 128)
@@ -270,6 +275,28 @@ def test_w13_nvfp4_static_bucket_dispatch():
                     (1, 32),
                 )
                 assert handled and result is sentinel
+
+        wrong_overlay = FakeDeepGemm()
+        wrong_overlay.__file__ = (
+            "/tmp/unpinned/site/deep_gemm_experimental/__init__.py"
+        )
+        with patch(
+            "sglang.srt.layers.glm52_opt.moe_w13_deepgemm.get_experimental_deep_gemm",
+            return_value=wrong_overlay,
+        ):
+            set_forward_mode(None, 16)
+            with op_context("moe_gate_proj"):
+                handled, result = try_dispatch_w13(
+                    lhs,
+                    rhs,
+                    out,
+                    masked_m,
+                    4,
+                    None,
+                    (1, 128),
+                    (1, 32),
+                )
+                assert not handled and result is None
     finally:
         set_forward_mode(None)
         for key, value in old_env.items():

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any, Optional, Tuple
 
 import torch
@@ -22,6 +23,9 @@ from sglang.srt.layers.glm52_opt.registry import lookup
 logger = logging.getLogger(__name__)
 
 _PINNED_VARIANT = "w13-bm32-a674bcf69"
+_PINNED_OVERLAY_ID = (
+    "731e7c7a97d269e4b9f482ea18d0e709a948f293-w13-a674bcf69"
+)
 _EXPECTED_M_BY_BUCKET = {16: frozenset((4, 5)), 32: frozenset((8, 9))}
 
 
@@ -114,6 +118,13 @@ def try_dispatch_w13(
     try:
         deep_gemm = get_experimental_deep_gemm()
         if deep_gemm is None:
+            return False, None
+        resolved = Path(deep_gemm.__file__).resolve()
+        if _PINNED_OVERLAY_ID not in str(resolved):
+            logger.warning(
+                "GLM-5.2 W13 overlay identity mismatch (%s); using stock",
+                resolved,
+            )
             return False, None
         kwargs = {
             "compiled_dims": "nk",
