@@ -107,6 +107,16 @@ def _nvtx_range(name: str):
     return _cm()
 
 
+def record_psum_hit(op: Optional[str], m: Optional[int] = None) -> None:
+    """Count contig PSUM layout applications (goals 08/09)."""
+    phase = "prefill"
+    try:
+        phase = _current_phase(int(m) if m is not None else 1)
+    except Exception:
+        pass
+    _record_hit("moe_contig_psum", op, phase, m=m)
+
+
 def try_dispatch_fp8_gemm(
     input_2d: torch.Tensor,
     weight: torch.Tensor,

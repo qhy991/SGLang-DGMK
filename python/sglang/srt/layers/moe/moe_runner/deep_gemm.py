@@ -218,11 +218,13 @@ class DeepGemmRunnerCore(MoeRunnerCore):
             hidden_states_scale = tma_align_input_scale(hidden_states_scale)
 
         from sglang.srt.layers.glm52_opt.config import contig_psum_kwargs
+        from sglang.srt.layers.glm52_opt.dispatch import record_psum_hit
 
         w13_psum = contig_psum_kwargs("moe_gate_proj")
         w13_layout = m_indices
         if w13_psum and runner_input.expert_start_loc is not None:
             w13_layout = runner_input.expert_start_loc
+            record_psum_hit("moe_gate_proj", m=int(all_tokens))
         else:
             w13_psum = {}
 
@@ -311,6 +313,7 @@ class DeepGemmRunnerCore(MoeRunnerCore):
         w2_layout = m_indices
         if w2_psum and runner_input.expert_start_loc is not None:
             w2_layout = runner_input.expert_start_loc
+            record_psum_hit("moe_down_proj", m=int(all_tokens))
         else:
             w2_psum = {}
 
