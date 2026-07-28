@@ -55,14 +55,15 @@ from sglang.srt.layers.quantization.base_config import (
 from sglang.srt.layers.quantization.fp8_utils import (
     _use_aiter_bpreshuffle_gfx95,
     apply_fp8_linear,
+    bind_glm52_attn_o_decode_direct_nk_runner,
     can_auto_enable_marlin_fp8,
     cutlass_fp8_supported,
-    deepgemm_w8a8_block_fp8_linear_attn_o_decode_direct_nk_dispatch,
     deepgemm_w8a8_block_fp8_linear_with_fallback,
     dispatch_w8a8_block_fp8_linear,
     dispatch_w8a8_mxfp8_linear,
     get_fp8_gemm_runner_backend,
     input_to_float8,
+    is_glm52_attn_o_decode_direct_nk_runner,
     mxfp8_group_quantize,
     normalize_e4m3fn_to_e4m3fnuz,
     requant_block_scale_ue8m0_for_deepgemm,
@@ -603,6 +604,9 @@ class Fp8LinearMethod(LinearMethodBase):
                 layer.register_parameter("input_scale", None)
 
     def process_weights_after_loading_block_quant(self, layer: Module) -> None:
+        use_glm52_attn_o_direct_nk_runner = is_glm52_attn_o_decode_direct_nk_runner(
+            self.w8a8_block_fp8_linear
+        )
         if self.convert_mxfp8_to_block:
             from sglang.srt.layers.quantization.mxfp8_block_convert import (
                 convert_mxfp8_weight_to_block_fp8,
@@ -651,8 +655,7 @@ class Fp8LinearMethod(LinearMethodBase):
             use_deepgemm_runner = (
                 self.w8a8_block_fp8_linear
                 is deepgemm_w8a8_block_fp8_linear_with_fallback
-                or self.w8a8_block_fp8_linear
-                is deepgemm_w8a8_block_fp8_linear_attn_o_decode_direct_nk_dispatch
+                or use_glm52_attn_o_direct_nk_runner
             )
             requant_block_scale_ue8m0_for_deepgemm(
                 layer.weight,
@@ -666,6 +669,13 @@ class Fp8LinearMethod(LinearMethodBase):
 
         layer.weight.data = weight.data
         layer.weight_scale_inv.data = weight_scale.data
+
+        if use_glm52_attn_o_direct_nk_runner:
+            self.w8a8_block_fp8_linear = bind_glm52_attn_o_decode_direct_nk_runner(
+                layer.weight,
+                layer.weight_scale_inv,
+                self.weight_block_size,
+            )
 
         if (
             _use_aiter_bpreshuffle_gfx95
@@ -1014,8 +1024,10 @@ def configure_glm52_attn_o_decode_direct_nk(layer: torch.nn.Module) -> bool:
     ):
         return False
 
-    method.w8a8_block_fp8_linear = (
-        deepgemm_w8a8_block_fp8_linear_attn_o_decode_direct_nk_dispatch
+    method.w8a8_block_fp8_linear = bind_glm52_attn_o_decode_direct_nk_runner(
+        getattr(layer, "weight", None),
+        getattr(layer, "weight_scale_inv", None),
+        method.weight_block_size,
     )
     layer._glm52_attn_o_decode_direct_nk = True
     return True

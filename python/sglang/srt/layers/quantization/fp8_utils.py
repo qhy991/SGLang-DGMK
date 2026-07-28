@@ -12,6 +12,7 @@ from sglang.kernels.ops.quantization.fp8_kernel import (
     sglang_per_token_group_quant_fp8_row_padded,
 )
 from sglang.srt.layers import deep_gemm_wrapper
+from sglang.srt.layers.glm52_opt.context import get_attn_o_direct_nk_context
 from sglang.srt.layers.quantization.mxfp4_tensor import MXFP4QuantizeUtil
 from sglang.srt.runtime_context import get_parallel
 from sglang.srt.utils.common import torch_release
@@ -850,6 +851,67 @@ def deepgemm_w8a8_block_fp8_linear_with_fallback(
     return output.to(dtype=output_dtype).view(*output_shape)
 
 
+def _is_glm52_attn_o_decode_direct_nk_build_supported() -> bool:
+    return (
+        _is_sm100_supported
+        and deep_gemm_wrapper.ENABLE_JIT_DEEPGEMM
+        and deep_gemm_wrapper.DEEPGEMM_SCALE_UE8M0
+        and deep_gemm_wrapper.DEEPGEMM_SUPPORTS_COMPILED_DIMS
+    )
+
+
+def _is_glm52_attn_o_decode_direct_nk_packed_weight_abi(
+    weight: torch.Tensor,
+    weight_scale: torch.Tensor,
+    block_size: List[int],
+) -> bool:
+    """Validate immutable build and packed-weight state at load/configure time."""
+    if not _is_glm52_attn_o_decode_direct_nk_build_supported():
+        return False
+
+    if getattr(weight, "ndim", None) != 2 or getattr(weight_scale, "ndim", None) != 2:
+        return False
+    if tuple(weight.shape) != (6144, 16384):
+        return False
+    if not isinstance(block_size, (list, tuple)) or tuple(block_size) != (128, 128):
+        return False
+
+    return (
+        getattr(weight, "dtype", None) == fp8_dtype
+        and getattr(weight, "is_cuda", False)
+        and getattr(weight_scale, "is_cuda", False)
+        and weight.device == weight_scale.device
+        and weight.is_contiguous()
+        and getattr(weight_scale, "dtype", None) == torch.int32
+        and tuple(weight_scale.shape) == (6144, 32)
+        and tuple(weight_scale.stride()) == (1, 6144)
+    )
+
+
+def _is_glm52_attn_o_decode_direct_nk_activation_abi(
+    input_2d: torch.Tensor,
+    x_scale: torch.Tensor,
+    *,
+    m: int,
+    device: torch.device,
+) -> bool:
+    """Defensively validate the dynamic post-quant ABI without rereading weights."""
+    return (
+        input_2d.ndim == 2
+        and tuple(input_2d.shape) == (m, 16384)
+        and input_2d.dtype == fp8_dtype
+        and input_2d.is_cuda
+        and input_2d.device == device
+        and input_2d.is_contiguous()
+        and x_scale.ndim == 2
+        and tuple(x_scale.shape) == (m, 32)
+        and x_scale.dtype == torch.int32
+        and x_scale.is_cuda
+        and x_scale.device == device
+        and tuple(x_scale.stride()) == (1, m)
+    )
+
+
 def _is_glm52_attn_o_decode_direct_nk_abi(
     input_2d: torch.Tensor,
     weight: torch.Tensor,
@@ -859,47 +921,22 @@ def _is_glm52_attn_o_decode_direct_nk_abi(
     output_dtype: torch.dtype,
 ) -> bool:
     """Check the exact packed SM100 ABI before selecting fixed N/K."""
-    if not (
-        _is_sm100_supported
-        and deep_gemm_wrapper.ENABLE_JIT_DEEPGEMM
-        and deep_gemm_wrapper.DEEPGEMM_SCALE_UE8M0
-        and deep_gemm_wrapper.DEEPGEMM_SUPPORTS_COMPILED_DIMS
-    ):
+    if output_dtype != torch.bfloat16 or input_2d.ndim != 2:
         return False
-
-    if input_2d.ndim != 2 or weight.ndim != 2:
-        return False
-    m, k = input_2d.shape
-    n, weight_k = weight.shape
-    if (
-        int(m) not in (16, 32)
-        or int(n) != 6144
-        or int(k) != 16384
-        or int(weight_k) != 16384
-    ):
-        return False
-
-    packed_k = 16384 // 128 // 4
+    m = int(input_2d.shape[0])
     return (
-        input_2d.dtype == fp8_dtype
-        and weight.dtype == fp8_dtype
-        and output_dtype == torch.bfloat16
-        and input_2d.is_cuda
-        and weight.is_cuda
-        and x_scale.is_cuda
-        and weight_scale.is_cuda
-        and input_2d.device == weight.device
-        and input_2d.device == x_scale.device
-        and input_2d.device == weight_scale.device
-        and input_2d.is_contiguous()
-        and weight.is_contiguous()
-        and x_scale.dtype == torch.int32
-        and weight_scale.dtype == torch.int32
-        and tuple(x_scale.shape) == (int(m), packed_k)
-        and tuple(weight_scale.shape) == (6144, packed_k)
-        and tuple(x_scale.stride()) == (1, int(m))
-        and tuple(weight_scale.stride()) == (1, 6144)
-        and tuple(block_size) == (128, 128)
+        m in (16, 32)
+        and _is_glm52_attn_o_decode_direct_nk_packed_weight_abi(
+            weight,
+            weight_scale,
+            block_size,
+        )
+        and _is_glm52_attn_o_decode_direct_nk_activation_abi(
+            input_2d,
+            x_scale,
+            m=m,
+            device=weight.device,
+        )
     )
 
 
@@ -940,6 +977,51 @@ def _glm52_attn_o_decode_candidate_postquant_fallback(
     return output
 
 
+def _glm52_attn_o_decode_direct_nk_from_bf16(
+    input_2d: torch.Tensor,
+    weight: torch.Tensor,
+    block_size: List[int],
+    weight_scale: torch.Tensor,
+) -> torch.Tensor:
+    """Quantize once, then use fixed N/K or the stock post-quant sequence."""
+    m = int(input_2d.shape[0])
+    q_input, x_scale = sglang_per_token_group_quant_fp8(
+        input_2d,
+        block_size[1],
+        column_major_scales=True,
+        scale_tma_aligned=True,
+        scale_ue8m0=deep_gemm_wrapper.DEEPGEMM_SCALE_UE8M0,
+    )
+    if _is_glm52_attn_o_decode_direct_nk_activation_abi(
+        q_input,
+        x_scale,
+        m=m,
+        device=weight.device,
+    ):
+        # This exact 2D/BF16 ABI already has the final output shape and dtype.
+        return w8a8_block_fp8_matmul_deepgemm_compiled_nk(
+            q_input,
+            weight,
+            x_scale,
+            weight_scale,
+            block_size,
+            output_dtype=torch.bfloat16,
+        )
+
+    # The activation is already quantized. Preserve the stock registry-first
+    # post-quant sequence without launching a second quantization kernel.
+    output = _glm52_attn_o_decode_candidate_postquant_fallback(
+        q_input,
+        weight,
+        block_size,
+        weight_scale,
+        x_scale,
+        torch.bfloat16,
+        bias=None,
+    )
+    return output.to(dtype=torch.bfloat16).view(m, 6144)
+
+
 def deepgemm_w8a8_block_fp8_linear_attn_o_decode_direct_nk(
     input: torch.Tensor,
     weight: torch.Tensor,
@@ -949,34 +1031,22 @@ def deepgemm_w8a8_block_fp8_linear_attn_o_decode_direct_nk(
     bias: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """Run the narrow GLM-5.2 decode specialization or fail closed to stock."""
-    build_supported = (
-        _is_sm100_supported
-        and deep_gemm_wrapper.ENABLE_JIT_DEEPGEMM
-        and deep_gemm_wrapper.DEEPGEMM_SCALE_UE8M0
-        and deep_gemm_wrapper.DEEPGEMM_SUPPORTS_COMPILED_DIMS
-    )
     high_level_abi_supported = (
         input_scale is None
         and bias is None
         and input.ndim == 2
-        and weight.ndim == 2
         and tuple(input.shape) in ((16, 16384), (32, 16384))
-        and tuple(weight.shape) == (6144, 16384)
         and input.dtype == torch.bfloat16
-        and weight.dtype == fp8_dtype
-        and weight_scale.dtype == torch.int32
         and input.is_cuda
-        and weight.is_cuda
-        and weight_scale.is_cuda
-        and input.device == weight.device
-        and input.device == weight_scale.device
         and input.is_contiguous()
-        and weight.is_contiguous()
-        and tuple(weight_scale.shape) == (6144, 32)
-        and tuple(weight_scale.stride()) == (1, 6144)
-        and tuple(block_size) == (128, 128)
+        and _is_glm52_attn_o_decode_direct_nk_packed_weight_abi(
+            weight,
+            weight_scale,
+            block_size,
+        )
+        and input.device == weight.device
     )
-    if not (build_supported and high_level_abi_supported):
+    if not high_level_abi_supported:
         return deepgemm_w8a8_block_fp8_linear_with_fallback(
             input,
             weight,
@@ -986,45 +1056,91 @@ def deepgemm_w8a8_block_fp8_linear_attn_o_decode_direct_nk(
             bias=bias,
         )
 
-    input_2d = input.view(-1, input.shape[-1])
-    output_shape = [*input.shape[:-1], weight.shape[0]]
-    q_input, x_scale = sglang_per_token_group_quant_fp8(
-        input_2d,
-        block_size[1],
-        column_major_scales=True,
-        scale_tma_aligned=True,
-        scale_ue8m0=deep_gemm_wrapper.DEEPGEMM_SCALE_UE8M0,
+    return _glm52_attn_o_decode_direct_nk_from_bf16(
+        input,
+        weight,
+        block_size,
+        weight_scale,
     )
 
-    if _is_glm52_attn_o_decode_direct_nk_abi(
-        q_input,
-        weight,
-        x_scale,
-        weight_scale,
-        block_size,
-        input.dtype,
-    ):
-        output = w8a8_block_fp8_matmul_deepgemm_compiled_nk(
-            q_input,
-            weight,
-            x_scale,
-            weight_scale,
-            block_size,
-            output_dtype=input.dtype,
+
+class Glm52AttnODecodeDirectNkRunner:
+    """Layer-private runner bound to one validated packed O-projection weight."""
+
+    __slots__ = (
+        "_weight",
+        "_weight_scale",
+        "_weight_version",
+        "_weight_scale_version",
+    )
+
+    def __init__(self, weight: torch.Tensor, weight_scale: torch.Tensor):
+        self._weight = weight
+        self._weight_scale = weight_scale
+        self._weight_version = (
+            None
+            if isinstance(weight, torch.Tensor) and torch.is_inference(weight)
+            else getattr(weight, "_version", None)
         )
-    else:
-        # The activation is already quantized. Preserve the stock registry-first
-        # post-quant sequence without launching a second quantization kernel.
-        output = _glm52_attn_o_decode_candidate_postquant_fallback(
-            q_input,
+        self._weight_scale_version = (
+            None
+            if isinstance(weight_scale, torch.Tensor)
+            and torch.is_inference(weight_scale)
+            else getattr(weight_scale, "_version", None)
+        )
+
+    def __call__(
+        self,
+        input: torch.Tensor,
+        weight: torch.Tensor,
+        block_size: List[int],
+        weight_scale: torch.Tensor,
+        input_scale: Optional[torch.Tensor] = None,
+        bias: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        context = get_attn_o_direct_nk_context()
+        if (
+            context is None
+            or input_scale is not None
+            or bias is not None
+            or input.ndim != 2
+            or int(input.shape[0]) != context[1]
+            or int(input.shape[1]) != 16384
+            or input.dtype != torch.bfloat16
+            or not input.is_cuda
+            or input.device != self._weight.device
+            or not input.is_contiguous()
+            or weight is not self._weight
+            or weight_scale is not self._weight_scale
+            or (
+                self._weight_version is not None
+                and getattr(weight, "_version", None) != self._weight_version
+            )
+            or (
+                self._weight_scale_version is not None
+                and getattr(weight_scale, "_version", None)
+                != self._weight_scale_version
+            )
+            or not isinstance(block_size, (list, tuple))
+            or len(block_size) != 2
+            or block_size[0] != 128
+            or block_size[1] != 128
+        ):
+            return deepgemm_w8a8_block_fp8_linear_with_fallback(
+                input,
+                weight,
+                block_size,
+                weight_scale,
+                input_scale=input_scale,
+                bias=bias,
+            )
+
+        return _glm52_attn_o_decode_direct_nk_from_bf16(
+            input,
             weight,
             block_size,
             weight_scale,
-            x_scale,
-            input.dtype,
-            bias=bias,
         )
-    return output.to(dtype=input.dtype).view(*output_shape)
 
 
 def deepgemm_w8a8_block_fp8_linear_attn_o_decode_direct_nk_dispatch(
@@ -1036,8 +1152,6 @@ def deepgemm_w8a8_block_fp8_linear_attn_o_decode_direct_nk_dispatch(
     bias: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """Select fixed N/K only on the one configured attention O runner."""
-    from sglang.srt.layers.glm52_opt.context import get_attn_o_direct_nk_context
-
     context = get_attn_o_direct_nk_context()
     if (
         context is not None
@@ -1062,6 +1176,29 @@ def deepgemm_w8a8_block_fp8_linear_attn_o_decode_direct_nk_dispatch(
         input_scale=input_scale,
         bias=bias,
     )
+
+
+def is_glm52_attn_o_decode_direct_nk_runner(runner: Callable) -> bool:
+    """Return whether ``runner`` belongs to this task's weight lifecycle."""
+    return (
+        runner is deepgemm_w8a8_block_fp8_linear_attn_o_decode_direct_nk_dispatch
+        or isinstance(runner, Glm52AttnODecodeDirectNkRunner)
+    )
+
+
+def bind_glm52_attn_o_decode_direct_nk_runner(
+    weight: torch.Tensor,
+    weight_scale: torch.Tensor,
+    block_size: List[int],
+) -> Callable:
+    """Bind immutable packed-weight checks, or retain the guarded dispatcher."""
+    if _is_glm52_attn_o_decode_direct_nk_packed_weight_abi(
+        weight,
+        weight_scale,
+        block_size,
+    ):
+        return Glm52AttnODecodeDirectNkRunner(weight, weight_scale)
+    return deepgemm_w8a8_block_fp8_linear_attn_o_decode_direct_nk_dispatch
 
 
 def _unpack_ue8m0_scale_for_triton(

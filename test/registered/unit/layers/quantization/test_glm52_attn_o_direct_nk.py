@@ -64,6 +64,7 @@ class _FakeTensor:
         self.is_cuda = is_cuda
         self._stride = tuple(stride) if stride is not None else (self.shape[-1], 1)
         self._contiguous = contiguous
+        self._version = 0
 
     def is_contiguous(self):
         return self._contiguous
@@ -304,10 +305,16 @@ class TestModelReachability(unittest.TestCase):
                 "requant_weight_ue8m0",
                 side_effect=cpu_reference_requant,
             ) as requant,
+            patch.object(
+                fp8_module,
+                "bind_glm52_attn_o_decode_direct_nk_runner",
+                wraps=fp8_utils.bind_glm52_attn_o_decode_direct_nk_runner,
+            ) as bind_runner,
         ):
             method.process_weights_after_loading(attention.o_proj)
 
         requant.assert_called_once()
+        bind_runner.assert_called_once()
         packed_scale = attention.o_proj.weight_scale_inv
         self.assertEqual(tuple(packed_scale.shape), (6144, 32))
         self.assertEqual(tuple(packed_scale.stride()), (1, 6144))
@@ -316,6 +323,11 @@ class TestModelReachability(unittest.TestCase):
         self.assertIs(
             method.w8a8_block_fp8_linear,
             fp8_utils.deepgemm_w8a8_block_fp8_linear_attn_o_decode_direct_nk_dispatch,
+        )
+        self.assertTrue(
+            fp8_utils.is_glm52_attn_o_decode_direct_nk_runner(
+                method.w8a8_block_fp8_linear
+            )
         )
 
     def test_non_deepgemm_weight_processing_identity_remains_false(self):
@@ -942,11 +954,221 @@ class TestPackedAbi(unittest.TestCase):
             )
 
         self.assertIs(result, output)
-        self.assertEqual(output.to_dtype, torch.bfloat16)
-        self.assertEqual(output.view_shape, (16, 6144))
+        self.assertIsNone(output.to_dtype)
+        self.assertIsNone(output.view_shape)
         quant.assert_called_once()
         compiled.assert_called_once()
         high_level_fallback.assert_not_called()
+
+    def test_packed_runner_factory_binds_and_routes_supported_decode(self):
+        input_bf16 = _FakeTensor((32, 16384), torch.bfloat16)
+        q, weight, q_scale, weight_scale = self._tensors(m=32)
+        output = _FakeOutput()
+        patches = self._support_patches()
+        with patches[0], patches[1], patches[2], patches[3]:
+            runner = fp8_utils.bind_glm52_attn_o_decode_direct_nk_runner(
+                weight,
+                weight_scale,
+                [128, 128],
+            )
+
+        self.assertIsInstance(
+            runner,
+            fp8_utils.Glm52AttnODecodeDirectNkRunner,
+        )
+        self.assertTrue(
+            fp8_utils.is_glm52_attn_o_decode_direct_nk_runner(runner),
+        )
+        with (
+            attn_o_direct_nk_context(ForwardMode.DECODE, 32),
+            patch.object(
+                fp8_utils,
+                "sglang_per_token_group_quant_fp8",
+                return_value=(q, q_scale),
+            ) as quant,
+            patch.object(
+                fp8_utils,
+                "w8a8_block_fp8_matmul_deepgemm_compiled_nk",
+                return_value=output,
+            ) as compiled,
+            patch.object(
+                fp8_utils,
+                "deepgemm_w8a8_block_fp8_linear_with_fallback",
+            ) as stock,
+        ):
+            result = runner(
+                input_bf16,
+                weight,
+                [128, 128],
+                weight_scale,
+            )
+
+        self.assertIs(result, output)
+        quant.assert_called_once()
+        compiled.assert_called_once()
+        stock.assert_not_called()
+
+    def test_configure_binds_an_already_packed_layer(self):
+        _, weight, _, weight_scale = self._tensors()
+        layer = SimpleNamespace(
+            weight=weight,
+            weight_scale_inv=weight_scale,
+            quant_method=_method(),
+        )
+        patches = self._support_patches()
+        with patches[0], patches[1], patches[2], patches[3]:
+            self.assertTrue(
+                fp8_module.configure_glm52_attn_o_decode_direct_nk(layer),
+            )
+
+        self.assertIsInstance(
+            layer.quant_method.w8a8_block_fp8_linear,
+            fp8_utils.Glm52AttnODecodeDirectNkRunner,
+        )
+        self.assertTrue(layer._glm52_attn_o_decode_direct_nk)
+
+    def test_bound_runner_postquant_miss_is_registry_first_and_quantizes_once(self):
+        input_bf16 = _FakeTensor((16, 16384), torch.bfloat16)
+        q, weight, q_scale, weight_scale = self._tensors()
+        output = _FakeOutput()
+        patches = self._support_patches()
+        with patches[0], patches[1], patches[2], patches[3]:
+            runner = fp8_utils.bind_glm52_attn_o_decode_direct_nk_runner(
+                weight,
+                weight_scale,
+                [128, 128],
+            )
+
+        with (
+            attn_o_direct_nk_context(ForwardMode.DECODE, 16),
+            patch.object(
+                fp8_utils,
+                "sglang_per_token_group_quant_fp8",
+                return_value=(q, q_scale),
+            ) as quant,
+            patch.object(
+                fp8_utils,
+                "_is_glm52_attn_o_decode_direct_nk_activation_abi",
+                return_value=False,
+            ),
+            patch.object(
+                glm52_dispatch,
+                "try_dispatch_fp8_gemm",
+                return_value=output,
+            ) as registry,
+            patch.object(
+                fp8_utils,
+                "w8a8_block_fp8_matmul_deepgemm",
+            ) as stock_gemm,
+            patch.object(
+                fp8_utils,
+                "w8a8_block_fp8_matmul_deepgemm_compiled_nk",
+            ) as compiled,
+            patch.object(
+                fp8_utils,
+                "deepgemm_w8a8_block_fp8_linear_with_fallback",
+            ) as high_level_stock,
+        ):
+            result = runner(
+                input_bf16,
+                weight,
+                [128, 128],
+                weight_scale,
+            )
+
+        self.assertIs(result, output)
+        quant.assert_called_once()
+        registry.assert_called_once_with(
+            q,
+            weight,
+            q_scale,
+            weight_scale,
+            [128, 128],
+            torch.bfloat16,
+            bias=None,
+        )
+        compiled.assert_not_called()
+        stock_gemm.assert_not_called()
+        high_level_stock.assert_not_called()
+
+    def test_bound_runner_modes_identity_and_version_fail_closed(self):
+        input_bf16 = _FakeTensor((16, 16384), torch.bfloat16)
+        _, weight, _, weight_scale = self._tensors()
+        patches = self._support_patches()
+        with patches[0], patches[1], patches[2], patches[3]:
+            runner = fp8_utils.bind_glm52_attn_o_decode_direct_nk_runner(
+                weight,
+                weight_scale,
+                [128, 128],
+            )
+
+        other_weight = _FakeTensor((6144, 16384), fp8_utils.fp8_dtype)
+        cases = (
+            ("no_context", nullcontext(), weight),
+            (
+                "target_verify",
+                attn_o_direct_nk_context(ForwardMode.TARGET_VERIFY, 16),
+                weight,
+            ),
+            (
+                "prefill",
+                attn_o_direct_nk_context(ForwardMode.EXTEND, 16),
+                weight,
+            ),
+            (
+                "weight_identity",
+                attn_o_direct_nk_context(ForwardMode.DECODE, 16),
+                other_weight,
+            ),
+        )
+        for name, context, call_weight in cases:
+            sentinel = object()
+            with (
+                self.subTest(name=name),
+                context,
+                patch.object(
+                    fp8_utils,
+                    "deepgemm_w8a8_block_fp8_linear_with_fallback",
+                    return_value=sentinel,
+                ) as stock,
+                patch.object(
+                    fp8_utils,
+                    "sglang_per_token_group_quant_fp8",
+                ) as quant,
+            ):
+                result = runner(
+                    input_bf16,
+                    call_weight,
+                    [128, 128],
+                    weight_scale,
+                )
+            self.assertIs(result, sentinel)
+            stock.assert_called_once()
+            quant.assert_not_called()
+
+        weight._version += 1
+        sentinel = object()
+        with (
+            attn_o_direct_nk_context(ForwardMode.DECODE, 16),
+            patch.object(
+                fp8_utils,
+                "deepgemm_w8a8_block_fp8_linear_with_fallback",
+                return_value=sentinel,
+            ) as stock,
+            patch.object(
+                fp8_utils,
+                "sglang_per_token_group_quant_fp8",
+            ) as quant,
+        ):
+            result = runner(
+                input_bf16,
+                weight,
+                [128, 128],
+                weight_scale,
+            )
+        self.assertIs(result, sentinel)
+        stock.assert_called_once()
+        quant.assert_not_called()
 
     def test_unsupported_high_level_call_falls_back_before_quantization(self):
         good_input = _FakeTensor((16, 16384), torch.bfloat16)
@@ -1059,7 +1281,7 @@ class TestPackedAbi(unittest.TestCase):
             ) as quant,
             patch.object(
                 fp8_utils,
-                "_is_glm52_attn_o_decode_direct_nk_abi",
+                "_is_glm52_attn_o_decode_direct_nk_activation_abi",
                 return_value=False,
             ),
             patch.object(
@@ -1114,7 +1336,7 @@ class TestPackedAbi(unittest.TestCase):
             ) as quant,
             patch.object(
                 fp8_utils,
-                "_is_glm52_attn_o_decode_direct_nk_abi",
+                "_is_glm52_attn_o_decode_direct_nk_activation_abi",
                 return_value=False,
             ),
             patch.object(
