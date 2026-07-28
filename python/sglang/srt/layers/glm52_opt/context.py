@@ -20,6 +20,43 @@ _attn_o_direct_nk_context: ContextVar[Optional[tuple["ForwardMode", int]]] = Con
 )
 
 
+class _AttnODirectNkNoopContext:
+    """Stateless strict no-op for every unsupported phase or shape."""
+
+    __slots__ = ()
+
+    def __enter__(self) -> None:
+        return None
+
+    def __exit__(self, *_exc_info: object) -> bool:
+        return False
+
+
+class _AttnODirectNkActiveContext:
+    """Low-overhead supported-bucket ContextVar scope."""
+
+    __slots__ = ("_token", "_value")
+
+    def __init__(self, mode: "ForwardMode", m: int) -> None:
+        self._value = (mode, m)
+        self._token = None
+
+    def __enter__(self) -> None:
+        self._token = _attn_o_direct_nk_context.set(self._value)
+        return None
+
+    def __exit__(self, *_exc_info: object) -> bool:
+        token = self._token
+        if token is None:
+            raise RuntimeError("attention O direct-N/K context was not entered")
+        _attn_o_direct_nk_context.reset(token)
+        self._token = None
+        return False
+
+
+_ATTN_O_DIRECT_NK_NOOP_CONTEXT = _AttnODirectNkNoopContext()
+
+
 def get_op_name() -> Optional[str]:
     return _op_name.get()
 
@@ -47,10 +84,9 @@ def is_attn_o_direct_nk_scope() -> bool:
     return get_attn_o_direct_nk_context() is not None
 
 
-@contextmanager
 def attn_o_direct_nk_context(
     mode: Optional["ForwardMode"], m: Optional[int] = None
-) -> Iterator[None]:
+) -> _AttnODirectNkNoopContext | _AttnODirectNkActiveContext:
     """Publish only supported task-local metadata; otherwise be a strict no-op."""
     local_m = None if m is None else int(m)
     if (
@@ -58,14 +94,8 @@ def attn_o_direct_nk_context(
         or local_m not in (16, 32)
         or not mode.is_decode()
     ):
-        yield
-        return
-
-    token = _attn_o_direct_nk_context.set((mode, local_m))
-    try:
-        yield
-    finally:
-        _attn_o_direct_nk_context.reset(token)
+        return _ATTN_O_DIRECT_NK_NOOP_CONTEXT
+    return _AttnODirectNkActiveContext(mode, local_m)
 
 
 @contextmanager

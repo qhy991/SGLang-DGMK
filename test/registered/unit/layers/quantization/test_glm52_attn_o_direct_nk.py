@@ -683,6 +683,19 @@ class TestApplyRouting(unittest.TestCase):
                     self.assertEqual(get_forward_m(), 4096)
             self.assertIsNone(get_attn_o_direct_nk_context())
 
+    def test_decode_context_restores_after_exception(self):
+        with _legacy_forward_mode(ForwardMode.MIXED, 777):
+            with self.assertRaisesRegex(RuntimeError, "sentinel"):
+                with attn_o_direct_nk_context(ForwardMode.DECODE, 32):
+                    self.assertEqual(
+                        get_attn_o_direct_nk_context(),
+                        (ForwardMode.DECODE, 32),
+                    )
+                    raise RuntimeError("sentinel")
+            self.assertIsNone(get_attn_o_direct_nk_context())
+            self.assertIs(get_forward_mode(), ForwardMode.MIXED)
+            self.assertEqual(get_forward_m(), 777)
+
     def test_dispatch_shape_scale_and_bias_isolation(self):
         method, layer = _configured_layer()
         sentinel = object()
