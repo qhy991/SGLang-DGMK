@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 import importlib.util
 import inspect
 import json
@@ -586,6 +587,115 @@ def test_worker_setup_selects_only_stage11_contract_and_callables():
         assert entrypoint._W2_BM16_CALLSITE_PREPARE is stage11.prepare_callsite_contract
         assert entrypoint._W2_BM16_LAYER_PREPARE is stage11.create_layer_contract
         assert entrypoint._W2_BM16_STRICT_PROFILE is True
+
+
+@pytest.mark.parametrize(
+    "profile",
+    (
+        config.W2_EM8_BM16_STAGE11_PROFILE,
+        "moe_w2_em8_bm16_stage11",
+    ),
+)
+def test_explicit_worker_setup_config_import_failure_propagates(
+    monkeypatch,
+    profile,
+):
+    monkeypatch.setenv(
+        "SGLANG_GLM52_OPT_PROFILE",
+        profile,
+    )
+    original_import = builtins.__import__
+
+    def fail_config_import(name, *args, **kwargs):
+        if name == "sglang.srt.layers.glm52_opt.config":
+            raise ImportError("stage11 config import rejected")
+        return original_import(name, *args, **kwargs)
+
+    with (
+        patch.object(entrypoint, "deep_gemm", SimpleNamespace(), create=True),
+        patch.object(
+            entrypoint.envs.SGLANG_DEEPGEMM_PDL,
+            "get",
+            return_value=False,
+        ),
+        patch.object(entrypoint.compile_utils, "update_deep_gemm_config"),
+        patch.object(builtins, "__import__", side_effect=fail_config_import),
+        pytest.raises(ImportError, match="stage11 config import rejected"),
+    ):
+        entrypoint.update_deep_gemm_config(0, SimpleNamespace())
+
+
+def test_non_stage11_worker_setup_config_failure_remains_best_effort(
+    monkeypatch,
+):
+    monkeypatch.setenv("SGLANG_GLM52_OPT_PROFILE", "serving_safe")
+    original_import = builtins.__import__
+
+    def fail_config_import(name, *args, **kwargs):
+        if name == "sglang.srt.layers.glm52_opt.config":
+            raise ImportError("ordinary config import rejected")
+        return original_import(name, *args, **kwargs)
+
+    with (
+        patch.object(entrypoint, "deep_gemm", SimpleNamespace(), create=True),
+        patch.object(
+            entrypoint.envs.SGLANG_DEEPGEMM_PDL,
+            "get",
+            return_value=False,
+        ),
+        patch.object(entrypoint.compile_utils, "update_deep_gemm_config"),
+        patch.object(builtins, "__import__", side_effect=fail_config_import),
+    ):
+        assert entrypoint.update_deep_gemm_config(0, SimpleNamespace()) is None
+
+
+def test_explicit_worker_setup_config_evaluation_failure_propagates(
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "SGLANG_GLM52_OPT_PROFILE",
+        config.W2_EM8_BM16_STAGE11_PROFILE,
+    )
+    with (
+        patch.object(entrypoint, "deep_gemm", SimpleNamespace(), create=True),
+        patch.object(
+            entrypoint.envs.SGLANG_DEEPGEMM_PDL,
+            "get",
+            return_value=False,
+        ),
+        patch.object(entrypoint.compile_utils, "update_deep_gemm_config"),
+        patch.object(
+            config,
+            "w2_em8_bm16_stage11_enabled",
+            side_effect=RuntimeError("stage11 config evaluation rejected"),
+        ),
+        pytest.raises(
+            RuntimeError,
+            match="stage11 config evaluation rejected",
+        ),
+    ):
+        entrypoint.update_deep_gemm_config(0, SimpleNamespace())
+
+
+def test_non_stage11_config_evaluation_failure_remains_best_effort(
+    monkeypatch,
+):
+    monkeypatch.setenv("SGLANG_GLM52_OPT_PROFILE", "serving_safe")
+    with (
+        patch.object(entrypoint, "deep_gemm", SimpleNamespace(), create=True),
+        patch.object(
+            entrypoint.envs.SGLANG_DEEPGEMM_PDL,
+            "get",
+            return_value=False,
+        ),
+        patch.object(entrypoint.compile_utils, "update_deep_gemm_config"),
+        patch.object(
+            config,
+            "w2_em8_bm16_stage11_enabled",
+            side_effect=RuntimeError("ordinary config evaluation rejected"),
+        ),
+    ):
+        assert entrypoint.update_deep_gemm_config(0, SimpleNamespace()) is None
 
 
 def test_explicit_worker_setup_prepare_failure_propagates():

@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 from contextlib import contextmanager
 from contextvars import ContextVar
 from functools import partial
@@ -33,11 +34,21 @@ _W2_BM16_DISPATCH: Optional[Callable[..., bool]] = None
 _W2_BM16_CALLSITE_PREPARE: Optional[Callable[..., bool]] = None
 _W2_BM16_LAYER_PREPARE: Optional[Callable[..., Any]] = None
 _W2_BM16_STRICT_PROFILE = False
+_W2_EM8_BM16_STAGE11_PROFILE_PREFIX = "moe_w2_em8_bm16_stage11"
 
 
 def w2_bm16_profile_requested() -> bool:
     """Cheap setup-time flag; default-off callers never import candidate code."""
     return _W2_BM16_PROFILE_REQUESTED
+
+
+def _w2_em8_bm16_stage11_profile_named_by_environment() -> bool:
+    """Recognize the strict profile before its config module can be imported."""
+    profile = os.environ.get("SGLANG_GLM52_OPT_PROFILE", "")
+    return profile.strip().lower() in {
+        _W2_EM8_BM16_STAGE11_PROFILE_PREFIX,
+        f"{_W2_EM8_BM16_STAGE11_PROFILE_PREFIX}_v3",
+    }
 
 
 def _glm52_moe_dispatch_compatible(
@@ -477,6 +488,9 @@ def update_deep_gemm_config(gpu_id: int, server_args: ServerArgs):
 
     # Resolve the explicit stage11-v3 profile before entering the legacy
     # best-effort path. Its setup failures must abort worker initialization.
+    strict_stage11_profile_named = (
+        _w2_em8_bm16_stage11_profile_named_by_environment()
+    )
     try:
         from sglang.srt.layers.glm52_opt.config import (
             deepgemm_variant,
@@ -485,10 +499,20 @@ def update_deep_gemm_config(gpu_id: int, server_args: ServerArgs):
             w2_em8_bm16_stage11_enabled,
         )
     except Exception as exc:
+        if strict_stage11_profile_named:
+            raise
         logger.warning("GLM-5.2 DeepGEMM config load skipped: %s", exc)
         return w2_forward_context
 
-    if w2_em8_bm16_stage11_enabled():
+    try:
+        stage11_enabled = w2_em8_bm16_stage11_enabled()
+    except Exception as exc:
+        if strict_stage11_profile_named:
+            raise
+        logger.warning("GLM-5.2 DeepGEMM config evaluation skipped: %s", exc)
+        return w2_forward_context
+
+    if stage11_enabled:
         _W2_BM16_PROFILE_REQUESTED = True
         _W2_BM16_STRICT_PROFILE = True
         from sglang.srt.layers.glm52_opt.experimental_deepgemm_em8_bm16_stage11 import (
