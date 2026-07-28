@@ -37,3 +37,19 @@ ENABLE_JIT_DEEPGEMM = _compute_enable_deep_gemm()
 DEEPGEMM_BLACKWELL = ENABLE_JIT_DEEPGEMM and is_sm100_supported()
 DEEPGEMM_SCALE_UE8M0 = DEEPGEMM_BLACKWELL
 DEEPGEMM_NEED_TMA_ALIGNED_SCALES = not (DEEPGEMM_SCALE_UE8M0 or _is_musa)
+
+
+def _supports_compiled_dims() -> bool:
+    if not DEEPGEMM_BLACKWELL:
+        return False
+    try:
+        import inspect
+
+        import deep_gemm
+
+        return "compiled_dims" in inspect.signature(deep_gemm.fp8_gemm_nt).parameters
+    except (AttributeError, ImportError, TypeError, ValueError):
+        return False
+
+
+DEEPGEMM_SUPPORTS_COMPILED_DIMS = _supports_compiled_dims()

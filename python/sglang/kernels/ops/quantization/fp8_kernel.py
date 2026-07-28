@@ -148,6 +148,17 @@ def deep_gemm_fp8_fp8_bf16_nt(
 
 
 @register_custom_op(mutates_args=["C"])
+def deep_gemm_fp8_fp8_bf16_nt_compiled_nk(
+    A: torch.Tensor,
+    As: torch.Tensor,
+    B: torch.Tensor,
+    Bs: torch.Tensor,
+    C: torch.Tensor,
+) -> None:
+    deep_gemm_wrapper.gemm_nt_f8f8bf16_compiled_nk((A, As), (B, Bs), C)
+
+
+@register_custom_op(mutates_args=["C"])
 def deep_gemm_mxfp8_fp8_bf16_nt(
     A: torch.Tensor,
     As: torch.Tensor,
@@ -1379,6 +1390,27 @@ def w8a8_block_fp8_matmul_deepgemm(
     assert C.dtype == torch.bfloat16 and deep_gemm_wrapper.ENABLE_JIT_DEEPGEMM
 
     deep_gemm_fp8_fp8_bf16_nt(A, As, B, Bs, C)
+
+    return C
+
+
+def w8a8_block_fp8_matmul_deepgemm_compiled_nk(
+    A: torch.Tensor,
+    B: torch.Tensor,
+    As: torch.Tensor,
+    Bs: torch.Tensor,
+    block_size: List[int],
+    output_dtype: torch.dtype,
+) -> torch.Tensor:
+    """DeepGEMM packed FP8 matmul with runtime M and compile-time N/K."""
+    M, N, K, C = prepare_block_fp8_matmul_inputs(A, B, As, Bs, block_size, output_dtype)
+
+    assert M in (16, 32) and N == 6144 and K == 16384, (
+        f"unsupported compiled-N/K bucket: {(M, N, K)}"
+    )
+    assert C.dtype == torch.bfloat16 and deep_gemm_wrapper.ENABLE_JIT_DEEPGEMM
+
+    deep_gemm_fp8_fp8_bf16_nt_compiled_nk(A, As, B, Bs, C)
 
     return C
 

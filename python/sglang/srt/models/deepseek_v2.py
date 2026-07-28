@@ -113,7 +113,10 @@ from sglang.srt.layers.moe.utils import (
     is_tbo_enabled,
 )
 from sglang.srt.layers.quantization.base_config import QuantizationConfig
-from sglang.srt.layers.quantization.fp8 import Fp8Config
+from sglang.srt.layers.quantization.fp8 import (
+    Fp8Config,
+    configure_glm52_attn_o_decode_direct_nk,
+)
 from sglang.srt.layers.quantization.fp8_utils import (
     materialize_bpreshuffle_fp8_scale,
 )
@@ -1542,6 +1545,36 @@ class DeepseekV2MoE(nn.Module):
         state.hidden_states_mlp_output = final_hidden_states
 
 
+def _is_glm52_dsa_target_attn_o(
+    config: PretrainedConfig,
+    *,
+    hidden_size: int,
+    num_heads: int,
+    qk_nope_head_dim: int,
+    v_head_dim: int,
+    use_dsa: bool,
+    is_nextn: bool,
+    attn_tp_size: int,
+    o_proj_input_size_per_partition: int,
+) -> bool:
+    """Identify only the GLM-5.2 target model's fixed-shape DSA O projection."""
+    architectures = tuple(getattr(config, "architectures", ()) or ())
+    return (
+        architectures == ("GlmMoeDsaForCausalLM",)
+        and getattr(config, "model_type", None) == "glm_moe_dsa"
+        and getattr(config, "head_dim", None) == 192
+        and getattr(config, "max_position_embeddings", None) == 1048576
+        and getattr(config, "index_share_for_mtp_iteration", None) is True
+        and use_dsa
+        and not is_nextn
+        and hidden_size == 6144
+        and qk_nope_head_dim == 192
+        and num_heads * v_head_dim == 16384
+        and attn_tp_size == 1
+        and o_proj_input_size_per_partition == 16384
+    )
+
+
 class DeepseekV2AttentionMLA(
     nn.Module,
     DeepseekMHAForwardMixin,
@@ -1703,6 +1736,23 @@ class DeepseekV2AttentionMLA(
             tp_rank=attn_tp_rank,
             tp_size=attn_tp_size,
         )
+        if (
+            envs.SGLANG_OPT_GLM52_ATTN_O_DECODE_DIRECT_NK.get()
+            and _is_glm52_dsa_target_attn_o(
+                config,
+                hidden_size=self.hidden_size,
+                num_heads=self.num_heads,
+                qk_nope_head_dim=self.qk_nope_head_dim,
+                v_head_dim=self.v_head_dim,
+                use_dsa=self.use_dsa,
+                is_nextn=self.is_nextn,
+                attn_tp_size=attn_tp_size,
+                o_proj_input_size_per_partition=self.o_proj.input_size_per_partition,
+            )
+        ):
+            # Configuration is private to this layer's Fp8LinearMethod instance.
+            # Incompatible quantizers stay entirely unchanged and unmarked.
+            configure_glm52_attn_o_decode_direct_nk(self.o_proj)
         self.kv_a_layernorm = RMSNorm(self.kv_lora_rank, eps=config.rms_norm_eps)
 
         if not skip_rope:

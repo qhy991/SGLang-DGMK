@@ -972,6 +972,10 @@ class Envs:
     SGLANG_MINIMAX_M3_FUSED_MOE_COMBINE = EnvBool(False)
 
     # GEMM / kernel fusion
+    # GLM-5.2 attention O projection decode: opt into the fixed-N/K DeepGEMM
+    # specialization for the exact SM100 packed-UE8M0 M16/M32 production ABI.
+    # This remains off until TP8/checkpoint acceptance is complete.
+    SGLANG_OPT_GLM52_ATTN_O_DECODE_DIRECT_NK = EnvBool(False)
     SGLANG_OPT_FP8_WO_A_GEMM = EnvBool(True)
     SGLANG_OPT_BF16_FP32_GEMM_ALGO = EnvStr("cublas")
     SGLANG_OPT_USE_JIT_EP_ACTIVATION = EnvBool(True)

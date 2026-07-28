@@ -10,6 +10,7 @@ from sglang.srt.layers.deep_gemm_wrapper.configurer import (  # noqa: F401
     DEEPGEMM_BLACKWELL,
     DEEPGEMM_NEED_TMA_ALIGNED_SCALES,
     DEEPGEMM_SCALE_UE8M0,
+    DEEPGEMM_SUPPORTS_COMPILED_DIMS,
     ENABLE_JIT_DEEPGEMM,
 )
 from sglang.srt.server_args import ServerArgs
@@ -203,6 +204,29 @@ def gemm_nt_f8f8bf16(
             lhs,
             rhs,
             out,
+        )
+
+
+def gemm_nt_f8f8bf16_compiled_nk(
+    lhs: Tuple[torch.Tensor, torch.Tensor],
+    rhs: Tuple[torch.Tensor, torch.Tensor],
+    out: torch.Tensor,
+):
+    """Run the normal FP8 GEMM with only N and K fixed at JIT compile time."""
+    m, k = lhs[0].shape
+    n, _ = rhs[0].shape
+    num_groups = 1
+    kernel_type = compile_utils.DeepGemmKernelType.GEMM_NT_F8F8BF16_COMPILED_NK
+
+    _sanity_check_input(lhs)
+    _sanity_check_input(rhs)
+
+    with compile_utils.deep_gemm_execution_hook(m, n, k, num_groups, kernel_type):
+        deep_gemm.fp8_gemm_nt(
+            lhs,
+            rhs,
+            out,
+            compiled_dims="nk",
         )
 
 

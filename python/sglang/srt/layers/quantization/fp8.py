@@ -57,6 +57,7 @@ from sglang.srt.layers.quantization.fp8_utils import (
     apply_fp8_linear,
     can_auto_enable_marlin_fp8,
     cutlass_fp8_supported,
+    deepgemm_w8a8_block_fp8_linear_attn_o_decode_direct_nk_dispatch,
     deepgemm_w8a8_block_fp8_linear_with_fallback,
     dispatch_w8a8_block_fp8_linear,
     dispatch_w8a8_mxfp8_linear,
@@ -650,6 +651,8 @@ class Fp8LinearMethod(LinearMethodBase):
             use_deepgemm_runner = (
                 self.w8a8_block_fp8_linear
                 is deepgemm_w8a8_block_fp8_linear_with_fallback
+                or self.w8a8_block_fp8_linear
+                is deepgemm_w8a8_block_fp8_linear_attn_o_decode_direct_nk_dispatch
             )
             requant_block_scale_ue8m0_for_deepgemm(
                 layer.weight,
@@ -997,6 +1000,25 @@ class Fp8LinearMethod(LinearMethodBase):
             cutlass_fp8_supported=self.cutlass_fp8_supported,
             use_per_token_if_dynamic=self.use_per_token_if_dynamic,
         )
+
+
+def configure_glm52_attn_o_decode_direct_nk(layer: torch.nn.Module) -> bool:
+    """Install the narrow dispatcher on one compatible attention O module."""
+    method = getattr(layer, "quant_method", None)
+    if not (
+        isinstance(method, Fp8LinearMethod)
+        and method.block_quant
+        and not method.use_marlin
+        and not method.use_mxfp8
+        and method.w8a8_block_fp8_linear is deepgemm_w8a8_block_fp8_linear_with_fallback
+    ):
+        return False
+
+    method.w8a8_block_fp8_linear = (
+        deepgemm_w8a8_block_fp8_linear_attn_o_decode_direct_nk_dispatch
+    )
+    layer._glm52_attn_o_decode_direct_nk = True
+    return True
 
 
 class Fp8MoEMethod(FusedMoEMethodBase):

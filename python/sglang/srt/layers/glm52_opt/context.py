@@ -14,6 +14,10 @@ _forward_mode: ContextVar[Optional["ForwardMode"]] = ContextVar(
     "glm52_forward_mode", default=None
 )
 _forward_m: ContextVar[Optional[int]] = ContextVar("glm52_forward_m", default=None)
+_attn_o_direct_nk_context: ContextVar[Optional[tuple["ForwardMode", int]]] = ContextVar(
+    "glm52_attn_o_direct_nk_context",
+    default=None,
+)
 
 
 def get_op_name() -> Optional[str]:
@@ -32,6 +36,36 @@ def get_forward_m() -> Optional[int]:
 def set_forward_mode(mode: Optional["ForwardMode"], m: Optional[int] = None) -> None:
     _forward_mode.set(mode)
     _forward_m.set(None if m is None else int(m))
+
+
+def get_attn_o_direct_nk_context() -> Optional[tuple["ForwardMode", int]]:
+    """Return task-local mode/M without exposing it to legacy GLM52 dispatch."""
+    return _attn_o_direct_nk_context.get()
+
+
+def is_attn_o_direct_nk_scope() -> bool:
+    return get_attn_o_direct_nk_context() is not None
+
+
+@contextmanager
+def attn_o_direct_nk_context(
+    mode: Optional["ForwardMode"], m: Optional[int] = None
+) -> Iterator[None]:
+    """Publish only supported task-local metadata; otherwise be a strict no-op."""
+    local_m = None if m is None else int(m)
+    if (
+        mode is None
+        or local_m not in (16, 32)
+        or not mode.is_decode()
+    ):
+        yield
+        return
+
+    token = _attn_o_direct_nk_context.set((mode, local_m))
+    try:
+        yield
+    finally:
+        _attn_o_direct_nk_context.reset(token)
 
 
 @contextmanager
