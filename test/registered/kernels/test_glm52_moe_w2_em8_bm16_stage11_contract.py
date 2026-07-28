@@ -213,6 +213,78 @@ def test_post_invoke_failure_propagates_without_stock(launch):
     stock.fp8_m_grouped_gemm_nt_masked.assert_not_called()
 
 
+def test_post_admission_dispatch_decline_propagates_without_stock():
+    inputs = _inputs()
+    candidate_dispatch = Mock(return_value=False)
+    callsite_prepare = Mock(return_value=True)
+    stock = SimpleNamespace(fp8_m_grouped_gemm_nt_masked=Mock())
+    armed = partial(
+        entrypoint._grouped_gemm_nt_f8f8bf16_masked_w2_bm16,
+        SimpleNamespace(callsite_checked=True, callsite_eligible=True),
+        SimpleNamespace(),
+        callsite_prepare,
+        candidate_dispatch,
+        strict_profile=True,
+    )
+    with (
+        patch.object(entrypoint, "deep_gemm", stock, create=True),
+        patch.object(entrypoint, "_ensure_cuda", side_effect=lambda value: value),
+        patch.object(entrypoint, "_sanity_check_input"),
+        patch.object(
+            entrypoint.compile_utils,
+            "deep_gemm_execution_hook",
+            return_value=nullcontext(),
+        ),
+        patch.object(
+            entrypoint,
+            "configure_deep_gemm_num_sms",
+            return_value=nullcontext(),
+        ),
+        pytest.raises(RuntimeError, match="dispatch declined"),
+    ):
+        armed(*inputs, expected_m=8)
+    callsite_prepare.assert_called_once()
+    candidate_dispatch.assert_called_once()
+    stock.fp8_m_grouped_gemm_nt_masked.assert_not_called()
+
+
+def test_pre_admission_decline_still_selects_stock_without_candidate_launch():
+    inputs = _inputs()
+    candidate_dispatch = Mock(side_effect=AssertionError("candidate launched"))
+    callsite_prepare = Mock(return_value=False)
+    stock_result = object()
+    stock = SimpleNamespace(
+        fp8_m_grouped_gemm_nt_masked=Mock(return_value=stock_result)
+    )
+    armed = partial(
+        entrypoint._grouped_gemm_nt_f8f8bf16_masked_w2_bm16,
+        SimpleNamespace(callsite_checked=False, callsite_eligible=False),
+        SimpleNamespace(),
+        callsite_prepare,
+        candidate_dispatch,
+        strict_profile=True,
+    )
+    with (
+        patch.object(entrypoint, "deep_gemm", stock, create=True),
+        patch.object(entrypoint, "_ensure_cuda", side_effect=lambda value: value),
+        patch.object(entrypoint, "_sanity_check_input"),
+        patch.object(
+            entrypoint.compile_utils,
+            "deep_gemm_execution_hook",
+            return_value=nullcontext(),
+        ),
+        patch.object(
+            entrypoint,
+            "configure_deep_gemm_num_sms",
+            return_value=nullcontext(),
+        ),
+    ):
+        assert armed(*inputs, expected_m=8) is stock_result
+    callsite_prepare.assert_called_once()
+    candidate_dispatch.assert_not_called()
+    stock.fp8_m_grouped_gemm_nt_masked.assert_called_once()
+
+
 def test_exact_recipe_or_overlap_failure_propagates_without_stock():
     inputs = _inputs()
     candidate_dispatch = Mock(side_effect=AssertionError("candidate launched"))
@@ -625,6 +697,72 @@ def test_explicit_worker_setup_config_import_failure_propagates(
         entrypoint.update_deep_gemm_config(0, SimpleNamespace())
 
 
+def test_sidecar_stage11_config_import_failure_propagates(
+    monkeypatch,
+    tmp_path,
+):
+    env_file = tmp_path / "glm52_opt.env"
+    env_file.write_text(
+        "SGLANG_GLM52_OPT=1\n"
+        f"SGLANG_GLM52_OPT_PROFILE={config.W2_EM8_BM16_STAGE11_PROFILE}\n"
+    )
+    monkeypatch.delenv("SGLANG_GLM52_OPT_PROFILE", raising=False)
+    monkeypatch.setenv("SGLANG_GLM52_ENV_FILE", str(env_file))
+    original_import = builtins.__import__
+
+    def fail_config_import(name, *args, **kwargs):
+        if name == "sglang.srt.layers.glm52_opt.config":
+            raise ImportError("sidecar stage11 config import rejected")
+        return original_import(name, *args, **kwargs)
+
+    with (
+        patch.object(entrypoint, "deep_gemm", SimpleNamespace(), create=True),
+        patch.object(
+            entrypoint.envs.SGLANG_DEEPGEMM_PDL,
+            "get",
+            return_value=False,
+        ),
+        patch.object(entrypoint.compile_utils, "update_deep_gemm_config"),
+        patch.object(builtins, "__import__", side_effect=fail_config_import),
+        pytest.raises(
+            ImportError,
+            match="sidecar stage11 config import rejected",
+        ),
+    ):
+        entrypoint.update_deep_gemm_config(0, SimpleNamespace())
+
+
+def test_sidecar_non_stage11_overrides_direct_strict_for_import_failure(
+    monkeypatch,
+    tmp_path,
+):
+    env_file = tmp_path / "glm52_opt.env"
+    env_file.write_text("SGLANG_GLM52_OPT_PROFILE=serving_safe\n")
+    monkeypatch.setenv(
+        "SGLANG_GLM52_OPT_PROFILE",
+        config.W2_EM8_BM16_STAGE11_PROFILE,
+    )
+    monkeypatch.setenv("SGLANG_GLM52_ENV_FILE", str(env_file))
+    original_import = builtins.__import__
+
+    def fail_config_import(name, *args, **kwargs):
+        if name == "sglang.srt.layers.glm52_opt.config":
+            raise ImportError("sidecar ordinary config import rejected")
+        return original_import(name, *args, **kwargs)
+
+    with (
+        patch.object(entrypoint, "deep_gemm", SimpleNamespace(), create=True),
+        patch.object(
+            entrypoint.envs.SGLANG_DEEPGEMM_PDL,
+            "get",
+            return_value=False,
+        ),
+        patch.object(entrypoint.compile_utils, "update_deep_gemm_config"),
+        patch.object(builtins, "__import__", side_effect=fail_config_import),
+    ):
+        assert entrypoint.update_deep_gemm_config(0, SimpleNamespace()) is None
+
+
 def test_non_stage11_worker_setup_config_failure_remains_best_effort(
     monkeypatch,
 ):
@@ -672,6 +810,37 @@ def test_explicit_worker_setup_config_evaluation_failure_propagates(
         pytest.raises(
             RuntimeError,
             match="stage11 config evaluation rejected",
+        ),
+    ):
+        entrypoint.update_deep_gemm_config(0, SimpleNamespace())
+
+
+def test_sidecar_stage11_config_evaluation_failure_propagates(
+    monkeypatch,
+    tmp_path,
+):
+    env_file = tmp_path / "glm52_opt.env"
+    env_file.write_text(
+        f"SGLANG_GLM52_OPT_PROFILE={config.W2_EM8_BM16_STAGE11_PROFILE}\n"
+    )
+    monkeypatch.delenv("SGLANG_GLM52_OPT_PROFILE", raising=False)
+    monkeypatch.setenv("SGLANG_GLM52_ENV_FILE", str(env_file))
+    with (
+        patch.object(entrypoint, "deep_gemm", SimpleNamespace(), create=True),
+        patch.object(
+            entrypoint.envs.SGLANG_DEEPGEMM_PDL,
+            "get",
+            return_value=False,
+        ),
+        patch.object(entrypoint.compile_utils, "update_deep_gemm_config"),
+        patch.object(
+            config,
+            "w2_em8_bm16_stage11_enabled",
+            side_effect=RuntimeError("sidecar stage11 evaluation rejected"),
+        ),
+        pytest.raises(
+            RuntimeError,
+            match="sidecar stage11 evaluation rejected",
         ),
     ):
         entrypoint.update_deep_gemm_config(0, SimpleNamespace())

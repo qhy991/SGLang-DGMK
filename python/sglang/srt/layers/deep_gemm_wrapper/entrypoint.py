@@ -4,6 +4,7 @@ import os
 from contextlib import contextmanager
 from contextvars import ContextVar
 from functools import partial
+from pathlib import Path
 from typing import Any, Callable, Optional, Tuple
 
 import torch
@@ -35,6 +36,10 @@ _W2_BM16_CALLSITE_PREPARE: Optional[Callable[..., bool]] = None
 _W2_BM16_LAYER_PREPARE: Optional[Callable[..., Any]] = None
 _W2_BM16_STRICT_PROFILE = False
 _W2_EM8_BM16_STAGE11_PROFILE_PREFIX = "moe_w2_em8_bm16_stage11"
+_GLM52_DEFAULT_ENV_FILE = Path("/home/ubuntu/wwxq/cache/sglang/glm52_opt.env")
+_GLM52_REPO_RUNTIME_ENV_FILE = (
+    Path(__file__).resolve().parents[5] / "glm52_opt" / "runtime.env"
+)
 
 
 def w2_bm16_profile_requested() -> bool:
@@ -43,8 +48,37 @@ def w2_bm16_profile_requested() -> bool:
 
 
 def _w2_em8_bm16_stage11_profile_named_by_environment() -> bool:
-    """Recognize the strict profile before its config module can be imported."""
+    """Resolve the strict profile before its config module can be imported.
+
+    This mirrors ``glm52_opt.config.ensure_glm52_env`` for the profile key.
+    Spawned workers may receive the selection only through a sidecar file, and
+    that file overrides a directly inherited value.
+    """
     profile = os.environ.get("SGLANG_GLM52_OPT_PROFILE", "")
+    explicit_env_file = os.environ.get("SGLANG_GLM52_ENV_FILE", "").strip()
+    candidates = []
+    if explicit_env_file:
+        candidates.append(Path(explicit_env_file))
+    candidates.extend((_GLM52_DEFAULT_ENV_FILE, _GLM52_REPO_RUNTIME_ENV_FILE))
+
+    for candidate in candidates:
+        if not candidate.is_file():
+            continue
+        try:
+            lines = candidate.read_text().splitlines()
+        except OSError:
+            if explicit_env_file and candidate == Path(explicit_env_file):
+                raise
+            break
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            if key.strip() == "SGLANG_GLM52_OPT_PROFILE":
+                profile = value.strip().strip('"').strip("'")
+        break
+
     return profile.strip().lower() in {
         _W2_EM8_BM16_STAGE11_PROFILE_PREFIX,
         f"{_W2_EM8_BM16_STAGE11_PROFILE_PREFIX}_v3",
@@ -205,17 +239,24 @@ def _grouped_gemm_nt_f8f8bf16_masked_w2_bm16(
                         recipe_b=recipe_b,
                         overlap_args=overlap_args,
                     )
-            if callsite_eligible and candidate_dispatch(
-                runtime_contract,
-                lhs,
-                rhs,
-                out,
-                masked_m,
-                expected_m,
-                callsite_eligible=True,
-            ):
-                # The stock no-overlap ABI writes `out` and returns None.
-                return None
+            if callsite_eligible:
+                candidate_dispatched = candidate_dispatch(
+                    runtime_contract,
+                    lhs,
+                    rhs,
+                    out,
+                    masked_m,
+                    expected_m,
+                    callsite_eligible=True,
+                )
+                if candidate_dispatched:
+                    # The stock no-overlap ABI writes `out` and returns None.
+                    return None
+                if strict_profile:
+                    raise RuntimeError(
+                        "explicit W2/em8/BM16/stage11-v3 dispatch declined "
+                        "after exact callsite admission"
+                    )
 
             # An armed-profile decline is final before launch: go directly to
             # authoritative stock and suppress the legacy generic replacement.
@@ -488,9 +529,7 @@ def update_deep_gemm_config(gpu_id: int, server_args: ServerArgs):
 
     # Resolve the explicit stage11-v3 profile before entering the legacy
     # best-effort path. Its setup failures must abort worker initialization.
-    strict_stage11_profile_named = (
-        _w2_em8_bm16_stage11_profile_named_by_environment()
-    )
+    strict_stage11_profile_named = _w2_em8_bm16_stage11_profile_named_by_environment()
     try:
         from sglang.srt.layers.glm52_opt.config import (
             deepgemm_variant,
