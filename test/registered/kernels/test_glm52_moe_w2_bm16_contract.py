@@ -854,6 +854,7 @@ def test_armed_setup_binds_one_per_runner_callable():
     runner_core = SimpleNamespace(set_masked_down_gemm=Mock())
     runtime_contract = SimpleNamespace()
     layer_contract = SimpleNamespace()
+    layer_prepare = Mock(return_value=layer_contract)
     callsite_prepare = Mock()
     candidate_dispatch = Mock()
     with (
@@ -872,10 +873,8 @@ def test_armed_setup_binds_one_per_runner_callable():
             entrypoint, "_W2_BM16_DISPATCH", candidate_dispatch
         ),
         patch.object(
-            experimental,
-            "create_w2_bm16_layer_contract",
-            return_value=layer_contract,
-        ) as create,
+            entrypoint, "_W2_BM16_LAYER_PREPARE", layer_prepare
+        ),
     ):
         entrypoint.configure_w2_bm16_masked_down_gemm(
             runner_core,
@@ -886,7 +885,7 @@ def test_armed_setup_binds_one_per_runner_callable():
             is_fp4_experts=False,
             use_mxfp8=False,
         )
-    create.assert_called_once()
+    layer_prepare.assert_called_once()
     bound = runner_core.set_masked_down_gemm.call_args.args[0]
     assert isinstance(bound, partial)
     assert (

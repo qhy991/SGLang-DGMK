@@ -31,6 +31,8 @@ _W2_BM16_PROFILE_REQUESTED = False
 _W2_BM16_PREPARED_CONTRACT: Any = None
 _W2_BM16_DISPATCH: Optional[Callable[..., bool]] = None
 _W2_BM16_CALLSITE_PREPARE: Optional[Callable[..., bool]] = None
+_W2_BM16_LAYER_PREPARE: Optional[Callable[..., Any]] = None
+_W2_BM16_STRICT_PROFILE = False
 
 
 def w2_bm16_profile_requested() -> bool:
@@ -128,6 +130,8 @@ def _grouped_gemm_nt_f8f8bf16_masked_w2_bm16(
     max_block_n: int = 256,
     recipe_a: Optional[Tuple[int, int]] = None,
     recipe_b: Optional[Tuple[int, int]] = None,
+    *,
+    strict_profile: bool = False,
 ):
     """Armed W2 down-GEMM callable; never installed on the default runner."""
     num_groups, _, k = lhs[0].shape
@@ -153,13 +157,29 @@ def _grouped_gemm_nt_f8f8bf16_masked_w2_bm16(
                 and not _NUM_SMS_OVERRIDE_ACTIVE.get()
             )
             callsite_eligible = False
-            if (
-                compatible
-                and layer_contract is not None
+            prepared = (
+                layer_contract is not None
                 and runtime_contract is not None
                 and callsite_prepare is not None
                 and candidate_dispatch is not None
-            ):
+            )
+            if strict_profile and not prepared:
+                raise RuntimeError(
+                    "explicit W2/em8/BM16/stage11-v3 profile is not prepared"
+                )
+            if strict_profile:
+                callsite_eligible = callsite_prepare(
+                    layer_contract,
+                    lhs,
+                    rhs,
+                    out,
+                    masked_m,
+                    expected_m=expected_m,
+                    recipe_a=recipe_a,
+                    recipe_b=recipe_b,
+                    overlap_args=overlap_args,
+                )
+            elif compatible and prepared:
                 if layer_contract.callsite_checked:
                     callsite_eligible = layer_contract.callsite_eligible
                 else:
@@ -174,17 +194,17 @@ def _grouped_gemm_nt_f8f8bf16_masked_w2_bm16(
                         recipe_b=recipe_b,
                         overlap_args=overlap_args,
                     )
-                if callsite_eligible and candidate_dispatch(
-                    runtime_contract,
-                    lhs,
-                    rhs,
-                    out,
-                    masked_m,
-                    expected_m,
-                    callsite_eligible=True,
-                ):
-                    # The stock no-overlap ABI writes `out` and returns None.
-                    return None
+            if callsite_eligible and candidate_dispatch(
+                runtime_contract,
+                lhs,
+                rhs,
+                out,
+                masked_m,
+                expected_m,
+                callsite_eligible=True,
+            ):
+                # The stock no-overlap ABI writes `out` and returns None.
+                return None
 
             # An armed-profile decline is final before launch: go directly to
             # authoritative stock and suppress the legacy generic replacement.
@@ -226,18 +246,25 @@ def configure_w2_bm16_masked_down_gemm(
     if not _W2_BM16_PROFILE_REQUESTED:
         return
 
+    if _W2_BM16_STRICT_PROFILE and (
+        _W2_BM16_PREPARED_CONTRACT is None
+        or _W2_BM16_CALLSITE_PREPARE is None
+        or _W2_BM16_DISPATCH is None
+        or _W2_BM16_LAYER_PREPARE is None
+    ):
+        raise RuntimeError(
+            "explicit W2/em8/BM16/stage11-v3 profile has incomplete setup"
+        )
+
     layer_contract = None
     if (
         _W2_BM16_PREPARED_CONTRACT is not None
         and _W2_BM16_CALLSITE_PREPARE is not None
         and _W2_BM16_DISPATCH is not None
+        and _W2_BM16_LAYER_PREPARE is not None
     ):
         try:
-            from sglang.srt.layers.glm52_opt.experimental_deepgemm import (
-                create_w2_bm16_layer_contract,
-            )
-
-            layer_contract = create_w2_bm16_layer_contract(
+            layer_contract = _W2_BM16_LAYER_PREPARE(
                 w2_weight=w2_weight,
                 w2_scale=w2_scale,
                 block_shape=block_shape,
@@ -246,7 +273,13 @@ def configure_w2_bm16_masked_down_gemm(
                 use_mxfp8=use_mxfp8,
             )
         except Exception as exc:
+            if _W2_BM16_STRICT_PROFILE:
+                raise
             logger.warning("GLM-5.2 W2/BM16 layer preparation skipped: %s", exc)
+    if _W2_BM16_STRICT_PROFILE and layer_contract is None:
+        raise RuntimeError(
+            "explicit W2/em8/BM16/stage11-v3 layer preparation returned no contract"
+        )
 
     runner_core.set_masked_down_gemm(
         partial(
@@ -255,6 +288,7 @@ def configure_w2_bm16_masked_down_gemm(
             _W2_BM16_PREPARED_CONTRACT,
             _W2_BM16_CALLSITE_PREPARE,
             _W2_BM16_DISPATCH,
+            strict_profile=_W2_BM16_STRICT_PROFILE,
         )
     )
 
@@ -423,11 +457,15 @@ def update_deep_gemm_config(gpu_id: int, server_args: ServerArgs):
     global _W2_BM16_PREPARED_CONTRACT
     global _W2_BM16_DISPATCH
     global _W2_BM16_CALLSITE_PREPARE
+    global _W2_BM16_LAYER_PREPARE
+    global _W2_BM16_STRICT_PROFILE
 
     _W2_BM16_PROFILE_REQUESTED = False
     _W2_BM16_PREPARED_CONTRACT = None
     _W2_BM16_DISPATCH = None
     _W2_BM16_CALLSITE_PREPARE = None
+    _W2_BM16_LAYER_PREPARE = None
+    _W2_BM16_STRICT_PROFILE = False
     w2_forward_context = None
 
     # deep_gemm.set_pdl can initialize CUDA state, so run it only after the
@@ -437,14 +475,46 @@ def update_deep_gemm_config(gpu_id: int, server_args: ServerArgs):
 
     compile_utils.update_deep_gemm_config(gpu_id, server_args)
 
-    # Opt-in GLM-5.2 experimental DeepGEMM overlay (does not replace stock import).
+    # Resolve the explicit stage11-v3 profile before entering the legacy
+    # best-effort path. Its setup failures must abort worker initialization.
     try:
         from sglang.srt.layers.glm52_opt.config import (
             deepgemm_variant,
             is_enabled,
             w2_bm16_enabled,
+            w2_em8_bm16_stage11_enabled,
+        )
+    except Exception as exc:
+        logger.warning("GLM-5.2 DeepGEMM config load skipped: %s", exc)
+        return w2_forward_context
+
+    if w2_em8_bm16_stage11_enabled():
+        _W2_BM16_PROFILE_REQUESTED = True
+        _W2_BM16_STRICT_PROFILE = True
+        from sglang.srt.layers.glm52_opt.experimental_deepgemm_em8_bm16_stage11 import (
+            create_layer_contract,
+            prepare_callsite_contract,
+            prepare_deep_gemm,
+        )
+        from sglang.srt.layers.glm52_opt.dispatch import (
+            try_dispatch_moe_w2_em8_bm16_stage11,
         )
 
+        contract = prepare_deep_gemm(gpu_id)
+        _W2_BM16_PREPARED_CONTRACT = contract
+        _W2_BM16_DISPATCH = try_dispatch_moe_w2_em8_bm16_stage11
+        _W2_BM16_CALLSITE_PREPARE = prepare_callsite_contract
+        _W2_BM16_LAYER_PREPARE = create_layer_contract
+        w2_forward_context = contract.forward_context
+        logger.info(
+            "GLM-5.2 W2/em8/BM16/stage11-v3 runtime prepared: %s",
+            json.dumps(contract.evidence(), sort_keys=True),
+        )
+        return w2_forward_context
+
+    # Other opt-in GLM-5.2 overlays preserve their established best-effort
+    # behavior and never replace the exact stock import.
+    try:
         if w2_bm16_enabled():
             # Arm before any fallible candidate import/preparation. If setup
             # fails, all W2 calls explicitly choose stock and do not enter a
@@ -462,6 +532,11 @@ def update_deep_gemm_config(gpu_id: int, server_args: ServerArgs):
             _W2_BM16_PREPARED_CONTRACT = contract
             _W2_BM16_DISPATCH = try_dispatch_moe_w2_bm16
             _W2_BM16_CALLSITE_PREPARE = prepare_w2_bm16_callsite_contract
+            from sglang.srt.layers.glm52_opt.experimental_deepgemm import (
+                create_w2_bm16_layer_contract,
+            )
+
+            _W2_BM16_LAYER_PREPARE = create_w2_bm16_layer_contract
             w2_forward_context = contract.forward_context
             logger.info(
                 "GLM-5.2 W2/BM16 DeepGEMM runtime prepared: %s",
