@@ -261,6 +261,57 @@ def try_dispatch_moe_w2_em8_bm16_stage11(
     return True
 
 
+def try_dispatch_moe_w2_em8_bm16_stage11_v4(
+    contract: Any,
+    lhs: Tuple[torch.Tensor, torch.Tensor],
+    rhs: Tuple[torch.Tensor, torch.Tensor],
+    out: torch.Tensor,
+    masked_m: torch.Tensor,
+    expected_m: int,
+    *,
+    callsite_eligible: bool,
+) -> bool:
+    """Commit only the READY-bound exact M32/em8 stage11-v4 launch."""
+    if isinstance(expected_m, bool) or not isinstance(expected_m, int):
+        raise TypeError("expected_m must be a non-bool int")
+    if contract is None:
+        raise RuntimeError("stage11-v4 dispatch has no prepared contract")
+    forward_state = contract.current_forward_state()
+    if forward_state is None:
+        raise RuntimeError("stage11-v4 dispatch has no forward context")
+    local_m = forward_state[1]
+    if isinstance(local_m, bool) or not isinstance(local_m, int):
+        raise TypeError("local_m must be a non-bool int")
+    if (
+        not forward_state[0].is_decode()
+        or local_m != 32
+        or expected_m != 8
+    ):
+        return False
+    if not callsite_eligible or get_op_name() != "moe_down_proj":
+        raise RuntimeError(
+            "exact M32/em8 stage11-v4 dispatch admission failed"
+        )
+
+    # Candidate invocation is the commit point.  Every JIT/launch/return
+    # failure propagates; stock must never execute after this call begins.
+    result = contract.launch(
+        lhs,
+        rhs,
+        out,
+        masked_m,
+        8,
+        masked_block_m_override=16,
+        masked_num_stages_override=11,
+    )
+    if result is not None:
+        raise RuntimeError(
+            "W2/em8/BM16/stage11-v4 candidate violated the stock "
+            "non-overlap None return contract"
+        )
+    return True
+
+
 def try_dispatch_moe_masked(
     lhs: Tuple[torch.Tensor, torch.Tensor],
     rhs: Tuple[torch.Tensor, torch.Tensor],

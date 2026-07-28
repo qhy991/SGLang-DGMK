@@ -27,6 +27,8 @@ _GLM52_ENV_KEYS = frozenset(
         "SGLANG_GLM52_DEEPGEMM_MANIFEST",
         "SGLANG_GLM52_W2_BM16_MANIFEST",
         "SGLANG_GLM52_W2_EM8_BM16_STAGE11_V3_MANIFEST",
+        "SGLANG_GLM52_W2_EM8_BM16_STAGE11_V4_MANIFEST",
+        "SGLANG_GLM52_W2_EM8_BM16_STAGE11_V4_READY",
         "SGLANG_GLM52_ENV_FILE",
         "SGLANG_GLM52_NSYS_GATE",
         "SGLANG_GLM52_NSYS_TRIGGER",
@@ -140,6 +142,7 @@ _E2E_DEFAULT_OPS = frozenset({"o_proj", "moe_gate_proj", "moe_down_proj"})
 _E2E_CONTIG_PSUM_OPS = frozenset({"moe_gate_proj", "moe_down_proj"})
 W2_BM16_PROFILE = "moe_w2_bm16"
 W2_EM8_BM16_STAGE11_PROFILE = "moe_w2_em8_bm16_stage11_v3"
+W2_EM8_BM16_STAGE11_V4_PROFILE = "moe_w2_em8_bm16_stage11_v4"
 
 
 def w2_bm16_enabled() -> bool:
@@ -153,6 +156,14 @@ def w2_bm16_enabled() -> bool:
 def w2_em8_bm16_stage11_enabled() -> bool:
     """Whether the exact separately versioned em8/BM16/stage11 trial is armed."""
     if not is_enabled() or profile_name() != W2_EM8_BM16_STAGE11_PROFILE:
+        return False
+    allow = opt_ops_allowlist()
+    return allow is None or "moe_down_proj" in allow
+
+
+def w2_em8_bm16_stage11_v4_enabled() -> bool:
+    """Whether the content-addressed stage11-v4 trial is explicitly armed."""
+    if not is_enabled() or profile_name() != W2_EM8_BM16_STAGE11_V4_PROFILE:
         return False
     allow = opt_ops_allowlist()
     return allow is None or "moe_down_proj" in allow

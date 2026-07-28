@@ -35,6 +35,7 @@ _W2_BM16_DISPATCH: Optional[Callable[..., bool]] = None
 _W2_BM16_CALLSITE_PREPARE: Optional[Callable[..., bool]] = None
 _W2_BM16_LAYER_PREPARE: Optional[Callable[..., Any]] = None
 _W2_BM16_STRICT_PROFILE = False
+_W2_BM16_STRICT_PROFILE_LABEL = "stage11-v3"
 _W2_EM8_BM16_STAGE11_PROFILE_PREFIX = "moe_w2_em8_bm16_stage11"
 _GLM52_DEFAULT_ENV_FILE = Path("/home/ubuntu/wwxq/cache/sglang/glm52_opt.env")
 _GLM52_REPO_RUNTIME_ENV_FILE = (
@@ -82,6 +83,7 @@ def _w2_em8_bm16_stage11_profile_named_by_environment() -> bool:
     return profile.strip().lower() in {
         _W2_EM8_BM16_STAGE11_PROFILE_PREFIX,
         f"{_W2_EM8_BM16_STAGE11_PROFILE_PREFIX}_v3",
+        f"{_W2_EM8_BM16_STAGE11_PROFILE_PREFIX}_v4",
     }
 
 
@@ -177,6 +179,7 @@ def _grouped_gemm_nt_f8f8bf16_masked_w2_bm16(
     recipe_b: Optional[Tuple[int, int]] = None,
     *,
     strict_profile: bool = False,
+    strict_profile_label: str = "stage11-v3",
 ):
     """Armed W2 down-GEMM callable; never installed on the default runner."""
     num_groups, _, k = lhs[0].shape
@@ -210,7 +213,8 @@ def _grouped_gemm_nt_f8f8bf16_masked_w2_bm16(
             )
             if strict_profile and not prepared:
                 raise RuntimeError(
-                    "explicit W2/em8/BM16/stage11-v3 profile is not prepared"
+                    "explicit W2/em8/BM16/"
+                    f"{strict_profile_label} profile is not prepared"
                 )
             if strict_profile:
                 callsite_eligible = callsite_prepare(
@@ -254,7 +258,8 @@ def _grouped_gemm_nt_f8f8bf16_masked_w2_bm16(
                     return None
                 if strict_profile:
                     raise RuntimeError(
-                        "explicit W2/em8/BM16/stage11-v3 dispatch declined "
+                        "explicit W2/em8/BM16/"
+                        f"{strict_profile_label} dispatch declined "
                         "after exact callsite admission"
                     )
 
@@ -305,7 +310,8 @@ def configure_w2_bm16_masked_down_gemm(
         or _W2_BM16_LAYER_PREPARE is None
     ):
         raise RuntimeError(
-            "explicit W2/em8/BM16/stage11-v3 profile has incomplete setup"
+            "explicit W2/em8/BM16/"
+            f"{_W2_BM16_STRICT_PROFILE_LABEL} profile has incomplete setup"
         )
 
     layer_contract = None
@@ -330,7 +336,8 @@ def configure_w2_bm16_masked_down_gemm(
             logger.warning("GLM-5.2 W2/BM16 layer preparation skipped: %s", exc)
     if _W2_BM16_STRICT_PROFILE and layer_contract is None:
         raise RuntimeError(
-            "explicit W2/em8/BM16/stage11-v3 layer preparation returned no contract"
+            "explicit W2/em8/BM16/"
+            f"{_W2_BM16_STRICT_PROFILE_LABEL} layer preparation returned no contract"
         )
 
     runner_core.set_masked_down_gemm(
@@ -341,6 +348,7 @@ def configure_w2_bm16_masked_down_gemm(
             _W2_BM16_CALLSITE_PREPARE,
             _W2_BM16_DISPATCH,
             strict_profile=_W2_BM16_STRICT_PROFILE,
+            strict_profile_label=_W2_BM16_STRICT_PROFILE_LABEL,
         )
     )
 
@@ -511,6 +519,7 @@ def update_deep_gemm_config(gpu_id: int, server_args: ServerArgs):
     global _W2_BM16_CALLSITE_PREPARE
     global _W2_BM16_LAYER_PREPARE
     global _W2_BM16_STRICT_PROFILE
+    global _W2_BM16_STRICT_PROFILE_LABEL
 
     _W2_BM16_PROFILE_REQUESTED = False
     _W2_BM16_PREPARED_CONTRACT = None
@@ -518,6 +527,7 @@ def update_deep_gemm_config(gpu_id: int, server_args: ServerArgs):
     _W2_BM16_CALLSITE_PREPARE = None
     _W2_BM16_LAYER_PREPARE = None
     _W2_BM16_STRICT_PROFILE = False
+    _W2_BM16_STRICT_PROFILE_LABEL = "stage11-v3"
     w2_forward_context = None
 
     # deep_gemm.set_pdl can initialize CUDA state, so run it only after the
@@ -536,6 +546,7 @@ def update_deep_gemm_config(gpu_id: int, server_args: ServerArgs):
             is_enabled,
             w2_bm16_enabled,
             w2_em8_bm16_stage11_enabled,
+            w2_em8_bm16_stage11_v4_enabled,
         )
     except Exception as exc:
         if strict_stage11_profile_named:
@@ -545,15 +556,42 @@ def update_deep_gemm_config(gpu_id: int, server_args: ServerArgs):
 
     try:
         stage11_enabled = w2_em8_bm16_stage11_enabled()
+        stage11_v4_enabled = w2_em8_bm16_stage11_v4_enabled()
     except Exception as exc:
         if strict_stage11_profile_named:
             raise
         logger.warning("GLM-5.2 DeepGEMM config evaluation skipped: %s", exc)
         return w2_forward_context
 
+    if stage11_v4_enabled:
+        _W2_BM16_PROFILE_REQUESTED = True
+        _W2_BM16_STRICT_PROFILE = True
+        _W2_BM16_STRICT_PROFILE_LABEL = "stage11-v4"
+        from sglang.srt.layers.glm52_opt.experimental_deepgemm_em8_bm16_stage11_v4 import (
+            create_layer_contract,
+            prepare_callsite_contract,
+            prepare_deep_gemm,
+        )
+        from sglang.srt.layers.glm52_opt.dispatch import (
+            try_dispatch_moe_w2_em8_bm16_stage11_v4,
+        )
+
+        contract = prepare_deep_gemm(gpu_id)
+        _W2_BM16_PREPARED_CONTRACT = contract
+        _W2_BM16_DISPATCH = try_dispatch_moe_w2_em8_bm16_stage11_v4
+        _W2_BM16_CALLSITE_PREPARE = prepare_callsite_contract
+        _W2_BM16_LAYER_PREPARE = create_layer_contract
+        w2_forward_context = contract.forward_context
+        logger.info(
+            "GLM-5.2 W2/em8/BM16/stage11-v4 READY runtime prepared: %s",
+            json.dumps(contract.evidence(), sort_keys=True),
+        )
+        return w2_forward_context
+
     if stage11_enabled:
         _W2_BM16_PROFILE_REQUESTED = True
         _W2_BM16_STRICT_PROFILE = True
+        _W2_BM16_STRICT_PROFILE_LABEL = "stage11-v3"
         from sglang.srt.layers.glm52_opt.experimental_deepgemm_em8_bm16_stage11 import (
             create_layer_contract,
             prepare_callsite_contract,

@@ -1,0 +1,36 @@
+{
+  "base_commit": "edcf77b276965de8f03cdc47c23f01b08bf7c7ab",
+  "base_tag": "v0.1.4.post1",
+  "build_tool_patch_sha256": "dc731d5442c0bdf0758b17380e02e67b580cf3aa579f4832a497d1b68e3a85c7",
+  "candidate_build_id": "glm52-task26-em8-bm16-stage11-v4:sgl-deep-gemm-0.1.4.post1@edcf77b276965de8f03cdc47c23f01b08bf7c7ab:sm100:e32:m1024:k2048:n6144:expected-m8:bm16:stages11:pdl1:sms148:packed-ue8m0:no-recipe:no-overlap",
+  "core_source_hashes_sha256": "e2b904139f5891ca7eb11a66f221e902a35b2d3bce536478829dcd8c7b374bcb",
+  "distribution": "sgl-deep-gemm",
+  "pipeline_hypothesis": {
+    "candidate_num_stages": 11,
+    "candidate_smem_bytes": 211756,
+    "claim": "reduced-pipeline-pressure-falsifiable",
+    "fixed_smem_bytes": 9004,
+    "smem_per_stage_bytes": 18432,
+    "stock_num_stages": 12,
+    "stock_smem_bytes": 230188,
+    "two_ctas_per_sm_enabled": false
+  },
+  "source_patch_sha256": "9b227e5cf597c3f620245f82a66c7e22c7c483be91d54c711e68027947a005c8",
+  "submodules": {
+    "third-party/cutlass": "f3fde58372d33e9a5650ba7b80fc48b3b49d40c8",
+    "third-party/fmt": "553ec11ec06fbe0beebfbb45f9dc3c9eabd83d28"
+  },
+  "variant": {
+    "fallback_eligible": false,
+    "name": "em8_bm16_stage11",
+    "predeclared_fallback": "em8_bm16_stage10",
+    "version": 4
+  },
+  "task_cache_paths": {
+    "DG_JIT_CACHE_DIR": "/home/qinhaiyan/glm52-v2-goal-runs/cache/26-moe_w2_decode_scoped_bm16/em8_bm16_stage11_v4/deepgemm",
+    "SGLANG_DG_CACHE_DIR": "/home/qinhaiyan/glm52-v2-goal-runs/cache/26-moe_w2_decode_scoped_bm16/em8_bm16_stage11_v4/deepgemm",
+    "TORCH_EXTENSIONS_DIR": "/home/qinhaiyan/glm52-v2-goal-runs/cache/26-moe_w2_decode_scoped_bm16/em8_bm16_stage11_v4/torch_extensions",
+    "TRITON_CACHE_DIR": "/home/qinhaiyan/glm52-v2-goal-runs/cache/26-moe_w2_decode_scoped_bm16/em8_bm16_stage11_v4/triton"
+  },
+  "version": "0.1.4.post1"
+}
