@@ -55,6 +55,7 @@ from sglang.srt.model_executor.cuda_graph_buffer_registry import (
     CudaGraphBufferRegistry,
     build_decode_registry,
 )
+from sglang.srt.model_executor.cuda_graph_config import Backend
 from sglang.srt.model_executor.forward_batch_info import (
     CaptureHiddenMode,
     ForwardBatch,
@@ -75,6 +76,9 @@ from sglang.srt.model_executor.runner.flashinfer_autotune import (
 from sglang.srt.model_executor.runner.shape_key import ShapeKey
 from sglang.srt.model_executor.runner_backend.breakable_cuda_graph_backend import (
     BreakableCudaGraphBackend,
+)
+from sglang.srt.model_executor.runner_backend.full_cuda_graph_backend import (
+    FullCudaGraphBackend,
 )
 from sglang.srt.model_executor.runner_backend.utils import resolve_decode_backend
 from sglang.srt.model_executor.runner_backend_utils import (
@@ -396,8 +400,7 @@ class DecodeCudaGraphRunner(BaseCudaGraphRunner):
 
         # --- capture --------------------------------------------------
         try:
-            with model_capture_mode():
-                self.capture()
+            self._capture_with_model_mode()
         except RuntimeError as e:
             raise Exception(
                 f"Capture cuda graph failed: {e}\n" f"{CUDA_GRAPH_CAPTURE_FAILED_MSG}"
@@ -806,6 +809,42 @@ class DecodeCudaGraphRunner(BaseCudaGraphRunner):
 
         return forward_batch, attn_backend, pp_proxy_tensors
 
+    def _capture_with_model_mode(
+        self,
+        *,
+        enter_model_capture_mode: bool = True,
+    ) -> None:
+        """Build decode graphs with narrow, exception-safe model specialization."""
+        config = self.model_runner.server_args.cuda_graph_config
+        configured_backend = (
+            Backend.FULL if config is None else config.decode.backend
+        )
+        should_arm_glm52_attn_o = (
+            envs.SGLANG_OPT_GLM52_ATTN_O_DECODE_DIRECT_NK.get()
+            and self.capture_forward_mode == ForwardMode.DECODE
+            and self.num_tokens_per_req == 1
+            and configured_backend == Backend.FULL
+            and type(self.backend) is FullCudaGraphBackend
+        )
+
+        arm_context = contextlib.nullcontext()
+        if should_arm_glm52_attn_o:
+            from sglang.srt.layers.quantization.fp8 import (
+                arm_glm52_attn_o_decode_direct_nk_for_cuda_graph,
+            )
+
+            arm_context = arm_glm52_attn_o_decode_direct_nk_for_cuda_graph(
+                self.model_runner.model
+            )
+
+        capture_mode_context = (
+            model_capture_mode()
+            if enter_model_capture_mode
+            else contextlib.nullcontext()
+        )
+        with capture_mode_context, arm_context:
+            self.capture()
+
     def capture(self) -> None:
         # Warm up + autotune kernels once before capture (run-once across the
         # decode + prefill runners; see BaseRunner.warmup).
@@ -1037,7 +1076,7 @@ class DecodeCudaGraphRunner(BaseCudaGraphRunner):
         if self.capture_hidden_mode != required_capture_hidden_mode:
             self.capture_hidden_mode = required_capture_hidden_mode
             self.backend.cleanup()
-            self.capture()
+            self._capture_with_model_mode(enter_model_capture_mode=False)
 
     def load_batch(
         self,

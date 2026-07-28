@@ -1027,43 +1027,6 @@ def deepgemm_w8a8_block_fp8_linear_attn_o_decode_direct_nk(
     return output.to(dtype=input.dtype).view(*output_shape)
 
 
-def deepgemm_w8a8_block_fp8_linear_attn_o_decode_direct_nk_dispatch(
-    input: torch.Tensor,
-    weight: torch.Tensor,
-    block_size: List[int],
-    weight_scale: torch.Tensor,
-    input_scale: Optional[torch.Tensor] = None,
-    bias: Optional[torch.Tensor] = None,
-) -> torch.Tensor:
-    """Select fixed N/K only on the one configured attention O runner."""
-    from sglang.srt.layers.glm52_opt.context import get_attn_o_direct_nk_context
-
-    context = get_attn_o_direct_nk_context()
-    if (
-        context is not None
-        and input_scale is None
-        and bias is None
-        and input.ndim == 2
-        and int(input.shape[0]) == context[1]
-    ):
-        return deepgemm_w8a8_block_fp8_linear_attn_o_decode_direct_nk(
-            input,
-            weight,
-            block_size,
-            weight_scale,
-            input_scale=None,
-            bias=None,
-        )
-    return deepgemm_w8a8_block_fp8_linear_with_fallback(
-        input,
-        weight,
-        block_size,
-        weight_scale,
-        input_scale=input_scale,
-        bias=bias,
-    )
-
-
 def _unpack_ue8m0_scale_for_triton(
     sf_packed: torch.Tensor,
     weight_shape: Tuple[int, int],

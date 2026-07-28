@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import os
+import threading
 import unittest
 from contextlib import ExitStack, contextmanager, nullcontext
 from types import SimpleNamespace
@@ -15,22 +16,25 @@ from sglang.kernels.ops.quantization.fp8_kernel import (
 )
 from sglang.srt.environ import envs
 from sglang.srt.layers import deep_gemm_wrapper
-from sglang.srt.layers.attention.dsa_backend import DeepseekSparseAttnBackend
 from sglang.srt.layers.deep_gemm_wrapper import compile_utils
 from sglang.srt.layers.deep_gemm_wrapper import entrypoint as deep_gemm_entrypoint
 from sglang.srt.layers.glm52_opt import dispatch as glm52_dispatch
-from sglang.srt.layers.glm52_opt.context import (
-    attn_o_direct_nk_context,
-    get_attn_o_direct_nk_context,
-    get_forward_m,
-    get_forward_mode,
-    get_op_name,
-    is_attn_o_direct_nk_scope,
-    set_forward_mode,
-)
 from sglang.srt.layers.quantization import fp8 as fp8_module
 from sglang.srt.layers.quantization import fp8_utils
-from sglang.srt.model_executor.forward_batch_info import ForwardMode
+from sglang.srt.model_executor.cuda_graph_config import Backend
+from sglang.srt.model_executor.forward_batch_info import (
+    CaptureHiddenMode,
+    ForwardMode,
+)
+from sglang.srt.model_executor.runner import (
+    decode_cuda_graph_runner as decode_cuda_graph_runner_module,
+)
+from sglang.srt.model_executor.runner.decode_cuda_graph_runner import (
+    DecodeCudaGraphRunner,
+)
+from sglang.srt.model_executor.runner_backend.full_cuda_graph_backend import (
+    FullCudaGraphBackend,
+)
 from sglang.srt.models import deepseek_v2 as deepseek_v2_module
 from sglang.srt.models.deepseek_common.attention_forward_methods.forward_mla import (
     DeepseekMLAForwardMixin,
@@ -99,34 +103,27 @@ def _method(runner=fp8_utils.deepgemm_w8a8_block_fp8_linear_with_fallback):
     return method
 
 
-def _layer(*, enabled=True, prefix="model.layers.0.self_attn.o_proj"):
+def _layer(*, marked=True, prefix="model.layers.0.self_attn.o_proj"):
     layer = SimpleNamespace(
         prefix=prefix,
         weight=object(),
         weight_scale_inv=object(),
     )
-    if enabled is not None:
-        layer._glm52_attn_o_decode_direct_nk = enabled
+    if marked is not None:
+        layer._glm52_attn_o_decode_direct_nk_graph = marked
     return layer
 
 
 def _configured_layer():
-    layer = _layer(enabled=None)
+    layer = _layer(marked=None)
     layer.quant_method = _method()
     if not fp8_module.configure_glm52_attn_o_decode_direct_nk(layer):
-        raise AssertionError("test fixture did not install the task-local dispatcher")
+        raise AssertionError("test fixture did not mark the compatible layer")
     return layer.quant_method, layer
 
 
-@contextmanager
-def _legacy_forward_mode(mode, m):
-    previous_mode = get_forward_mode()
-    previous_m = get_forward_m()
-    set_forward_mode(mode, m)
-    try:
-        yield
-    finally:
-        set_forward_mode(previous_mode, previous_m)
+def _model(*layers):
+    return SimpleNamespace(modules=lambda: iter(layers))
 
 
 class _FakeLinear:
@@ -253,11 +250,11 @@ class TestModelReachability(unittest.TestCase):
             attention.o_proj.prefix,
             "model.layers.0.self_attn.o_proj",
         )
-        self.assertTrue(attention.o_proj._glm52_attn_o_decode_direct_nk)
+        self.assertTrue(attention.o_proj._glm52_attn_o_decode_direct_nk_graph)
         self.assertEqual(attention.o_proj.input_size_per_partition, 16384)
         self.assertIs(
             attention.o_proj.quant_method.w8a8_block_fp8_linear,
-            fp8_utils.deepgemm_w8a8_block_fp8_linear_attn_o_decode_direct_nk_dispatch,
+            fp8_utils.deepgemm_w8a8_block_fp8_linear_with_fallback,
         )
 
     def test_constructor_weight_processing_produces_real_packed_scale(self):
@@ -315,7 +312,7 @@ class TestModelReachability(unittest.TestCase):
         self.assertTrue(packed_scale.format_ue8m0)
         self.assertIs(
             method.w8a8_block_fp8_linear,
-            fp8_utils.deepgemm_w8a8_block_fp8_linear_attn_o_decode_direct_nk_dispatch,
+            fp8_utils.deepgemm_w8a8_block_fp8_linear_with_fallback,
         )
 
     def test_non_deepgemm_weight_processing_identity_remains_false(self):
@@ -356,9 +353,10 @@ class TestModelReachability(unittest.TestCase):
             _dsa_config(),
             feature_enabled=False,
         )
-        self.assertFalse(hasattr(non_target.o_proj, "_glm52_attn_o_decode_direct_nk"))
-        self.assertFalse(hasattr(nextn.o_proj, "_glm52_attn_o_decode_direct_nk"))
-        self.assertFalse(hasattr(disabled.o_proj, "_glm52_attn_o_decode_direct_nk"))
+        marker = "_glm52_attn_o_decode_direct_nk_graph"
+        self.assertFalse(hasattr(non_target.o_proj, marker))
+        self.assertFalse(hasattr(nextn.o_proj, marker))
+        self.assertFalse(hasattr(disabled.o_proj, marker))
         for attention in (non_target, nextn, disabled):
             self.assertIs(
                 attention.o_proj.quant_method.w8a8_block_fp8_linear,
@@ -367,7 +365,7 @@ class TestModelReachability(unittest.TestCase):
 
     def test_glm51_fingerprint_negative_constructor(self):
         glm51 = _construct_dsa_attention(_glm51_config())
-        self.assertFalse(hasattr(glm51.o_proj, "_glm52_attn_o_decode_direct_nk"))
+        self.assertFalse(hasattr(glm51.o_proj, "_glm52_attn_o_decode_direct_nk_graph"))
         self.assertIs(
             glm51.o_proj.quant_method.w8a8_block_fp8_linear,
             fp8_utils.deepgemm_w8a8_block_fp8_linear_with_fallback,
@@ -376,7 +374,7 @@ class TestModelReachability(unittest.TestCase):
     def test_attention_tp_topology_isolation(self):
         tp8 = _construct_dsa_attention(_dsa_config(), attn_tp_size=8)
         self.assertEqual(tp8.o_proj.input_size_per_partition, 2048)
-        self.assertFalse(hasattr(tp8.o_proj, "_glm52_attn_o_decode_direct_nk"))
+        self.assertFalse(hasattr(tp8.o_proj, "_glm52_attn_o_decode_direct_nk_graph"))
         self.assertIs(
             tp8.o_proj.quant_method.w8a8_block_fp8_linear,
             fp8_utils.deepgemm_w8a8_block_fp8_linear_with_fallback,
@@ -422,12 +420,12 @@ class TestModelReachability(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertFalse(predicate(config, **(kwargs | updates)))
         self.assertNotIn(
-            "_glm52_attn_o_decode_direct_nk",
+            "_glm52_attn_o_decode_direct_nk_graph",
             inspect.getsource(Glm4MoeAttention.__init__),
         )
 
 
-class TestApplyRouting(unittest.TestCase):
+class TestGraphCaptureLifecycle(unittest.TestCase):
     def test_feature_is_default_off(self):
         name = "SGLANG_OPT_GLM52_ATTN_O_DECODE_DIRECT_NK"
         old = os.environ.pop(name, None)
@@ -437,115 +435,190 @@ class TestApplyRouting(unittest.TestCase):
             if old is not None:
                 os.environ[name] = old
 
-    def test_decode_buckets_select_direct_path(self):
-        sentinel = object()
-        for m in (16, 32):
-            method, layer = _configured_layer()
-            direct = Mock()
+    def test_configure_is_marker_only_and_eager_runner_stays_exact_stock(self):
+        method, layer = _configured_layer()
 
-            def run_direct(*args, _m=m, **kwargs):
-                self.assertEqual(get_op_name(), "o_proj")
-                self.assertEqual(
-                    get_attn_o_direct_nk_context(),
-                    (ForwardMode.DECODE, _m),
-                )
-                self.assertEqual(get_forward_mode(), ForwardMode.EXTEND)
-                self.assertEqual(get_forward_m(), 1024)
-                self.assertTrue(is_attn_o_direct_nk_scope())
-                return sentinel
+        self.assertTrue(layer._glm52_attn_o_decode_direct_nk_graph)
+        self.assertFalse(hasattr(layer, "_glm52_attn_o_decode_direct_nk"))
+        self.assertIs(
+            method.w8a8_block_fp8_linear,
+            fp8_utils.deepgemm_w8a8_block_fp8_linear_with_fallback,
+        )
+        apply_source = inspect.getsource(fp8_module.Fp8LinearMethod.apply)
+        self.assertNotIn("_glm52_attn_o_decode_direct_nk_graph", apply_source)
+        self.assertNotIn(
+            "deepgemm_w8a8_block_fp8_linear_attn_o_decode_direct_nk",
+            apply_source,
+        )
 
-            direct.side_effect = run_direct
-            with (
-                self.subTest(m=m),
-                patch.object(
-                    fp8_module,
-                    "use_intel_amx_backend",
-                    return_value=False,
-                ),
-                patch.object(
-                    fp8_utils,
-                    "deepgemm_w8a8_block_fp8_linear_attn_o_decode_direct_nk",
-                    direct,
-                ),
-                _legacy_forward_mode(ForwardMode.EXTEND, 1024),
-            ):
-                with attn_o_direct_nk_context(ForwardMode.DECODE, m):
-                    result = method.apply(
-                        layer,
-                        _FakeTensor((m, 16384), torch.bfloat16),
-                    )
-                self.assertEqual(get_forward_mode(), ForwardMode.EXTEND)
-                self.assertEqual(get_forward_m(), 1024)
-                self.assertIsNone(get_attn_o_direct_nk_context())
-                self.assertFalse(is_attn_o_direct_nk_scope())
-
-            self.assertIs(result, sentinel)
-            direct.assert_called_once()
-            self.assertEqual(direct.call_args.kwargs["input_scale"], None)
-            self.assertEqual(direct.call_args.kwargs["bias"], None)
-            self.assertIsNone(get_op_name())
-
-    def test_runner_global_mode_alone_cannot_activate_candidate(self):
-        for mode, m in (
-            (ForwardMode.DECODE, 16),
-            (ForwardMode.TARGET_VERIFY, 32),
-        ):
-            method, layer = _configured_layer()
-            sentinel = object()
-            with (
-                self.subTest(mode=mode.name, m=m),
-                patch.object(
-                    fp8_module,
-                    "use_intel_amx_backend",
-                    return_value=False,
-                ),
-                patch.object(
-                    fp8_utils,
-                    "deepgemm_w8a8_block_fp8_linear_attn_o_decode_direct_nk",
-                ) as direct,
-                patch.object(
-                    fp8_utils,
-                    "deepgemm_w8a8_block_fp8_linear_with_fallback",
-                    return_value=sentinel,
-                ) as stock,
-                _legacy_forward_mode(mode, m),
-            ):
-                result = method.apply(
-                    layer,
-                    _FakeTensor((m, 16384), torch.bfloat16),
-                )
-
-            self.assertIs(result, sentinel)
-            self.assertIsNone(get_attn_o_direct_nk_context())
-            direct.assert_not_called()
-            stock.assert_called_once()
-
-    def test_unmarked_hot_path_has_no_task_branch_or_runner_rewrite(self):
-        sentinel = object()
-        stock = Mock(return_value=sentinel)
-        method = _method(stock)
-        layer = _layer(enabled=None)
+        layer.weight = _FakeTensor((6144, 16384), fp8_utils.fp8_dtype)
+        output = _FakeOutput()
         with (
             patch.object(
                 fp8_module,
                 "use_intel_amx_backend",
                 return_value=False,
             ),
+            patch.object(
+                fp8_utils,
+                "sglang_per_token_group_quant_fp8",
+                return_value=(object(), object()),
+            ) as quant,
+            patch.object(
+                glm52_dispatch,
+                "try_dispatch_fp8_gemm",
+                return_value=output,
+            ) as registry,
         ):
             result = method.apply(
                 layer,
                 _FakeTensor((16, 16384), torch.bfloat16),
             )
 
-        self.assertIs(result, sentinel)
-        stock.assert_called_once()
-        self.assertNotIn(
-            "attn_o_decode_direct_nk",
-            inspect.getsource(fp8_module.Fp8LinearMethod.apply),
+        self.assertIs(result, output)
+        quant.assert_called_once()
+        registry.assert_called_once()
+        self.assertIs(
+            method.w8a8_block_fp8_linear,
+            fp8_utils.deepgemm_w8a8_block_fp8_linear_with_fallback,
         )
-        self.assertFalse(
-            fp8_module.configure_glm52_attn_o_decode_direct_nk(layer),
-        )
+
+    def test_arm_temporarily_swaps_and_restores_exact_stock_runner(self):
+        method, layer = _configured_layer()
+        stock = fp8_utils.deepgemm_w8a8_block_fp8_linear_with_fallback
+        direct = fp8_utils.deepgemm_w8a8_block_fp8_linear_attn_o_decode_direct_nk
+
+        with fp8_module.arm_glm52_attn_o_decode_direct_nk_for_cuda_graph(
+            _model(layer)
+        ) as armed:
+            self.assertEqual(armed, 1)
+            self.assertIs(method.w8a8_block_fp8_linear, direct)
+
+        self.assertIs(method.w8a8_block_fp8_linear, stock)
+
+    def test_nested_arming_is_idempotent_and_restores_at_outer_exit(self):
+        method, first = _configured_layer()
+        second = _layer(marked=True)
+        second.quant_method = method
+        model = _model(first, second)
+        stock = fp8_utils.deepgemm_w8a8_block_fp8_linear_with_fallback
+        direct = fp8_utils.deepgemm_w8a8_block_fp8_linear_attn_o_decode_direct_nk
+
+        with fp8_module.arm_glm52_attn_o_decode_direct_nk_for_cuda_graph(
+            model
+        ) as outer_armed:
+            self.assertEqual(outer_armed, 1)
+            self.assertIs(method.w8a8_block_fp8_linear, direct)
+            with fp8_module.arm_glm52_attn_o_decode_direct_nk_for_cuda_graph(
+                model
+            ) as inner_armed:
+                self.assertEqual(inner_armed, 0)
+                self.assertIs(method.w8a8_block_fp8_linear, direct)
+            self.assertIs(method.w8a8_block_fp8_linear, direct)
+
+        self.assertIs(method.w8a8_block_fp8_linear, stock)
+
+    def test_parallel_arming_is_serialized_for_the_full_capture_scope(self):
+        method, layer = _configured_layer()
+        model = _model(layer)
+        stock = fp8_utils.deepgemm_w8a8_block_fp8_linear_with_fallback
+        direct = fp8_utils.deepgemm_w8a8_block_fp8_linear_attn_o_decode_direct_nk
+        owner_entered = threading.Event()
+        contender_attempting = threading.Event()
+        release_owner = threading.Event()
+        contender_entered = threading.Event()
+        failures = []
+
+        def owner():
+            try:
+                with fp8_module.arm_glm52_attn_o_decode_direct_nk_for_cuda_graph(
+                    model
+                ) as armed:
+                    self.assertEqual(armed, 1)
+                    self.assertIs(method.w8a8_block_fp8_linear, direct)
+                    owner_entered.set()
+                    if not release_owner.wait(timeout=2):
+                        raise AssertionError("test did not release the owner")
+            # Transfer any thread failure to the unittest-owning thread.
+            except BaseException as error:  # noqa: BLE001
+                failures.append(error)
+
+        def contender():
+            try:
+                if not owner_entered.wait(timeout=2):
+                    raise AssertionError("owner did not enter the arming scope")
+                contender_attempting.set()
+                with fp8_module.arm_glm52_attn_o_decode_direct_nk_for_cuda_graph(
+                    model
+                ) as armed:
+                    self.assertEqual(armed, 1)
+                    self.assertIs(method.w8a8_block_fp8_linear, direct)
+                    contender_entered.set()
+            # Transfer any thread failure to the unittest-owning thread.
+            except BaseException as error:  # noqa: BLE001
+                failures.append(error)
+
+        owner_thread = threading.Thread(target=owner)
+        contender_thread = threading.Thread(target=contender)
+        owner_thread.start()
+        contender_thread.start()
+        self.assertTrue(contender_attempting.wait(timeout=2))
+        self.assertFalse(contender_entered.wait(timeout=0.1))
+        release_owner.set()
+        owner_thread.join(timeout=2)
+        contender_thread.join(timeout=2)
+
+        self.assertFalse(owner_thread.is_alive())
+        self.assertFalse(contender_thread.is_alive())
+        self.assertEqual(failures, [])
+        self.assertTrue(contender_entered.is_set())
+        self.assertIs(method.w8a8_block_fp8_linear, stock)
+
+    def test_foreign_or_nonstock_runner_fails_closed(self):
+        method, layer = _configured_layer()
+        direct = fp8_utils.deepgemm_w8a8_block_fp8_linear_attn_o_decode_direct_nk
+        method.w8a8_block_fp8_linear = direct
+        try:
+            with (
+                self.assertRaisesRegex(
+                    RuntimeError,
+                    "without the exact stock runner",
+                ),
+                fp8_module.arm_glm52_attn_o_decode_direct_nk_for_cuda_graph(
+                    _model(layer)
+                ),
+            ):
+                self.fail("foreign runner must not enter the capture scope")
+        finally:
+            method.w8a8_block_fp8_linear = (
+                fp8_utils.deepgemm_w8a8_block_fp8_linear_with_fallback
+            )
+
+    def test_body_exception_restores_exact_stock_runner(self):
+        method, layer = _configured_layer()
+        stock = fp8_utils.deepgemm_w8a8_block_fp8_linear_with_fallback
+
+        with (
+            self.assertRaisesRegex(ValueError, "capture failed"),
+            fp8_module.arm_glm52_attn_o_decode_direct_nk_for_cuda_graph(_model(layer)),
+        ):
+            raise ValueError("capture failed")
+
+        self.assertIs(method.w8a8_block_fp8_linear, stock)
+
+    def test_unexpected_mutation_fails_loudly_after_restoring_stock(self):
+        method, layer = _configured_layer()
+        stock = fp8_utils.deepgemm_w8a8_block_fp8_linear_with_fallback
+
+        with (
+            self.assertRaisesRegex(
+                RuntimeError,
+                "unexpected runner mutation",
+            ),
+            fp8_module.arm_glm52_attn_o_decode_direct_nk_for_cuda_graph(_model(layer)),
+        ):
+            method.w8a8_block_fp8_linear = Mock()
+
         self.assertIs(method.w8a8_block_fp8_linear, stock)
 
     def test_stock_function_has_no_candidate_branch(self):
@@ -562,229 +635,367 @@ class TestApplyRouting(unittest.TestCase):
             source.index("w8a8_block_fp8_matmul_deepgemm"),
         )
 
-    def test_stock_and_candidate_execute_inside_same_op_context(self):
-        stock_sentinel = object()
-        candidate_sentinel = object()
-        stock = Mock()
-        direct = Mock()
+    def test_unmarked_and_incompatible_layers_never_arm(self):
+        stock = fp8_utils.deepgemm_w8a8_block_fp8_linear_with_fallback
 
-        def run_stock(**kwargs):
-            self.assertEqual(get_op_name(), "o_proj")
-            self.assertEqual(get_forward_mode(), ForwardMode.EXTEND)
-            self.assertEqual(get_forward_m(), 1024)
-            return stock_sentinel
+        unmarked = _layer(marked=None)
+        unmarked.quant_method = _method()
 
-        def run_direct(*args, **kwargs):
-            self.assertEqual(get_op_name(), "o_proj")
-            self.assertEqual(get_forward_mode(), ForwardMode.EXTEND)
-            self.assertEqual(get_forward_m(), 1024)
-            self.assertEqual(
-                get_attn_o_direct_nk_context(),
-                (ForwardMode.DECODE, 16),
-            )
-            return candidate_sentinel
+        marlin = _layer(marked=True)
+        marlin.quant_method = _method()
+        marlin.quant_method.use_marlin = True
 
-        stock.side_effect = run_stock
-        direct.side_effect = run_direct
-        candidate_method, candidate_layer = _configured_layer()
-        with (
-            patch.object(
-                fp8_module,
-                "use_intel_amx_backend",
-                return_value=False,
-            ),
-            patch.object(
-                fp8_utils,
-                "deepgemm_w8a8_block_fp8_linear_attn_o_decode_direct_nk",
-                direct,
-            ),
-            _legacy_forward_mode(ForwardMode.EXTEND, 1024),
-        ):
-            stock_result = _method(stock).apply(
-                _layer(enabled=None),
-                _FakeTensor((16, 16384), torch.bfloat16),
-            )
-            with attn_o_direct_nk_context(ForwardMode.DECODE, 16):
-                candidate_result = candidate_method.apply(
-                    candidate_layer,
-                    _FakeTensor((16, 16384), torch.bfloat16),
-                )
+        mxfp8 = _layer(marked=True)
+        mxfp8.quant_method = _method()
+        mxfp8.quant_method.use_mxfp8 = True
 
-        self.assertIs(stock_result, stock_sentinel)
-        self.assertIs(candidate_result, candidate_sentinel)
-        stock.assert_called_once()
-        direct.assert_called_once()
-        self.assertIsNone(get_op_name())
+        non_block = _layer(marked=True)
+        non_block.quant_method = _method()
+        non_block.quant_method.block_quant = False
 
-    def test_unsupported_modes_and_m_are_strict_context_noops(self):
-        unsupported = (
-            (ForwardMode.EXTEND, 16),
-            (ForwardMode.DRAFT_EXTEND_V2, 32),
-            (ForwardMode.TARGET_VERIFY, 16),
-            (ForwardMode.TARGET_VERIFY, 32),
-            (ForwardMode.DECODE, 1),
-            (ForwardMode.DECODE, 64),
-        )
-        with _legacy_forward_mode(ForwardMode.MIXED, 777):
-            for mode, m in unsupported:
-                with self.subTest(mode=mode.name, m=m):
-                    before = get_attn_o_direct_nk_context()
-                    with attn_o_direct_nk_context(mode, m):
-                        self.assertIs(
-                            get_forward_mode(),
-                            ForwardMode.MIXED,
-                        )
-                        self.assertEqual(get_forward_m(), 777)
-                        self.assertIs(get_attn_o_direct_nk_context(), before)
-                    self.assertIs(get_attn_o_direct_nk_context(), before)
+        non_fp8 = _layer(marked=True)
+        non_fp8.quant_method = SimpleNamespace()
 
-            with attn_o_direct_nk_context(ForwardMode.DECODE, 32):
-                outer = get_attn_o_direct_nk_context()
-                for mode, m in unsupported:
-                    with self.subTest(nested_mode=mode.name, nested_m=m):
-                        with attn_o_direct_nk_context(mode, m):
-                            self.assertEqual(
-                                get_attn_o_direct_nk_context(),
-                                outer,
-                            )
-                            self.assertIs(
-                                get_forward_mode(),
-                                ForwardMode.MIXED,
-                            )
-                            self.assertEqual(get_forward_m(), 777)
-
-    def test_decode_context_is_phase_exact_and_legacy_is_untouched(self):
-        with _legacy_forward_mode(ForwardMode.EXTEND, 4096):
-            for m in (16, 32):
-                with (
-                    self.subTest(m=m),
-                    attn_o_direct_nk_context(ForwardMode.DECODE, m),
-                ):
-                    self.assertEqual(
-                        get_attn_o_direct_nk_context(),
-                        (ForwardMode.DECODE, m),
-                    )
-                    self.assertIs(get_forward_mode(), ForwardMode.EXTEND)
-                    self.assertEqual(get_forward_m(), 4096)
-            self.assertIsNone(get_attn_o_direct_nk_context())
-
-    def test_dispatch_shape_scale_and_bias_isolation(self):
-        method, layer = _configured_layer()
-        sentinel = object()
-        direct = Mock(return_value=object())
-        cases = (
-            ("no_task_context", nullcontext(), (16, 16384), None, None),
-            (
-                "unsupported_prefill",
-                attn_o_direct_nk_context(ForwardMode.EXTEND, 16),
-                (16, 16384),
-                None,
-                None,
-            ),
-            (
-                "unsupported_target_verify",
-                attn_o_direct_nk_context(ForwardMode.TARGET_VERIFY, 16),
-                (16, 16384),
-                None,
-                None,
-            ),
-            (
-                "unsupported_m",
-                attn_o_direct_nk_context(ForwardMode.DECODE, 64),
-                (64, 16384),
-                None,
-                None,
-            ),
-            (
-                "context_shape_mismatch",
-                attn_o_direct_nk_context(ForwardMode.DECODE, 16),
-                (32, 16384),
-                None,
-                None,
-            ),
-            (
-                "input_scale",
-                attn_o_direct_nk_context(ForwardMode.DECODE, 16),
-                (16, 16384),
-                object(),
-                None,
-            ),
-            (
-                "bias",
-                attn_o_direct_nk_context(ForwardMode.DECODE, 16),
-                (16, 16384),
-                None,
-                object(),
-            ),
-        )
-        for name, context, shape, input_scale, bias in cases:
-            with (
-                self.subTest(name=name),
-                context,
-                patch.object(
-                    fp8_module,
-                    "use_intel_amx_backend",
-                    return_value=False,
-                ),
-                patch.object(
-                    fp8_utils,
-                    "deepgemm_w8a8_block_fp8_linear_with_fallback",
-                    return_value=sentinel,
-                ) as stock,
-                patch.object(
-                    fp8_utils,
-                    "deepgemm_w8a8_block_fp8_linear_attn_o_decode_direct_nk",
-                    direct,
-                ),
-            ):
-                x = _FakeTensor(shape, torch.bfloat16)
-                apply_input = (x, input_scale) if input_scale is not None else x
-                result = method.apply(layer, apply_input, bias=bias)
-
-            self.assertIs(result, sentinel)
-            stock.assert_called_once()
-            direct.assert_not_called()
-
-    def test_incompatible_quant_method_is_not_marked_or_rewritten(self):
-        for name, method in (
-            ("non_fp8", SimpleNamespace()),
-            ("non_stock_runner", _method(lambda **kwargs: None)),
+        for name, layer in (
+            ("unmarked", unmarked),
+            ("marlin", marlin),
+            ("mxfp8", mxfp8),
+            ("non_block", non_block),
+            ("non_fp8", non_fp8),
         ):
             with self.subTest(name=name):
-                layer = _layer(enabled=None)
+                original = getattr(
+                    layer.quant_method,
+                    "w8a8_block_fp8_linear",
+                    None,
+                )
+                with fp8_module.arm_glm52_attn_o_decode_direct_nk_for_cuda_graph(
+                    _model(layer)
+                ) as armed:
+                    self.assertEqual(armed, 0)
+                    self.assertIs(
+                        getattr(
+                            layer.quant_method,
+                            "w8a8_block_fp8_linear",
+                            None,
+                        ),
+                        original,
+                    )
+                self.assertIs(
+                    getattr(
+                        layer.quant_method,
+                        "w8a8_block_fp8_linear",
+                        None,
+                    ),
+                    original,
+                )
+
+        self.assertIs(unmarked.quant_method.w8a8_block_fp8_linear, stock)
+
+    def test_incompatible_quant_methods_are_not_marked(self):
+        marlin = _method()
+        marlin.use_marlin = True
+        mxfp8 = _method()
+        mxfp8.use_mxfp8 = True
+        non_block = _method()
+        non_block.block_quant = False
+        incompatible = (
+            ("non_fp8", SimpleNamespace()),
+            ("non_stock_runner", _method(Mock())),
+            ("marlin", marlin),
+            ("mxfp8", mxfp8),
+            ("non_block", non_block),
+        )
+        for name, method in incompatible:
+            with self.subTest(name=name):
+                layer = _layer(marked=None)
                 layer.quant_method = method
                 self.assertFalse(
                     fp8_module.configure_glm52_attn_o_decode_direct_nk(layer)
                 )
-                self.assertFalse(hasattr(layer, "_glm52_attn_o_decode_direct_nk"))
+                self.assertFalse(hasattr(layer, "_glm52_attn_o_decode_direct_nk_graph"))
 
-    def test_real_mla_o_call_is_the_only_scope_site(self):
+    def test_forward_mla_has_no_task_branch(self):
         source = inspect.getsource(DeepseekMLAForwardMixin.forward_absorb_core)
-        context_pos = source.index("attn_o_direct_nk_context")
-        o_proj_pos = source.index("self.o_proj(attn_bmm_output)", context_pos)
-        self.assertGreater(o_proj_pos, context_pos)
-        self.assertNotIn(
+        self.assertEqual(source.count("self.o_proj(attn_bmm_output)"), 1)
+        for stale_branch in (
+            "_glm52_attn_o_decode_direct_nk",
             "attn_o_direct_nk_context",
-            inspect.getsource(DeepseekV2AttentionMLA.forward_core),
+            "deepgemm_w8a8_block_fp8_linear_attn_o_decode_direct_nk",
+        ):
+            self.assertNotIn(stale_branch, source)
+
+    def test_decode_runner_arms_only_inside_eligible_capture(self):
+        model = object()
+        for config_name, config in (
+            ("legacy_default", None),
+            (
+                "explicit_full",
+                SimpleNamespace(
+                    decode=SimpleNamespace(backend=Backend.FULL),
+                ),
+            ),
+        ):
+            with self.subTest(config=config_name):
+                events = []
+
+                @contextmanager
+                def model_capture_context(_events=events):
+                    _events.append("model:enter")
+                    try:
+                        yield
+                    finally:
+                        _events.append("model:exit")
+
+                @contextmanager
+                def arm_context(armed_model, _events=events):
+                    self.assertIs(armed_model, model)
+                    _events.append("arm:enter")
+                    try:
+                        yield 1
+                    finally:
+                        _events.append("arm:exit")
+
+                runner = object.__new__(DecodeCudaGraphRunner)
+                runner.model_runner = SimpleNamespace(
+                    server_args=SimpleNamespace(cuda_graph_config=config),
+                    model=model,
+                )
+                runner.capture_forward_mode = ForwardMode.DECODE
+                runner.num_tokens_per_req = 1
+                runner.backend = object.__new__(FullCudaGraphBackend)
+                runner.capture = Mock(
+                    side_effect=lambda _events=events: _events.append("capture"),
+                )
+
+                with (
+                    patch.object(
+                        envs.SGLANG_OPT_GLM52_ATTN_O_DECODE_DIRECT_NK,
+                        "get",
+                        return_value=True,
+                    ),
+                    patch.object(
+                        decode_cuda_graph_runner_module,
+                        "model_capture_mode",
+                        model_capture_context,
+                    ),
+                    patch.object(
+                        fp8_module,
+                        "arm_glm52_attn_o_decode_direct_nk_for_cuda_graph",
+                        side_effect=arm_context,
+                    ) as arm,
+                ):
+                    runner._capture_with_model_mode()
+
+                arm.assert_called_once_with(model)
+                runner.capture.assert_called_once_with()
+                self.assertEqual(
+                    events,
+                    [
+                        "model:enter",
+                        "arm:enter",
+                        "capture",
+                        "arm:exit",
+                        "model:exit",
+                    ],
+                )
+
+    def test_decode_runner_rejects_every_non_exact_capture_shape(self):
+        explicit_full = SimpleNamespace(
+            decode=SimpleNamespace(backend=Backend.FULL),
+        )
+        breakable = SimpleNamespace(
+            decode=SimpleNamespace(backend=Backend.BREAKABLE),
         )
 
-    def test_dsa_decode_and_target_verify_route_through_mla_but_only_decode_scopes(self):
-        for mode in (ForwardMode.DECODE, ForwardMode.TARGET_VERIFY):
-            with self.subTest(mode=mode.name):
-                backend = object.__new__(DeepseekSparseAttnBackend)
-                backend.enable_auto_select_prefill_impl = False
-                backend.use_mha = True
-                backend.set_dsa_prefill_impl(
-                    SimpleNamespace(forward_mode=mode),
+        class FullBackendSubclass(FullCudaGraphBackend):
+            pass
+
+        cases = (
+            (
+                "feature_off",
+                False,
+                ForwardMode.DECODE,
+                1,
+                explicit_full,
+                object.__new__(FullCudaGraphBackend),
+            ),
+            (
+                "target_verify",
+                True,
+                ForwardMode.TARGET_VERIFY,
+                1,
+                explicit_full,
+                object.__new__(FullCudaGraphBackend),
+            ),
+            (
+                "multi_token",
+                True,
+                ForwardMode.DECODE,
+                2,
+                explicit_full,
+                object.__new__(FullCudaGraphBackend),
+            ),
+            (
+                "configured_breakable",
+                True,
+                ForwardMode.DECODE,
+                1,
+                breakable,
+                object.__new__(FullCudaGraphBackend),
+            ),
+            (
+                "runtime_not_full",
+                True,
+                ForwardMode.DECODE,
+                1,
+                explicit_full,
+                object(),
+            ),
+            (
+                "runtime_full_subclass",
+                True,
+                ForwardMode.DECODE,
+                1,
+                explicit_full,
+                object.__new__(FullBackendSubclass),
+            ),
+        )
+        for name, feature, mode, tokens, config, backend in cases:
+            with self.subTest(name=name):
+                runner = object.__new__(DecodeCudaGraphRunner)
+                runner.model_runner = SimpleNamespace(
+                    server_args=SimpleNamespace(cuda_graph_config=config),
+                    model=object(),
                 )
-                self.assertFalse(backend.use_mha)
-                with attn_o_direct_nk_context(mode, 16):
-                    expected = (
-                        (ForwardMode.DECODE, 16)
-                        if mode is ForwardMode.DECODE
-                        else None
-                    )
-                    self.assertEqual(get_attn_o_direct_nk_context(), expected)
+                runner.capture_forward_mode = mode
+                runner.num_tokens_per_req = tokens
+                runner.backend = backend
+                runner.capture = Mock()
+
+                with (
+                    patch.object(
+                        envs.SGLANG_OPT_GLM52_ATTN_O_DECODE_DIRECT_NK,
+                        "get",
+                        return_value=feature,
+                    ),
+                    patch.object(
+                        decode_cuda_graph_runner_module,
+                        "model_capture_mode",
+                        return_value=nullcontext(),
+                    ),
+                    patch.object(
+                        fp8_module,
+                        "arm_glm52_attn_o_decode_direct_nk_for_cuda_graph",
+                        return_value=nullcontext(),
+                    ) as arm,
+                ):
+                    runner._capture_with_model_mode()
+
+                arm.assert_not_called()
+                runner.capture.assert_called_once_with()
+
+    def test_initial_capture_and_recapture_share_lifecycle_hook(self):
+        init_source = inspect.getsource(DecodeCudaGraphRunner.__init__)
+        self.assertIn("self._capture_with_model_mode()", init_source)
+        self.assertNotIn("self.capture()", init_source)
+
+        runner = object.__new__(DecodeCudaGraphRunner)
+        runner.capture_hidden_mode = CaptureHiddenMode.NULL
+        runner.enable_return_hidden_states = False
+        runner.backend = SimpleNamespace(cleanup=Mock())
+        runner._capture_with_model_mode = Mock()
+        forward_batch = SimpleNamespace(
+            capture_hidden_mode=CaptureHiddenMode.FULL,
+            spec_info=None,
+        )
+
+        runner.recapture_if_needed(forward_batch)
+
+        self.assertEqual(runner.capture_hidden_mode, CaptureHiddenMode.FULL)
+        runner.backend.cleanup.assert_called_once_with()
+        runner._capture_with_model_mode.assert_called_once_with(
+            enter_model_capture_mode=False
+        )
+
+        runner.recapture_if_needed(forward_batch)
+        runner.backend.cleanup.assert_called_once_with()
+        runner._capture_with_model_mode.assert_called_once_with(
+            enter_model_capture_mode=False
+        )
+
+    def test_recapture_preserves_stock_absence_of_model_capture_mode(self):
+        runner = object.__new__(DecodeCudaGraphRunner)
+        runner.model_runner = SimpleNamespace(
+            server_args=SimpleNamespace(cuda_graph_config=None),
+            model=object(),
+        )
+        runner.capture_forward_mode = ForwardMode.DECODE
+        runner.num_tokens_per_req = 1
+        runner.backend = object.__new__(FullCudaGraphBackend)
+        runner.capture = Mock()
+
+        with (
+            patch.object(
+                envs.SGLANG_OPT_GLM52_ATTN_O_DECODE_DIRECT_NK,
+                "get",
+                return_value=False,
+            ),
+            patch.object(
+                decode_cuda_graph_runner_module,
+                "model_capture_mode",
+            ) as model_mode,
+        ):
+            runner._capture_with_model_mode(enter_model_capture_mode=False)
+
+        model_mode.assert_not_called()
+        runner.capture.assert_called_once_with()
+
+    def test_feature_on_recapture_arms_without_entering_model_capture_mode(self):
+        model = object()
+        events = []
+
+        @contextmanager
+        def arm_context(armed_model):
+            self.assertIs(armed_model, model)
+            events.append("arm:enter")
+            try:
+                yield 1
+            finally:
+                events.append("arm:exit")
+
+        runner = object.__new__(DecodeCudaGraphRunner)
+        runner.model_runner = SimpleNamespace(
+            server_args=SimpleNamespace(cuda_graph_config=None),
+            model=model,
+        )
+        runner.capture_forward_mode = ForwardMode.DECODE
+        runner.num_tokens_per_req = 1
+        runner.backend = object.__new__(FullCudaGraphBackend)
+        runner.capture = Mock(side_effect=lambda: events.append("capture"))
+
+        with (
+            patch.object(
+                envs.SGLANG_OPT_GLM52_ATTN_O_DECODE_DIRECT_NK,
+                "get",
+                return_value=True,
+            ),
+            patch.object(
+                decode_cuda_graph_runner_module,
+                "model_capture_mode",
+            ) as model_mode,
+            patch.object(
+                fp8_module,
+                "arm_glm52_attn_o_decode_direct_nk_for_cuda_graph",
+                side_effect=arm_context,
+            ) as arm,
+        ):
+            runner._capture_with_model_mode(enter_model_capture_mode=False)
+
+        model_mode.assert_not_called()
+        arm.assert_called_once_with(model)
+        runner.capture.assert_called_once_with()
+        self.assertEqual(events, ["arm:enter", "capture", "arm:exit"])
 
 
 class TestPackedAbi(unittest.TestCase):

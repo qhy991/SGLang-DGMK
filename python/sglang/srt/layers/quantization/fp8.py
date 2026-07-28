@@ -5,6 +5,11 @@
 from __future__ import annotations
 
 import logging
+import sys
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 import torch
@@ -57,7 +62,7 @@ from sglang.srt.layers.quantization.fp8_utils import (
     apply_fp8_linear,
     can_auto_enable_marlin_fp8,
     cutlass_fp8_supported,
-    deepgemm_w8a8_block_fp8_linear_attn_o_decode_direct_nk_dispatch,
+    deepgemm_w8a8_block_fp8_linear_attn_o_decode_direct_nk,
     deepgemm_w8a8_block_fp8_linear_with_fallback,
     dispatch_w8a8_block_fp8_linear,
     dispatch_w8a8_mxfp8_linear,
@@ -651,8 +656,6 @@ class Fp8LinearMethod(LinearMethodBase):
             use_deepgemm_runner = (
                 self.w8a8_block_fp8_linear
                 is deepgemm_w8a8_block_fp8_linear_with_fallback
-                or self.w8a8_block_fp8_linear
-                is deepgemm_w8a8_block_fp8_linear_attn_o_decode_direct_nk_dispatch
             )
             requant_block_scale_ue8m0_for_deepgemm(
                 layer.weight,
@@ -1002,8 +1005,103 @@ class Fp8LinearMethod(LinearMethodBase):
         )
 
 
+_glm52_attn_o_decode_direct_nk_armed_methods: ContextVar[frozenset[int]] = (
+    ContextVar(
+        "glm52_attn_o_decode_direct_nk_armed_methods",
+        default=frozenset(),
+    )
+)
+_glm52_attn_o_decode_direct_nk_arm_lock = threading.RLock()
+
+
+@contextmanager
+def arm_glm52_attn_o_decode_direct_nk_for_cuda_graph(
+    model: torch.nn.Module,
+) -> Iterator[int]:
+    """Temporarily arm marked O projections while full decode graphs are built.
+
+    The permanent runner remains the stock callable. This context is deliberately
+    entered outside model forward and torch.compile, and restores every exact
+    callable in reverse order even when graph warmup or capture raises.
+    """
+    with _glm52_attn_o_decode_direct_nk_arm_lock:
+        inherited = _glm52_attn_o_decode_direct_nk_armed_methods.get()
+        newly_armed: list[tuple[Fp8LinearMethod, object]] = []
+        token = None
+        try:
+            seen_methods: set[int] = set()
+            for layer in model.modules():
+                if not getattr(
+                    layer,
+                    "_glm52_attn_o_decode_direct_nk_graph",
+                    False,
+                ):
+                    continue
+
+                method = getattr(layer, "quant_method", None)
+                if not (
+                    isinstance(method, Fp8LinearMethod)
+                    and method.block_quant
+                    and not method.use_marlin
+                    and not method.use_mxfp8
+                ):
+                    continue
+
+                method_id = id(method)
+                if method_id in seen_methods:
+                    continue
+                seen_methods.add(method_id)
+
+                runner = method.w8a8_block_fp8_linear
+                if method_id in inherited:
+                    if (
+                        runner
+                        is not deepgemm_w8a8_block_fp8_linear_attn_o_decode_direct_nk
+                    ):
+                        raise RuntimeError(
+                            "Nested GLM-5.2 CUDA-Graph arming lost candidate identity"
+                        )
+                    continue
+                if runner is not deepgemm_w8a8_block_fp8_linear_with_fallback:
+                    raise RuntimeError(
+                        "GLM-5.2 CUDA-Graph arming found a marked method "
+                        "without the exact stock runner"
+                    )
+
+                method.w8a8_block_fp8_linear = (
+                    deepgemm_w8a8_block_fp8_linear_attn_o_decode_direct_nk
+                )
+                newly_armed.append((method, runner))
+
+            token = _glm52_attn_o_decode_direct_nk_armed_methods.set(
+                inherited.union(id(method) for method, _ in newly_armed)
+            )
+            yield len(newly_armed)
+        finally:
+            unexpected_runner = False
+            for method, original_runner in reversed(newly_armed):
+                if (
+                    method.w8a8_block_fp8_linear
+                    is not deepgemm_w8a8_block_fp8_linear_attn_o_decode_direct_nk
+                ):
+                    unexpected_runner = True
+                method.w8a8_block_fp8_linear = original_runner
+            if token is not None:
+                _glm52_attn_o_decode_direct_nk_armed_methods.reset(token)
+            if unexpected_runner:
+                active_error = sys.exc_info()[1]
+                message = (
+                    "GLM-5.2 CUDA-Graph arming observed an unexpected runner "
+                    "mutation; the exact stock runner was restored"
+                )
+                if active_error is None:
+                    raise RuntimeError(message)
+                if hasattr(active_error, "add_note"):
+                    active_error.add_note(message)
+
+
 def configure_glm52_attn_o_decode_direct_nk(layer: torch.nn.Module) -> bool:
-    """Install the narrow dispatcher on one compatible attention O module."""
+    """Mark one compatible attention O module for graph-capture specialization."""
     method = getattr(layer, "quant_method", None)
     if not (
         isinstance(method, Fp8LinearMethod)
@@ -1014,10 +1112,7 @@ def configure_glm52_attn_o_decode_direct_nk(layer: torch.nn.Module) -> bool:
     ):
         return False
 
-    method.w8a8_block_fp8_linear = (
-        deepgemm_w8a8_block_fp8_linear_attn_o_decode_direct_nk_dispatch
-    )
-    layer._glm52_attn_o_decode_direct_nk = True
+    layer._glm52_attn_o_decode_direct_nk_graph = True
     return True
 
 

@@ -985,18 +985,7 @@ class DeepseekMLAForwardMixin:
             attn_bmm_output = apply_kv_b_lora_v_correction(
                 self, attn_output, attn_bmm_output
             )
-        if getattr(self.o_proj, "_glm52_attn_o_decode_direct_nk", False):
-            from sglang.srt.layers.glm52_opt.context import (
-                attn_o_direct_nk_context,
-            )
-
-            with attn_o_direct_nk_context(
-                forward_batch.forward_mode,
-                int(attn_bmm_output.shape[0]),
-            ):
-                output, _ = self.o_proj(attn_bmm_output)
-        else:
-            output, _ = self.o_proj(attn_bmm_output)
+        output, _ = self.o_proj(attn_bmm_output)
 
         if self.next_skip_topk is None:
             return output
