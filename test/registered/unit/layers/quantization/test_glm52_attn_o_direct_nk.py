@@ -32,6 +32,9 @@ from sglang.srt.layers.quantization import fp8 as fp8_module
 from sglang.srt.layers.quantization import fp8_utils
 from sglang.srt.model_executor.forward_batch_info import ForwardMode
 from sglang.srt.models import deepseek_v2 as deepseek_v2_module
+from sglang.srt.models.deepseek_common.attention_forward_methods import (
+    forward_mla as forward_mla_module,
+)
 from sglang.srt.models.deepseek_common.attention_forward_methods.forward_mla import (
     DeepseekMLAForwardMixin,
 )
@@ -779,6 +782,108 @@ class TestApplyRouting(unittest.TestCase):
             "attn_o_direct_nk_context",
             inspect.getsource(DeepseekV2AttentionMLA.forward_core),
         )
+
+    def test_real_mla_o_call_scopes_and_restores_task_context(self):
+        class ObservedOProj:
+            _glm52_attn_o_decode_direct_nk = True
+
+            def __init__(self, test_case, expected):
+                self.test_case = test_case
+                self.expected = expected
+                self.calls = 0
+
+            def __call__(self, value):
+                self.calls += 1
+                self.assertions(value)
+                return value, None
+
+            def assertions(self, value):
+                self.test_case.assertEqual(
+                    get_attn_o_direct_nk_context(),
+                    self.expected,
+                )
+                self.test_case.assertIs(get_forward_mode(), ForwardMode.EXTEND)
+                self.test_case.assertEqual(get_forward_m(), 1024)
+                self.test_case.assertEqual(value.shape[1], 16384)
+
+        cases = (
+            (ForwardMode.DECODE, 16, (ForwardMode.DECODE, 16)),
+            (ForwardMode.DECODE, 32, (ForwardMode.DECODE, 32)),
+            (ForwardMode.TARGET_VERIFY, 16, None),
+            (ForwardMode.EXTEND, 16, None),
+            (ForwardMode.DECODE, 64, None),
+        )
+        for mode, m, expected in cases:
+            with self.subTest(mode=mode.name, m=m):
+                module = SimpleNamespace(
+                    current_attention_backend=object(),
+                    kv_lora_rank=2,
+                    num_local_heads=1,
+                    v_head_dim=16384,
+                    use_deep_gemm_bmm=False,
+                    w_vc=torch.ones((1, 2, 16384), dtype=torch.bfloat16),
+                    next_skip_topk=None,
+                )
+                module.attn_mqa = lambda *args, _m=m, **kwargs: torch.ones(
+                    (_m, 1, 2),
+                    dtype=torch.bfloat16,
+                )
+                module.o_proj = ObservedOProj(self, expected)
+                forward_batch = SimpleNamespace(forward_mode=mode)
+                q_nope = torch.ones((m, 1, 2), dtype=torch.bfloat16)
+                q_pe = torch.ones((m, 1, 1), dtype=torch.bfloat16)
+                k_nope = torch.ones((m, 1, 2), dtype=torch.bfloat16)
+                k_pe = torch.ones((m, 1, 1), dtype=torch.bfloat16)
+
+                with (
+                    patch.object(
+                        forward_mla_module,
+                        "get_parallel",
+                        return_value=SimpleNamespace(dcp_enabled=False),
+                    ),
+                    patch.object(
+                        forward_mla_module,
+                        "_SGLANG_EXPERIMENTAL_LORA_OPTI",
+                        False,
+                    ),
+                    patch.object(
+                        forward_mla_module,
+                        "is_kv_b_lora_active",
+                        return_value=False,
+                    ),
+                    patch.object(
+                        forward_mla_module,
+                        "is_in_tc_piecewise_cuda_graph",
+                        return_value=False,
+                    ),
+                    patch.object(forward_mla_module, "_is_hip", False),
+                    patch.object(forward_mla_module, "_is_musa", False),
+                    patch.object(
+                        forward_mla_module,
+                        "_use_aiter_gfx95",
+                        False,
+                    ),
+                    _legacy_forward_mode(ForwardMode.EXTEND, 1024),
+                ):
+                    output = DeepseekMLAForwardMixin.forward_absorb_core(
+                        module,
+                        q_pe,
+                        k_pe,
+                        q_nope,
+                        k_nope,
+                        forward_batch,
+                        zero_allocator=None,
+                        positions=None,
+                        topk_indices=None,
+                        llama_4_scaling=None,
+                    )
+                    self.assertIsNone(get_attn_o_direct_nk_context())
+                    self.assertIs(get_forward_mode(), ForwardMode.EXTEND)
+                    self.assertEqual(get_forward_m(), 1024)
+
+                self.assertEqual(module.o_proj.calls, 1)
+                self.assertEqual(tuple(output.shape), (m, 16384))
+                self.assertIsNone(get_attn_o_direct_nk_context())
 
     def test_dsa_decode_and_target_verify_route_through_mla_but_only_decode_scopes(self):
         for mode in (ForwardMode.DECODE, ForwardMode.TARGET_VERIFY):
