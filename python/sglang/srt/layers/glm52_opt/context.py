@@ -14,6 +14,49 @@ _forward_mode: ContextVar[Optional["ForwardMode"]] = ContextVar(
     "glm52_forward_mode", default=None
 )
 _forward_m: ContextVar[Optional[int]] = ContextVar("glm52_forward_m", default=None)
+_fused_qkv_a_direct_nk_context: ContextVar[Optional[tuple["ForwardMode", int]]] = (
+    ContextVar(
+        "glm52_fused_qkv_a_direct_nk_context",
+        default=None,
+    )
+)
+
+
+class _FusedQkvADirectNkNoopContext:
+    """Stateless strict no-op for unsupported phases and shapes."""
+
+    __slots__ = ()
+
+    def __enter__(self) -> None:
+        return None
+
+    def __exit__(self, *_exc_info: object) -> bool:
+        return False
+
+
+class _FusedQkvADirectNkActiveContext:
+    """Low-overhead context private to the one marked projection layer."""
+
+    __slots__ = ("_token", "_value")
+
+    def __init__(self, mode: "ForwardMode", m: int) -> None:
+        self._value = (mode, m)
+        self._token = None
+
+    def __enter__(self) -> None:
+        self._token = _fused_qkv_a_direct_nk_context.set(self._value)
+        return None
+
+    def __exit__(self, *_exc_info: object) -> bool:
+        token = self._token
+        if token is None:
+            raise RuntimeError("fused-QKV-A direct-N/K context was not entered")
+        _fused_qkv_a_direct_nk_context.reset(token)
+        self._token = None
+        return False
+
+
+_FUSED_QKV_A_DIRECT_NK_NOOP_CONTEXT = _FusedQkvADirectNkNoopContext()
 
 
 def get_op_name() -> Optional[str]:
@@ -32,6 +75,27 @@ def get_forward_m() -> Optional[int]:
 def set_forward_mode(mode: Optional["ForwardMode"], m: Optional[int] = None) -> None:
     _forward_mode.set(mode)
     _forward_m.set(None if m is None else int(m))
+
+
+def get_fused_qkv_a_direct_nk_context() -> Optional[tuple["ForwardMode", int]]:
+    """Return task-private forward metadata without touching legacy dispatch."""
+    return _fused_qkv_a_direct_nk_context.get()
+
+
+def fused_qkv_a_direct_nk_context(
+    mode: Optional["ForwardMode"], m: Optional[int] = None
+) -> _FusedQkvADirectNkNoopContext | _FusedQkvADirectNkActiveContext:
+    """Publish only exact non-speculative decode buckets."""
+    if (
+        mode is None
+        or not isinstance(m, int)
+        or isinstance(m, bool)
+        or m not in (16, 32)
+        or not callable(getattr(mode, "is_decode", None))
+        or not mode.is_decode()
+    ):
+        return _FUSED_QKV_A_DIRECT_NK_NOOP_CONTEXT
+    return _FusedQkvADirectNkActiveContext(mode, m)
 
 
 @contextmanager

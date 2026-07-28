@@ -113,7 +113,10 @@ from sglang.srt.layers.moe.utils import (
     is_tbo_enabled,
 )
 from sglang.srt.layers.quantization.base_config import QuantizationConfig
-from sglang.srt.layers.quantization.fp8 import Fp8Config
+from sglang.srt.layers.quantization.fp8 import (
+    Fp8Config,
+    configure_glm52_fused_qkv_a_decode_direct_nk,
+)
 from sglang.srt.layers.quantization.fp8_utils import (
     materialize_bpreshuffle_fp8_scale,
 )
@@ -1542,6 +1545,39 @@ class DeepseekV2MoE(nn.Module):
         state.hidden_states_mlp_output = final_hidden_states
 
 
+def _is_glm52_dsa_target_fused_qkv_a(
+    config: PretrainedConfig,
+    *,
+    hidden_size: int,
+    q_lora_rank: int,
+    kv_lora_rank: int,
+    qk_rope_head_dim: int,
+    use_dsa: bool,
+    is_nextn: bool,
+    attn_tp_size: int,
+    projection_input_size: int,
+    projection_output_size: int,
+) -> bool:
+    """Identify only GLM-5.2's replicated fused-QKV-A projection."""
+    architectures = tuple(getattr(config, "architectures", ()) or ())
+    return (
+        architectures == ("GlmMoeDsaForCausalLM",)
+        and getattr(config, "model_type", None) == "glm_moe_dsa"
+        and getattr(config, "head_dim", None) == 192
+        and getattr(config, "max_position_embeddings", None) == 1048576
+        and getattr(config, "index_share_for_mtp_iteration", None) is True
+        and use_dsa
+        and not is_nextn
+        and hidden_size == 6144
+        and q_lora_rank == 2048
+        and kv_lora_rank == 512
+        and qk_rope_head_dim == 64
+        and attn_tp_size == 1
+        and projection_input_size == 6144
+        and projection_output_size == 2624
+    )
+
+
 class DeepseekV2AttentionMLA(
     nn.Module,
     DeepseekMHAForwardMixin,
@@ -1618,6 +1654,28 @@ class DeepseekV2AttentionMLA(
                 prefix=add_prefix("fused_qkv_a_proj_with_mqa", prefix),
             )
             self.q_a_layernorm = RMSNorm(self.q_lora_rank, eps=config.rms_norm_eps)
+            if (
+                envs.SGLANG_OPT_GLM52_FUSED_QKV_A_DECODE_DIRECT_NK.get()
+                and _is_glm52_dsa_target_fused_qkv_a(
+                    config,
+                    hidden_size=self.hidden_size,
+                    q_lora_rank=self.q_lora_rank,
+                    kv_lora_rank=self.kv_lora_rank,
+                    qk_rope_head_dim=self.qk_rope_head_dim,
+                    use_dsa=self.use_dsa,
+                    is_nextn=self.is_nextn,
+                    attn_tp_size=attn_tp_size,
+                    projection_input_size=(
+                        self.fused_qkv_a_proj_with_mqa.input_size_per_partition
+                    ),
+                    projection_output_size=(
+                        self.fused_qkv_a_proj_with_mqa.output_size_per_partition
+                    ),
+                )
+            ):
+                configure_glm52_fused_qkv_a_decode_direct_nk(
+                    self.fused_qkv_a_proj_with_mqa
+                )
             self.q_b_proj = ColumnParallelLinear(
                 q_lora_rank,
                 self.num_heads * self.qk_head_dim,
@@ -2018,7 +2076,27 @@ class DeepseekV2AttentionMLA(
                 backend=self.fused_a_gemm_backend,
             )
         else:
-            qkv_latent = self.fused_qkv_a_proj_with_mqa(hidden_states)[0]
+            marked_direct_nk = getattr(
+                self.fused_qkv_a_proj_with_mqa,
+                "_glm52_fused_qkv_a_decode_direct_nk",
+                False,
+            )
+            if (
+                marked_direct_nk
+                and not lora_active
+                and isinstance(hidden_states, torch.Tensor)
+            ):
+                from sglang.srt.layers.glm52_opt.context import (
+                    fused_qkv_a_direct_nk_context,
+                )
+
+                with fused_qkv_a_direct_nk_context(
+                    forward_batch.forward_mode,
+                    int(hidden_states.shape[0]),
+                ):
+                    qkv_latent = self.fused_qkv_a_proj_with_mqa(hidden_states)[0]
+            else:
+                qkv_latent = self.fused_qkv_a_proj_with_mqa(hidden_states)[0]
         return qkv_latent
 
     def rebuild_cp_kv_cache(self, latent_cache, forward_batch, k_nope, k_pe):

@@ -972,6 +972,10 @@ class Envs:
     SGLANG_MINIMAX_M3_FUSED_MOE_COMBINE = EnvBool(False)
 
     # GEMM / kernel fusion
+    # GLM-5.2 fused-QKV-A decode projection: opt into the layer-private
+    # fixed-N/K DeepGEMM specialization for exact packed UE8M0 M16/M32.
+    # Default remains off until checkpoint-backed TP8 acceptance.
+    SGLANG_OPT_GLM52_FUSED_QKV_A_DECODE_DIRECT_NK = EnvBool(False)
     SGLANG_OPT_FP8_WO_A_GEMM = EnvBool(True)
     SGLANG_OPT_BF16_FP32_GEMM_ALGO = EnvStr("cublas")
     SGLANG_OPT_USE_JIT_EP_ACTIVATION = EnvBool(True)
