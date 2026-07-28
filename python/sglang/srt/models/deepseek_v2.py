@@ -526,9 +526,9 @@ class MoEGate(nn.Module):
                 logits = F.linear(hidden_states, self.weight, None)
             else:
                 # cuBLAS bf16 x bf16 -> fp32 GEMM (torch.mm's out_dtype kwarg is CUDA-only)
-                from sglang.jit_kernel.dsv4 import linear_bf16_fp32
+                from sglang.jit_kernel.dsv4.gemm import router_linear_bf16_fp32
 
-                logits = linear_bf16_fp32(hidden_states, self.weight)
+                logits = router_linear_bf16_fp32(hidden_states, self.weight)
 
         return logits
 
