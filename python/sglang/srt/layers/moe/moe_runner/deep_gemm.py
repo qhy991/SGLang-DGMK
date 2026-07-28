@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, List, Optional, Tuple
 
 import einops
 import torch
@@ -142,10 +142,18 @@ class DeepGemmRunnerCore(MoeRunnerCore):
         assert self.config.is_gated
         self.swiglu_limit = self.config.swiglu_limit
         self.use_swizzle = False
+        # The default runner retains the authoritative stock callable and ABI.
+        # An explicit W2/BM16 profile may replace this once, after weights load.
+        self._masked_down_gemm: Callable[..., Any] = (
+            deep_gemm_wrapper.grouped_gemm_nt_f8f8bf16_masked
+        )
         if envs.SGLANG_OPT_FIX_MEGA_MOE_MEMORY.get():
             assert envs.SGLANG_OPT_SWIGLU_CLAMP_FUSION.get()
             assert envs.SGLANG_OPT_USE_JIT_EP_ACTIVATION.get()
             self.use_swizzle = True
+
+    def set_masked_down_gemm(self, gemm: Callable[..., Any]) -> None:
+        self._masked_down_gemm = gemm
 
     def run(
         self,
@@ -575,7 +583,7 @@ class DeepGemmRunnerCore(MoeRunnerCore):
         from sglang.srt.layers.glm52_opt.context import op_context
 
         with op_context("moe_down_proj"):
-            deep_gemm_return_value = deep_gemm_wrapper.grouped_gemm_nt_f8f8bf16_masked(
+            deep_gemm_return_value = self._masked_down_gemm(
                 (down_input, down_input_scale),
                 (w2_weight, w2_scale),
                 down_output,

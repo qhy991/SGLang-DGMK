@@ -108,6 +108,15 @@ try:
 except ImportError:
     KTRANSFORMERS_AVAILABLE = False
 
+@contextlib.contextmanager
+def _stacked_capture_contexts(primary, task_private):
+    """Enter both contexts atomically with cleanup if the second enter fails."""
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(primary)
+        stack.enter_context(task_private)
+        yield
+
+
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
@@ -917,7 +926,19 @@ class DecodeCudaGraphRunner(BaseCudaGraphRunner):
         # All setup hooks below read get_attn_backend() (TboForwardBatchPreparer,
         # DeepEP adapter, …) so they must run inside the same ForwardContext
         # that wraps the warmup/capture forward.
-        with forward_context(ForwardContext(attn_backend=attn_backend)):
+        capture_context = forward_context(
+            ForwardContext(attn_backend=attn_backend)
+        )
+        w2_context_factory = getattr(
+            self.model_runner, "_w2_bm16_forward_context", None
+        )
+        if w2_context_factory is not None:
+            capture_context = _stacked_capture_contexts(
+                capture_context,
+                w2_context_factory(forward_batch.forward_mode, num_tokens)
+            )
+
+        with capture_context:
             self.tbo_plugin.capture_one_batch_size(forward_batch, num_tokens=num_tokens)
 
             if forward_batch.lora_ids is not None:

@@ -25,6 +25,7 @@ _GLM52_ENV_KEYS = frozenset(
         "SGLANG_GLM52_ARCHIVE",
         "SGLANG_GLM52_DEEPGEMM_OVERLAY",
         "SGLANG_GLM52_DEEPGEMM_MANIFEST",
+        "SGLANG_GLM52_W2_BM16_MANIFEST",
         "SGLANG_GLM52_ENV_FILE",
         "SGLANG_GLM52_NSYS_GATE",
         "SGLANG_GLM52_NSYS_TRIGGER",
@@ -136,6 +137,15 @@ def profile_name() -> str:
 # serving_safe.  See glm52_opt/history/e2e_candidates_20260723/INDEX.md.
 _E2E_DEFAULT_OPS = frozenset({"o_proj", "moe_gate_proj", "moe_down_proj"})
 _E2E_CONTIG_PSUM_OPS = frozenset({"moe_gate_proj", "moe_down_proj"})
+W2_BM16_PROFILE = "moe_w2_bm16"
+
+
+def w2_bm16_enabled() -> bool:
+    """Whether the exact source-scoped W2/BM16 production trial is armed."""
+    if not is_enabled() or profile_name() != W2_BM16_PROFILE:
+        return False
+    allow = opt_ops_allowlist()
+    return allow is None or "moe_down_proj" in allow
 
 
 def opt_ops_allowlist() -> frozenset[str] | None:

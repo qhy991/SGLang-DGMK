@@ -2022,6 +2022,25 @@ class Fp8MoEMethod(FusedMoEMethodBase):
 
                 align_fp8_moe_weights_for_flashinfer_trtllm(layer)
 
+        from sglang.srt.layers import deep_gemm_wrapper
+
+        if deep_gemm_wrapper.w2_bm16_profile_requested():
+            runner = getattr(self, "runner", None)
+            if (
+                runner is not None
+                and runner.runner_backend.is_deep_gemm()
+                and runner.runner_core is not None
+            ):
+                deep_gemm_wrapper.configure_w2_bm16_masked_down_gemm(
+                    runner.runner_core,
+                    w2_weight=layer.w2_weight,
+                    w2_scale=getattr(layer, "w2_weight_scale_inv", None),
+                    block_shape=self.weight_block_size,
+                    deep_gemm_backend=True,
+                    is_fp4_experts=self.is_fp4_expert,
+                    use_mxfp8=self.use_mxfp8,
+                )
+
         if hasattr(layer, "dispatcher"):
             layer.dispatcher.set_quant_config({"weight_dtype": layer.w13_weight.dtype})
 
