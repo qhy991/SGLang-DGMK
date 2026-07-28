@@ -5,6 +5,14 @@
   "candidate_build_id": "glm52-task26-em8-bm16-stage11-v4:sgl-deep-gemm-0.1.4.post1@edcf77b276965de8f03cdc47c23f01b08bf7c7ab:sm100:e32:m1024:k2048:n6144:expected-m8:bm16:stages11:pdl1:sms148:packed-ue8m0:no-recipe:no-overlap",
   "core_source_hashes_sha256": "e2b904139f5891ca7eb11a66f221e902a35b2d3bce536478829dcd8c7b374bcb",
   "distribution": "sgl-deep-gemm",
+  "manifest_schema_version": 6,
+  "package_tree_contract": {
+    "hardlink_policy": "forbid",
+    "mode_policy": "bind-posix-permission-bits",
+    "schema_version": 1,
+    "special_file_policy": "forbid",
+    "symlink_policy": "forbid"
+  },
   "pipeline_hypothesis": {
     "candidate_num_stages": 11,
     "candidate_smem_bytes": 211756,
@@ -16,6 +24,7 @@
     "two_ctas_per_sm_enabled": false
   },
   "source_patch_sha256": "9b227e5cf597c3f620245f82a66c7e22c7c483be91d54c711e68027947a005c8",
+  "provenance_schema_version": 5,
   "submodules": {
     "third-party/cutlass": "f3fde58372d33e9a5650ba7b80fc48b3b49d40c8",
     "third-party/fmt": "553ec11ec06fbe0beebfbb45f9dc3c9eabd83d28"

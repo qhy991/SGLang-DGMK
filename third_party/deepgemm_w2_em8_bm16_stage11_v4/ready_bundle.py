@@ -15,6 +15,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 import tempfile
@@ -48,6 +49,9 @@ SOURCE_PATCH_SHA256 = "9b227e5cf597c3f620245f82a66c7e22c7c483be91d54c711e6802794
 CORE_HASHES_SHA256 = "e2b904139f5891ca7eb11a66f221e902a35b2d3bce536478829dcd8c7b374bcb"
 HEX64 = re.compile(r"[0-9a-f]{64}")
 GIT_OID = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})")
+MANIFEST_SCHEMA_VERSION = 6
+PROVENANCE_SCHEMA_VERSION = 5
+PACKAGE_TREE_SCHEMA_VERSION = 1
 
 
 class ReadinessError(RuntimeError):
@@ -73,6 +77,90 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _package_tree_record(package: Path, *, role: str) -> dict[str, Any]:
+    """Recompute the complete staged package tree without following links."""
+    try:
+        root_stat = package.lstat()
+    except FileNotFoundError:
+        raise ReadinessError(f"{role} package is missing: {package}") from None
+    _require(
+        not stat.S_ISLNK(root_stat.st_mode) and stat.S_ISDIR(root_stat.st_mode),
+        f"{role} package root must be a real directory: {package}",
+    )
+    entries: list[dict[str, Any]] = [
+        {
+            "path": ".",
+            "type": "directory",
+            "mode": f"{stat.S_IMODE(root_stat.st_mode):04o}",
+        }
+    ]
+
+    def visit(directory: Path, relative: Path) -> None:
+        try:
+            with os.scandir(directory) as stream:
+                children = sorted(stream, key=lambda entry: entry.name)
+        except OSError as exc:
+            raise ReadinessError(
+                f"{role} package directory is unreadable: {directory}: {exc}"
+            ) from exc
+        for child in children:
+            child_relative = relative / child.name
+            child_path = directory / child.name
+            child_stat = child.stat(follow_symlinks=False)
+            mode = f"{stat.S_IMODE(child_stat.st_mode):04o}"
+            relative_text = child_relative.as_posix()
+            _require(
+                not stat.S_ISLNK(child_stat.st_mode),
+                f"{role} package symlinks are forbidden: {relative_text}",
+            )
+            if stat.S_ISDIR(child_stat.st_mode):
+                entries.append(
+                    {
+                        "path": relative_text,
+                        "type": "directory",
+                        "mode": mode,
+                    }
+                )
+                visit(child_path, child_relative)
+                continue
+            _require(
+                stat.S_ISREG(child_stat.st_mode),
+                f"{role} package special files are forbidden: {relative_text}",
+            )
+            _require(
+                child_stat.st_nlink == 1,
+                f"{role} package hardlinks are forbidden: {relative_text}",
+            )
+            entries.append(
+                {
+                    "path": relative_text,
+                    "type": "file",
+                    "mode": mode,
+                    "bytes": child_stat.st_size,
+                    "sha256": _sha256(child_path),
+                }
+            )
+
+    visit(package, Path())
+    files = [entry for entry in entries if entry["type"] == "file"]
+    directories = [entry for entry in entries if entry["type"] == "directory"]
+    _require(bool(files), f"{role} package tree is empty: {package}")
+    payload = {
+        "schema_version": PACKAGE_TREE_SCHEMA_VERSION,
+        "path_encoding": "utf-8-json-posix-relative-v1",
+        "symlink_policy": "forbid",
+        "hardlink_policy": "forbid",
+        "special_file_policy": "forbid",
+        "mode_policy": "bind-posix-permission-bits",
+        "entry_count": len(entries),
+        "file_count": len(files),
+        "directory_count": len(directories),
+        "total_file_bytes": sum(int(entry["bytes"]) for entry in files),
+        "entries": entries,
+    }
+    return {**payload, "tree_sha256": _canonical_sha256(payload)}
 
 
 def _json(path: Path, label: str) -> dict[str, Any]:
@@ -139,6 +227,21 @@ def _package_contract(
 ) -> dict[str, Any]:
     record = manifest.get(role)
     _require(isinstance(record, dict), f"manifest.{role} is missing")
+    _require(
+        set(record)
+        == {
+            "package_relpath",
+            "import_name",
+            "build_id",
+            "version_literal",
+            "version_sha256",
+            "init_sha256",
+            "extension_sha256",
+            "extension_bytes",
+            "package_tree",
+        },
+        f"manifest.{role} has an unexpected package field set",
+    )
     package = _safe_bundle_member(
         bundle_dir,
         record.get("package_relpath"),
@@ -161,6 +264,7 @@ def _package_contract(
         "init_sha256": _sha256(files["init"]),
         "extension_sha256": _sha256(files["extension"]),
         "extension_bytes": files["extension"].stat().st_size,
+        "package_tree": _package_tree_record(package, role=role),
     }
     for field, value in observed.items():
         _require(
@@ -309,13 +413,19 @@ def bundle_content_contract(
     replay = _json(replay_path, "source replay record")
     source_patch, build_tool_patch, core_hashes = _source_inputs(sglang_root)
 
-    _require(manifest.get("schema_version") == 5, "manifest schema must be v5")
+    _require(
+        manifest.get("schema_version") == MANIFEST_SCHEMA_VERSION,
+        f"manifest schema must be v{MANIFEST_SCHEMA_VERSION}",
+    )
     _require(manifest.get("variant") == VARIANT, "manifest variant is not v4")
     _require(
         manifest.get("build_key") == expected_build_key(sglang_root),
         "manifest build key is not derived from the v4 source inputs",
     )
-    _require(provenance.get("schema_version") == 4, "provenance schema must be v4")
+    _require(
+        provenance.get("schema_version") == PROVENANCE_SCHEMA_VERSION,
+        f"provenance schema must be v{PROVENANCE_SCHEMA_VERSION}",
+    )
     _require(provenance.get("variant") == VARIANT, "provenance variant is not v4")
     _require(
         provenance.get("build_key") == manifest.get("build_key"),
@@ -571,6 +681,12 @@ def verify_ready(
         "build_provenance_sha256": expected["bundle_content"][
             "build_provenance_sha256"
         ],
+        "stock_package_tree_sha256": expected["bundle_content"]["stock"][
+            "package_tree"
+        ]["tree_sha256"],
+        "candidate_package_tree_sha256": expected["bundle_content"]["candidate"][
+            "package_tree"
+        ]["tree_sha256"],
         "stock_site": str((ready_path.parent / "stock/site").resolve()),
         "candidate_package": str(
             (

@@ -45,9 +45,13 @@ export TORCH_EXTENSIONS_DIR=/home/qinhaiyan/glm52-v2-goal-runs/cache/26-moe_w2_d
 third_party/deepgemm_w2_em8_bm16_stage11_v4/build_overlay.sh
 ```
 
-The build creates stock and candidate packages, an exact manifest, a fresh
-source replay, and tracked `build_provenance.json`. It moves the external
-bundle to:
+The build removes mutable bytecode caches, makes both staged package trees
+read-only, and creates an exact manifest, a fresh source replay, and tracked
+`build_provenance.json`. Manifest schema v6 and provenance schema v5 bind every
+regular package file and directory by relative path and permission mode, every
+file by byte count and SHA-256, and forbid symlinks, hardlinks, and special
+files. This covers the Python/JIT sources and the staged DeepGEMM/CUTLASS
+headers as well as `_C.so`. It moves the external bundle to:
 
 ```text
 build/deepgemm-w2-em8-bm16-stage11-v4-ready-bundles/<content-sha256>/

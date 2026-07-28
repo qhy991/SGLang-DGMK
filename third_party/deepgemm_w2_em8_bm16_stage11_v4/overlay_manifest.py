@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import platform
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -67,6 +68,9 @@ CORE_HASHES = SCRIPT_DIR / "core_source_hashes.sha256"
 BASE_LOCK = SCRIPT_DIR / "base_lock.json"
 BUILD_PROVENANCE = SCRIPT_DIR / "build_provenance.json"
 EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
+MANIFEST_SCHEMA_VERSION = 6
+PROVENANCE_SCHEMA_VERSION = 5
+PACKAGE_TREE_SCHEMA_VERSION = 1
 
 
 def _sha256(path: Path) -> str:
@@ -79,6 +83,96 @@ def _sha256(path: Path) -> str:
 
 def _sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def _canonical_sha256(value: Any) -> str:
+    return _sha256_bytes(
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode()
+    )
+
+
+def _package_tree_record(package: Path, *, role: str) -> dict[str, Any]:
+    """Bind every staged runtime input, including paths, modes, and bytes."""
+    try:
+        root_stat = package.lstat()
+    except FileNotFoundError:
+        raise FileNotFoundError(package) from None
+    if stat.S_ISLNK(root_stat.st_mode) or not stat.S_ISDIR(root_stat.st_mode):
+        raise RuntimeError(f"{role} package root must be a real directory: {package}")
+
+    entries: list[dict[str, Any]] = [
+        {
+            "path": ".",
+            "type": "directory",
+            "mode": f"{stat.S_IMODE(root_stat.st_mode):04o}",
+        }
+    ]
+
+    def visit(directory: Path, relative: Path) -> None:
+        with os.scandir(directory) as stream:
+            children = sorted(stream, key=lambda entry: entry.name)
+        for child in children:
+            child_relative = relative / child.name
+            child_path = directory / child.name
+            child_stat = child.stat(follow_symlinks=False)
+            mode = f"{stat.S_IMODE(child_stat.st_mode):04o}"
+            relative_text = child_relative.as_posix()
+            if stat.S_ISLNK(child_stat.st_mode):
+                raise RuntimeError(
+                    f"{role} package symlinks are forbidden: {relative_text}"
+                )
+            if stat.S_ISDIR(child_stat.st_mode):
+                entries.append(
+                    {
+                        "path": relative_text,
+                        "type": "directory",
+                        "mode": mode,
+                    }
+                )
+                visit(child_path, child_relative)
+                continue
+            if not stat.S_ISREG(child_stat.st_mode):
+                raise RuntimeError(
+                    f"{role} package special files are forbidden: {relative_text}"
+                )
+            if child_stat.st_nlink != 1:
+                raise RuntimeError(
+                    f"{role} package hardlinks are forbidden: {relative_text}"
+                )
+            entries.append(
+                {
+                    "path": relative_text,
+                    "type": "file",
+                    "mode": mode,
+                    "bytes": child_stat.st_size,
+                    "sha256": _sha256(child_path),
+                }
+            )
+
+    visit(package, Path())
+    files = [entry for entry in entries if entry["type"] == "file"]
+    directories = [entry for entry in entries if entry["type"] == "directory"]
+    if not files:
+        raise RuntimeError(f"{role} package tree is empty: {package}")
+    payload = {
+        "schema_version": PACKAGE_TREE_SCHEMA_VERSION,
+        "path_encoding": "utf-8-json-posix-relative-v1",
+        "symlink_policy": "forbid",
+        "hardlink_policy": "forbid",
+        "special_file_policy": "forbid",
+        "mode_policy": "bind-posix-permission-bits",
+        "entry_count": len(entries),
+        "file_count": len(files),
+        "directory_count": len(directories),
+        "total_file_bytes": sum(int(entry["bytes"]) for entry in files),
+        "entries": entries,
+    }
+    return {**payload, "tree_sha256": _canonical_sha256(payload)}
 
 
 def _git(repo: Path, *args: str, binary: bool = False) -> str | bytes:
@@ -206,6 +300,10 @@ def _package_record(
         "init_sha256": _sha256(init_py),
         "extension_sha256": _sha256(extension),
         "extension_bytes": extension.stat().st_size,
+        "package_tree": _package_tree_record(
+            package_at_artifact_root,
+            role=role,
+        ),
     }
 
 
@@ -240,7 +338,7 @@ def write_manifest(args: argparse.Namespace) -> None:
     core_hashes_sha = _sha256(CORE_HASHES)
     build_key = f"{BASE_COMMIT[:12]}-{source_sha[:12]}-{build_tool_sha[:12]}"
     manifest = {
-        "schema_version": 5,
+        "schema_version": MANIFEST_SCHEMA_VERSION,
         "build_key": build_key,
         "variant": {
             "name": VARIANT_NAME,
@@ -336,7 +434,7 @@ def write_build_provenance(args: argparse.Namespace) -> None:
     manifest_path = args.manifest.resolve()
     manifest = json.loads(manifest_path.read_text())
     record = {
-        "schema_version": 4,
+        "schema_version": PROVENANCE_SCHEMA_VERSION,
         "variant": manifest["variant"],
         "base": manifest["base"],
         "build_key": manifest["build_key"],
@@ -418,6 +516,11 @@ def _verify_package(
     _assert_equal(
         record["extension_bytes"], extension.stat().st_size, f"{role}.extension_bytes"
     )
+    _assert_equal(
+        record["package_tree"],
+        _package_tree_record(package, role=role),
+        f"{role}.package_tree",
+    )
 
 
 def verify_manifest(args: argparse.Namespace) -> None:
@@ -430,7 +533,11 @@ def verify_manifest(args: argparse.Namespace) -> None:
     core_hashes_sha = _sha256(CORE_HASHES)
     build_key = f"{BASE_COMMIT[:12]}-{source_sha[:12]}-{build_tool_sha[:12]}"
 
-    _assert_equal(manifest["schema_version"], 5, "schema_version")
+    _assert_equal(
+        manifest["schema_version"],
+        MANIFEST_SCHEMA_VERSION,
+        "schema_version",
+    )
     _assert_equal(manifest["build_key"], build_key, "build_key")
     _assert_equal(
         manifest["variant"],
@@ -452,6 +559,27 @@ def verify_manifest(args: argparse.Namespace) -> None:
         lock["core_source_hashes_sha256"], core_hashes_sha, "lock.core_hashes"
     )
     _assert_equal(lock["candidate_build_id"], BUILD_ID, "lock.candidate_build_id")
+    _assert_equal(
+        lock["manifest_schema_version"],
+        MANIFEST_SCHEMA_VERSION,
+        "lock.manifest_schema_version",
+    )
+    _assert_equal(
+        lock["provenance_schema_version"],
+        PROVENANCE_SCHEMA_VERSION,
+        "lock.provenance_schema_version",
+    )
+    _assert_equal(
+        lock["package_tree_contract"],
+        {
+            "schema_version": PACKAGE_TREE_SCHEMA_VERSION,
+            "symlink_policy": "forbid",
+            "hardlink_policy": "forbid",
+            "special_file_policy": "forbid",
+            "mode_policy": "bind-posix-permission-bits",
+        },
+        "lock.package_tree_contract",
+    )
     _assert_equal(
         lock["variant"],
         {
@@ -667,7 +795,11 @@ def verify_manifest(args: argparse.Namespace) -> None:
 
     if args.check_provenance:
         provenance = json.loads(BUILD_PROVENANCE.read_text())
-        _assert_equal(provenance["schema_version"], 4, "provenance.schema_version")
+        _assert_equal(
+            provenance["schema_version"],
+            PROVENANCE_SCHEMA_VERSION,
+            "provenance.schema_version",
+        )
         _assert_equal(
             provenance["generated_manifest_sha256"],
             _sha256(manifest_path),
@@ -695,20 +827,11 @@ def verify_manifest(args: argparse.Namespace) -> None:
             "provenance.candidate_api",
         )
         for role in ("stock", "candidate"):
-            for field in (
-                "build_id",
-                "import_name",
-                "version_literal",
-                "version_sha256",
-                "init_sha256",
-                "extension_sha256",
-                "extension_bytes",
-            ):
-                _assert_equal(
-                    provenance[role][field],
-                    manifest[role][field],
-                    f"provenance.{role}.{field}",
-                )
+            _assert_equal(
+                provenance[role],
+                manifest[role],
+                f"provenance.{role}",
+            )
         _assert_equal(
             provenance["source_identity"],
             manifest["source_identity"],

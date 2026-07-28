@@ -524,10 +524,30 @@ def _minimal_manifest(cache_env: dict[str, str]) -> dict:
                 "third-party/fmt": ("553ec11ec06fbe0beebfbb45f9dc3c9eabd83d28"),
             },
         },
-        "stock": {"extension_sha256": "1" * 64},
-        "candidate": {"extension_sha256": "2" * 64},
+        "stock": {
+            "extension_sha256": "1" * 64,
+            "package_tree": {"tree_sha256": "3" * 64},
+        },
+        "candidate": {
+            "extension_sha256": "2" * 64,
+            "package_tree": {"tree_sha256": "4" * 64},
+        },
         "runtime_contract": {"cache_paths": cache_env},
     }
+
+
+def _verified_manifest(
+    manifest_path: Path,
+    *,
+    candidate_tree: str = "4" * 64,
+) -> Path:
+    stage11._VERIFIED_READY.update(
+        {
+            "stock_package_tree_sha256": "3" * 64,
+            "candidate_package_tree_sha256": candidate_tree,
+        }
+    )
+    return manifest_path
 
 
 def test_prepare_establishes_and_proves_independent_runtime_state(tmp_path):
@@ -546,7 +566,11 @@ def test_prepare_establishes_and_proves_independent_runtime_state(tmp_path):
             cache_env,
             clear=False,
         ),
-        patch.object(stage11, "_verify_manifest", return_value=manifest_path),
+        patch.object(
+            stage11,
+            "_verify_manifest",
+            side_effect=lambda: _verified_manifest(manifest_path),
+        ),
         patch.object(stage11, "_ensure_stock", return_value=stock),
         patch.object(stage11, "_load_candidate", return_value=candidate),
         patch.object(stage11, "_PREPARED", None),
@@ -567,8 +591,36 @@ def test_prepare_establishes_and_proves_independent_runtime_state(tmp_path):
     assert evidence["masked_num_stages_override"] == 11
     assert evidence["candidate_jit_identity"] == stage11.JIT_IDENTITY
     assert evidence["fallback_eligible"] is False
+    assert evidence["stock_package_tree_sha256"] == "3" * 64
+    assert evidence["candidate_package_tree_sha256"] == "4" * 64
     assert contract.candidate_module is candidate
     assert contract.launch is candidate.fp8_m_grouped_gemm_nt_masked
+
+
+def test_prepare_rejects_package_tree_identity_before_cuda(tmp_path):
+    cache_env = _cache_env(
+        "/home/qinhaiyan/glm52-v2-goal-runs/cache/"
+        "26-moe_w2_decode_scoped_bm16/em8_bm16_stage11_v4"
+    )
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(_minimal_manifest(cache_env)))
+    ensure_stock = Mock()
+    with (
+        patch.object(
+            stage11,
+            "_verify_manifest",
+            side_effect=lambda: _verified_manifest(
+                manifest_path,
+                candidate_tree="0" * 64,
+            ),
+        ),
+        patch.object(stage11, "_ensure_stock", ensure_stock),
+        patch.object(torch.cuda, "current_device") as cuda_query,
+        pytest.raises(RuntimeError, match="candidate package-tree identity"),
+    ):
+        stage11.prepare_deep_gemm(0)
+    ensure_stock.assert_not_called()
+    cuda_query.assert_not_called()
 
 
 def test_prepare_fails_closed_when_candidate_pdl_cannot_be_synchronized(
@@ -588,7 +640,11 @@ def test_prepare_fails_closed_when_candidate_pdl_cannot_be_synchronized(
             cache_env,
             clear=False,
         ),
-        patch.object(stage11, "_verify_manifest", return_value=manifest_path),
+        patch.object(
+            stage11,
+            "_verify_manifest",
+            side_effect=lambda: _verified_manifest(manifest_path),
+        ),
         patch.object(stage11, "_ensure_stock", return_value=stock),
         patch.object(stage11, "_load_candidate", return_value=candidate),
         patch.object(torch.cuda, "current_device", return_value=0),

@@ -358,6 +358,8 @@ class PreparedContract:
     source_replay_sha256: str = ""
     build_provenance_path: str = ""
     build_provenance_sha256: str = ""
+    stock_package_tree_sha256: str = ""
+    candidate_package_tree_sha256: str = ""
     ready_verified_before_runtime: bool = True
     bundle_contract: str = "content-addressed-ready-v1"
     build_phase: str = "cpu-only-before-gpu-lease"
@@ -423,6 +425,22 @@ def prepare_deep_gemm(gpu_id: int) -> PreparedContract:
         manifest_path = _verify_manifest()
         manifest = json.loads(manifest_path.read_text())
         manifest["_bundle_dir"] = str(manifest_path.parent.resolve())
+        for role in ("stock", "candidate"):
+            expected_tree = (
+                manifest.get(role, {})
+                .get("package_tree", {})
+                .get("tree_sha256")
+            )
+            observed_tree = _VERIFIED_READY.get(
+                f"{role}_package_tree_sha256"
+            )
+            if (
+                not isinstance(expected_tree, str)
+                or observed_tree != expected_tree
+            ):
+                raise RuntimeError(
+                    f"stage11-v4 {role} package-tree identity mismatch"
+                )
         if manifest.get("variant") != {
             "name": VARIANT_NAME,
             "version": VARIANT_VERSION,
@@ -559,6 +577,12 @@ def prepare_deep_gemm(gpu_id: int) -> PreparedContract:
             build_provenance_path=str(_VERIFIED_READY.get("build_provenance_path", "")),
             build_provenance_sha256=str(
                 _VERIFIED_READY.get("build_provenance_sha256", "")
+            ),
+            stock_package_tree_sha256=str(
+                _VERIFIED_READY.get("stock_package_tree_sha256", "")
+            ),
+            candidate_package_tree_sha256=str(
+                _VERIFIED_READY.get("candidate_package_tree_sha256", "")
             ),
         )
         _PREPARED = contract

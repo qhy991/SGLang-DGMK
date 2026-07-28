@@ -153,6 +153,30 @@ cp -a "${BUILD_TMP}/stock-source/build/deep_gemm" \
 cp -a "${BUILD_TMP}/candidate-source/build/deep_gemm" \
   "${STAGED_OVERLAY}/candidate/site/deep_gemm_glm52_w2_em8_bm16_stage11_v4"
 
+for package in \
+  "${STAGED_OVERLAY}/stock/site/deep_gemm" \
+  "${STAGED_OVERLAY}/candidate/site/deep_gemm_glm52_w2_em8_bm16_stage11_v4"; do
+  # Bytecode is a mutable cache, not a build input.  Remove it before hashing
+  # and make the complete runtime/header tree read-only so import cannot create
+  # an unbound __pycache__ after READY verification.
+  find "$package" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
+  find "$package" -depth -type d -name __pycache__ -empty -delete
+  if [[ -n "$(find "$package" -type l -print -quit)" ]]; then
+    echo "ERROR: staged DeepGEMM package contains a symlink: $package" >&2
+    exit 1
+  fi
+  if [[ -n "$(find "$package" -type f -links +1 -print -quit)" ]]; then
+    echo "ERROR: staged DeepGEMM package contains a hardlink: $package" >&2
+    exit 1
+  fi
+  if [[ -n "$(find "$package" ! -type d ! -type f -print -quit)" ]]; then
+    echo "ERROR: staged DeepGEMM package contains a special file: $package" >&2
+    exit 1
+  fi
+  find "$package" -type f -exec chmod a-w -- {} +
+  find "$package" -type d -exec chmod a-w -- {} +
+done
+
 while read -r expected_hash relative; do
   [[ -n "$expected_hash" && -n "$relative" ]]
   mkdir -p "${STAGED_OVERLAY}/candidate/core_source/$(dirname "$relative")"

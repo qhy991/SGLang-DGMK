@@ -13,6 +13,7 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[3]
 TOOL_PATH = REPO / "third_party" / "deepgemm_w2_em8_bm16_stage11_v4" / "ready_bundle.py"
+MANIFEST_TOOL_PATH = TOOL_PATH.with_name("overlay_manifest.py")
 
 
 def _load_tool():
@@ -27,6 +28,20 @@ def _load_tool():
 
 
 READY = _load_tool()
+
+
+def _load_manifest_tool():
+    spec = importlib.util.spec_from_file_location(
+        "task26_stage11_v4_overlay_manifest",
+        MANIFEST_TOOL_PATH,
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+MANIFEST = _load_manifest_tool()
 
 
 def _sha256(path: Path) -> str:
@@ -65,7 +80,13 @@ def _package_record(
     (package / "__init__.py").write_text("__version__ = '0.1.4.post1'\n")
     (package / "VERSION").write_text("0.1.4.post1\n")
     (package / "_C.so").write_bytes(f"fixture:{import_name}".encode())
-    return {
+    (package / "utils").mkdir()
+    (package / "utils/jit_runtime.py").write_text("RUNTIME_INPUT = True\n")
+    (package / "include/deep_gemm").mkdir(parents=True)
+    (package / "include/deep_gemm/kernel.hpp").write_text(
+        "#pragma once\n#define TASK26_FIXTURE 1\n"
+    )
+    record = {
         "package_relpath": relative,
         "import_name": import_name,
         "build_id": build_id,
@@ -75,6 +96,11 @@ def _package_record(
         "extension_sha256": _sha256(package / "_C.so"),
         "extension_bytes": (package / "_C.so").stat().st_size,
     }
+    record["package_tree"] = READY._package_tree_record(
+        package,
+        role=import_name,
+    )
+    return record
 
 
 def _fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
@@ -110,7 +136,7 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
     build_key = READY.expected_build_key(sglang)
     source_identity = {"stock": {"head": "base"}, "candidate": {"head": "base+v4"}}
     manifest = {
-        "schema_version": 5,
+        "schema_version": READY.MANIFEST_SCHEMA_VERSION,
         "variant": READY.VARIANT,
         "build_key": build_key,
         "stock": stock,
@@ -120,7 +146,7 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
     manifest_path = staging / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     provenance = {
-        "schema_version": 4,
+        "schema_version": READY.PROVENANCE_SCHEMA_VERSION,
         "variant": READY.VARIANT,
         "build_key": build_key,
         "generated_manifest_sha256": _sha256(manifest_path),
@@ -174,6 +200,12 @@ def test_ready_binds_content_packages_replay_provenance_and_clean_heads(
     assert Path(evidence["ready_path"]) == ready
     assert Path(evidence["manifest_path"]).parent == ready.parent
     assert Path(evidence["source_replay_path"]).parent == ready.parent
+    assert len(evidence["stock_package_tree_sha256"]) == 64
+    assert len(evidence["candidate_package_tree_sha256"]) == 64
+    assert (
+        evidence["stock_package_tree_sha256"]
+        != evidence["candidate_package_tree_sha256"]
+    )
     document = json.loads(ready.read_text())
     assert document["contract"]["release_policy"]["required_lanes"] == [
         "leaf_eager",
@@ -184,12 +216,38 @@ def test_ready_binds_content_packages_replay_provenance_and_clean_heads(
     assert document["contract"]["release_policy"]["gpu_driver_may_build"] is False
 
 
+def test_manifest_and_ready_tools_hash_the_same_complete_package_tree(tmp_path):
+    package = tmp_path / "deep_gemm"
+    _package_record(
+        tmp_path,
+        "deep_gemm",
+        import_name="deep_gemm",
+        build_id="fixture",
+    )
+    ready_record = READY._package_tree_record(package, role="stock")
+    manifest_record = MANIFEST._package_tree_record(package, role="stock")
+    assert manifest_record == ready_record
+    assert ready_record["file_count"] == 5
+    assert ready_record["directory_count"] == 4
+    paths = {entry["path"] for entry in ready_record["entries"]}
+    assert "utils/jit_runtime.py" in paths
+    assert "include/deep_gemm/kernel.hpp" in paths
+
+
 @pytest.mark.parametrize(
     "mutation",
     (
         "ready",
         "manifest",
         "package",
+        "jit_python",
+        "header",
+        "added_file",
+        "deleted_file",
+        "file_mode",
+        "directory_mode",
+        "symlink",
+        "hardlink",
         "source_replay",
         "provenance",
         "source_input",
@@ -208,6 +266,58 @@ def test_corrupt_or_missing_ready_input_fails_closed(tmp_path, mutation):
         (
             ready.parent / "candidate/site/deep_gemm_glm52_w2_em8_bm16_stage11_v4/_C.so"
         ).write_bytes(b"corrupt")
+    elif mutation == "jit_python":
+        (
+            ready.parent
+            / "candidate/site/deep_gemm_glm52_w2_em8_bm16_stage11_v4"
+            / "utils/jit_runtime.py"
+        ).write_text("RUNTIME_INPUT = False\n")
+    elif mutation == "header":
+        (
+            ready.parent
+            / "candidate/site/deep_gemm_glm52_w2_em8_bm16_stage11_v4"
+            / "include/deep_gemm/kernel.hpp"
+        ).write_text("#pragma once\n#define TASK26_FIXTURE 0\n")
+    elif mutation == "added_file":
+        (
+            ready.parent
+            / "candidate/site/deep_gemm_glm52_w2_em8_bm16_stage11_v4"
+            / "utils/untracked_runtime.py"
+        ).write_text("UNBOUND = True\n")
+    elif mutation == "deleted_file":
+        (
+            ready.parent
+            / "candidate/site/deep_gemm_glm52_w2_em8_bm16_stage11_v4"
+            / "utils/jit_runtime.py"
+        ).unlink()
+    elif mutation == "file_mode":
+        (
+            ready.parent
+            / "candidate/site/deep_gemm_glm52_w2_em8_bm16_stage11_v4"
+            / "utils/jit_runtime.py"
+        ).chmod(0o755)
+    elif mutation == "directory_mode":
+        (
+            ready.parent
+            / "candidate/site/deep_gemm_glm52_w2_em8_bm16_stage11_v4"
+            / "include/deep_gemm"
+        ).chmod(0o700)
+    elif mutation == "symlink":
+        target = (
+            ready.parent
+            / "candidate/site/deep_gemm_glm52_w2_em8_bm16_stage11_v4"
+            / "utils/jit_runtime.py"
+        )
+        target.unlink()
+        target.symlink_to("../__init__.py")
+    elif mutation == "hardlink":
+        package = (
+            ready.parent
+            / "candidate/site/deep_gemm_glm52_w2_em8_bm16_stage11_v4"
+        )
+        target = package / "utils/jit_runtime.py"
+        target.unlink()
+        target.hardlink_to(package / "__init__.py")
     elif mutation == "source_replay":
         (ready.parent / "source_replay.json").unlink()
     elif mutation == "provenance":
