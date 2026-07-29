@@ -237,6 +237,26 @@ void dg_fp8_fp4_gemm_nt(TensorView a, TensorView a_sf,
                            compiled_dims, disable_ue8m0_cast);
 }
 
+void dg_fp8_fp4_gemm_nt_task06_one_sm(
+        TensorView a, TensorView a_sf,
+        TensorView b, TensorView b_sf,
+        TensorView d) {
+    gemm::fp8_fp4_gemm_nt_task06_one_sm(
+        std::make_pair(convert_to_torch_tensor(a), convert_to_torch_tensor(a_sf)),
+        std::make_pair(convert_to_torch_tensor(b), convert_to_torch_tensor(b_sf)),
+        convert_to_torch_tensor(d));
+}
+
+void dg_fp8_fp4_gemm_nt_task06_gated_dual(
+        TensorView a, TensorView a_sf,
+        TensorView b, TensorView b_sf,
+        TensorView d) {
+    gemm::fp8_fp4_gemm_nt_task06_gated_dual(
+        std::make_pair(convert_to_torch_tensor(a), convert_to_torch_tensor(a_sf)),
+        std::make_pair(convert_to_torch_tensor(b), convert_to_torch_tensor(b_sf)),
+        convert_to_torch_tensor(d));
+}
+
 // GLM-5.2 fused UE8M0 scale pack (raw f32 SF operands packed inside the kernel).
 void dg_fp8_fp4_gemm_nt_fused(TensorView a, TensorView a_sf,
                               TensorView b, TensorView b_sf,
@@ -522,6 +542,8 @@ void dg_k_grouped_fp8_gemm_nt_contiguous(TensorView a, TensorView a_sf,
 }
 
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(fp8_fp4_gemm_nt, dg_fp8_fp4_gemm_nt);
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(fp8_fp4_gemm_nt_task06_one_sm, dg_fp8_fp4_gemm_nt_task06_one_sm);
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(fp8_fp4_gemm_nt_task06_gated_dual, dg_fp8_fp4_gemm_nt_task06_gated_dual);
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(fp8_fp4_gemm_nt_fused, dg_fp8_fp4_gemm_nt_fused);
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(fp8_fp4_gemm_nt_prof, dg_fp8_fp4_gemm_nt_prof);
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(fp8_fp4_gemm_nn, dg_fp8_fp4_gemm_nn);

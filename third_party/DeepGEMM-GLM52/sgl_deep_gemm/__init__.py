@@ -165,6 +165,20 @@ try:
         _C.fp8_fp4_gemm_tt(a_data, a_sf, b_data, b_sf, d, c, recipe, recipe_a, recipe_b, compiled_dims, disable_ue8m0_cast)
 
     fp8_gemm_nt = fp8_fp4_gemm_nt
+
+    def fp8_fp4_gemm_nt_task06_one_sm(a, b, d):
+        """Goal 06 exact packed-UE8M0 one-SM feasibility entry."""
+        (a_data, a_sf), (b_data, b_sf) = _parse_tensor_or_tuple(a), _parse_tensor_or_tuple(b)
+        _C.fp8_fp4_gemm_nt_task06_one_sm(a_data, a_sf, b_data, b_sf, d)
+
+    fp8_gemm_nt_task06_one_sm = fp8_fp4_gemm_nt_task06_one_sm
+
+    def fp8_fp4_gemm_nt_task06_gated_dual(a, b, d):
+        """Goal 06 exact packed-UE8M0 gated-dual SwiGLU feasibility entry."""
+        (a_data, a_sf), (b_data, b_sf) = _parse_tensor_or_tuple(a), _parse_tensor_or_tuple(b)
+        _C.fp8_fp4_gemm_nt_task06_gated_dual(a_data, a_sf, b_data, b_sf, d)
+
+    fp8_gemm_nt_task06_gated_dual = fp8_fp4_gemm_nt_task06_gated_dual
     fp8_gemm_nn = fp8_fp4_gemm_nn
     fp8_gemm_tn = fp8_fp4_gemm_tn
     fp8_gemm_tt = fp8_fp4_gemm_tt

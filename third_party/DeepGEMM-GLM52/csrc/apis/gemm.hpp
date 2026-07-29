@@ -78,7 +78,8 @@ static void fp8_fp4_gemm_nt(const std::pair<torch::Tensor, torch::Tensor>& a,
                             std::optional<std::tuple<int, int>> recipe_a,
                             std::optional<std::tuple<int, int>> recipe_b,
                             const std::string& compiled_dims,
-                            const bool& disable_ue8m0_cast) {
+                            const bool& disable_ue8m0_cast,
+                            const bool& task06_one_sm = false) {
     // Shape must be `[M, K] @ [N, K].T`
     const auto major_a = get_major_type_ab(a.first);
     const auto major_b = get_major_type_ab(b.first);
@@ -117,10 +118,111 @@ static void fp8_fp4_gemm_nt(const std::pair<torch::Tensor, torch::Tensor>& a,
         }
     } else if (arch_major == 10 and sfa.scalar_type() == torch::kInt) {
         sm100_fp8_fp4_gemm_1d1d(a.first, sfa, b.first, sfb, c, d, m, n, k, gran_k_a, gran_k_b,
-                                major_a, major_b, compiled_dims);
+                                major_a, major_b, compiled_dims, std::nullopt,
+                                /*fuse_scale_pack=*/false, /*prof=*/nullptr,
+                                task06_one_sm);
     } else {
         DG_HOST_UNREACHABLE("Unsupported architecture or scaling factor types");
     }
+}
+
+// Goal 06 route B1: an explicit, fail-closed one-SM feasibility entry.
+// It consumes the already-packed production UE8M0 tensors and writes the
+// caller-owned BF16 [M,4096] buffer.  It is intentionally not aliased to the
+// normal API and cannot affect stock dispatch.
+static void fp8_fp4_gemm_nt_task06_one_sm(
+        const std::pair<torch::Tensor, torch::Tensor>& a,
+        const std::pair<torch::Tensor, torch::Tensor>& b,
+        const torch::Tensor& d) {
+    DG_HOST_ASSERT(a.first.dim() == 2 and b.first.dim() == 2 and
+                   a.second.dim() == 2 and b.second.dim() == 2 and
+                   d.dim() == 2);
+    const auto m = a.first.size(0);
+    const auto k = a.first.size(1);
+    const auto n = b.first.size(0);
+    DG_HOST_ASSERT((m == 16 or m == 32) and n == 4096 and k == 6144);
+    DG_HOST_ASSERT(b.first.size(1) == k and
+                   d.size(0) == m and d.size(1) == n);
+    DG_HOST_ASSERT(a.first.scalar_type() == torch::kFloat8_e4m3fn and
+                   b.first.scalar_type() == torch::kFloat8_e4m3fn and
+                   d.scalar_type() == torch::kBFloat16);
+    DG_HOST_ASSERT(a.second.scalar_type() == torch::kInt);
+    DG_HOST_ASSERT(b.second.scalar_type() == torch::kInt);
+    DG_HOST_ASSERT(a.first.is_contiguous() and b.first.is_contiguous() and
+                   d.is_contiguous() and d.storage_offset() == 0);
+    DG_HOST_ASSERT(a.second.size(0) == m and a.second.size(1) == k / 128 / 4 and
+                   b.second.size(0) == n and b.second.size(1) == k / 128 / 4);
+    DG_HOST_ASSERT(a.second.stride(0) == 1 and a.second.stride(1) == m and
+                   b.second.stride(0) == 1 and b.second.stride(1) == n);
+    fp8_fp4_gemm_nt(
+        a, b, d, std::nullopt,
+        std::nullopt, std::nullopt, std::nullopt,
+        /*compiled_dims=*/"mnk",
+        /*disable_ue8m0_cast=*/false,
+        /*task06_one_sm=*/true);
+}
+
+// Goal 06 route B2: a true gated dual GEMM over the production merged
+// [gate(2048), up(2048)] weight. The dedicated SM100 kernel reuses each
+// activation tile, keeps gate/up in disjoint TMEM accumulator regions, applies
+// exact FP32 SwiGLU in its epilogue, and writes BF16 [M,2048]
+// directly. This entry is deliberately not reachable from the stock API.
+static void fp8_fp4_gemm_nt_task06_gated_dual(
+        const std::pair<torch::Tensor, torch::Tensor>& a,
+        const std::pair<torch::Tensor, torch::Tensor>& b,
+        const torch::Tensor& d) {
+    const auto major_a = get_major_type_ab(a.first);
+    const auto major_b = get_major_type_ab(b.first);
+    DG_HOST_ASSERT(major_a == cute::UMMA::Major::K and
+                   major_b == cute::UMMA::Major::K);
+    check_major_type_cd(d);
+
+    const auto arch_major = device_runtime->get_arch_major();
+    const auto [m, k] = check_ab_fp8_fp4(a.first, major_a, arch_major);
+    const auto [merged_n, k_] = check_ab_fp8_fp4(b.first, major_b, arch_major);
+    const auto [m_out, n_out] = get_shape<2>(d);
+    DG_HOST_ASSERT(arch_major == 10);
+    DG_HOST_ASSERT((m == 16 or m == 32) and k == 6144);
+    DG_HOST_ASSERT(merged_n == 4096 and k_ == k);
+    DG_HOST_ASSERT(m_out == m and n_out == 2048);
+    DG_HOST_ASSERT(a.first.scalar_type() == torch::kFloat8_e4m3fn and
+                   b.first.scalar_type() == torch::kFloat8_e4m3fn);
+    DG_HOST_ASSERT(a.second.scalar_type() == torch::kInt and
+                   b.second.scalar_type() == torch::kInt);
+    DG_HOST_ASSERT(d.scalar_type() == torch::kBFloat16);
+    DG_HOST_ASSERT(a.first.is_contiguous() and b.first.is_contiguous() and
+                   d.is_contiguous() and d.storage_offset() == 0);
+    DG_HOST_ASSERT(a.second.size(0) == m and a.second.size(1) == k / 128 / 4 and
+                   b.second.size(0) == merged_n and
+                   b.second.size(1) == k / 128 / 4);
+    DG_HOST_ASSERT(a.second.stride(0) == 1 and a.second.stride(1) == m and
+                   b.second.stride(0) == 1 and
+                   b.second.stride(1) == merged_n);
+
+    // Preserve the production packed-int32 UE8M0 layout conversion/validation.
+    // `merged_n`, not output N, owns the weight scale tensor.
+    std::optional<std::tuple<int, int, int>> recipe = std::nullopt;
+    const std::optional<std::tuple<int, int>> recipe_a = std::nullopt;
+    const std::optional<std::tuple<int, int>> recipe_b = std::nullopt;
+    const auto [sfa, sfb, gran_k_a, gran_k_b] =
+        layout::transform_sf_pair_into_required_layout(
+            a.second, b.second, m, merged_n, k,
+            recipe, recipe_a, recipe_b,
+            std::nullopt, std::nullopt,
+            /*disable_ue8m0_cast=*/false);
+    DG_HOST_ASSERT(sfa.scalar_type() == torch::kInt and
+                   sfb.scalar_type() == torch::kInt);
+
+    sm100_fp8_fp4_gemm_1d1d(
+        a.first, sfa, b.first, sfb, std::nullopt, d,
+        m, n_out, k, gran_k_a, gran_k_b,
+        major_a, major_b,
+        /*compiled_dims=*/"mnk",
+        std::nullopt,
+        /*fuse_scale_pack=*/false,
+        /*prof=*/nullptr,
+        /*task06_one_sm=*/false,
+        /*task06_gated_dual=*/true);
 }
 
 // GLM-5.2 fused UE8M0 scale pack: same math as `fp8_fp4_gemm_nt`, but the raw

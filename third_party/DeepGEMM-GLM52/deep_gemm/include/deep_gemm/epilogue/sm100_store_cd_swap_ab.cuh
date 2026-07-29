@@ -141,4 +141,133 @@ sm100_store_cd_swap_ab(const utils::PatternVisitor<pattern_cd_t>& smem_cd, uint3
     }
 }
 
+// Goal 06 route B2: direct gated-dual epilogue for the standalone GLM-5.2
+// shared expert.  The two input addresses name disjoint FP32 TMEM accumulator
+// regions produced from the gate and up halves of the merged production
+// weight. The epilogue evaluates silu(gate) * up from the corresponding FP32
+// accumulators and converts only the final value to the caller-owned BF16
+// [M,2048] output. There is no BF16 [M,4096] global, shared, or register
+// intermediate.
+template <uint32_t BLOCK_M, uint32_t BLOCK_N,
+          uint32_t STORE_BLOCK_M, uint32_t STORE_BLOCK_N,
+          uint32_t kSwizzleCDMode,
+          uint32_t kNumTMAStoreStages,
+          uint32_t kNumUMMAStoreThreads,
+          typename cd_dtype_t,
+          typename pattern_cd_t>
+CUTLASS_DEVICE void
+sm100_store_swiglu_swap_ab(
+        const utils::PatternVisitor<pattern_cd_t>& smem_cd,
+        uint32_t& tma_stage_idx,
+        const uint32_t& gate_tmem_base_addr,
+        const uint32_t& up_tmem_base_addr,
+        const uint32_t& base_m_idx,
+        const uint32_t& base_n_idx,
+        const uint32_t& effective_m,
+        const uint32_t& epilogue_warp_idx,
+        const uint32_t& lane_idx,
+        const cutlass::arch::ClusterTransactionBarrier* tmem_empty_barrier,
+        const cute::TmaDescriptor& tensor_map_cd) {
+    DG_STATIC_ASSERT(cute::is_same_v<cd_dtype_t, cutlass::bfloat16_t>,
+                     "Task 06 gated-dual output must be BF16");
+    DG_STATIC_ASSERT(STORE_BLOCK_N == 128,
+                     "STORE_BLOCK_N must be 128 to match TMEM rows");
+
+    constexpr uint32_t STORE_BLOCK_N_ATOM = kSwizzleCDMode / sizeof(cd_dtype_t);
+    constexpr uint32_t kNumBankGroupBytes = 16;
+    constexpr uint32_t kNumSwizzleAtomRows = 8;
+    DG_STATIC_ASSERT(kSwizzleCDMode == 128, "TMA D must be 128B swizzled");
+    DG_STATIC_ASSERT(BLOCK_M % STORE_BLOCK_M == 0, "Invalid block sizes");
+    DG_STATIC_ASSERT(BLOCK_N % STORE_BLOCK_N == 0, "Invalid block sizes");
+    DG_STATIC_ASSERT(STORE_BLOCK_M % kNumSwizzleAtomRows == 0, "Invalid swizzling");
+    DG_STATIC_ASSERT(STORE_BLOCK_N % STORE_BLOCK_N_ATOM == 0, "Invalid swizzling");
+
+    auto advance_store_pipeline = [&]() {
+        tma_stage_idx = (tma_stage_idx + 1) % kNumTMAStoreStages;
+    };
+
+    const auto num_stores = effective_m / STORE_BLOCK_M;
+    for (uint32_t s = 0; s < num_stores; ++s, advance_store_pipeline()) {
+        if (epilogue_warp_idx == 0)
+            cute::tma_store_wait<kNumTMAStoreStages - 1>();
+        cutlass::arch::NamedBarrier::sync(kNumUMMAStoreThreads, 0);
+
+        #pragma unroll
+        for (uint32_t i = 0; i < STORE_BLOCK_M / kNumSwizzleAtomRows; ++i) {
+            const uint32_t stage_offset = s * STORE_BLOCK_M +
+                                          i * kNumSwizzleAtomRows;
+            const uint32_t gate_tmem_addr = gate_tmem_base_addr + stage_offset;
+            const uint32_t up_tmem_addr = up_tmem_base_addr + stage_offset;
+            uint32_t gate_values[kNumSwizzleAtomRows];
+            uint32_t up_values[kNumSwizzleAtomRows];
+
+            constexpr uint32_t kNumWarpsPerAtom = STORE_BLOCK_N_ATOM / 32;
+            const uint32_t outer_atom_offset =
+                (epilogue_warp_idx / kNumWarpsPerAtom) *
+                STORE_BLOCK_M * kSwizzleCDMode;
+            const uint32_t inner_atom_offset =
+                i * kNumSwizzleAtomRows * kSwizzleCDMode;
+            auto smem_base_ptr =
+                reinterpret_cast<uint8_t*>(smem_cd[tma_stage_idx]) +
+                outer_atom_offset + inner_atom_offset;
+
+            // Match the proven swap-AB BF16 store mapping for both TMEM banks.
+            cute::SM100_TMEM_LOAD_16dp256b1x::copy(
+                gate_tmem_addr,
+                gate_values[0], gate_values[1], gate_values[2], gate_values[3]);
+            cute::SM100_TMEM_LOAD_16dp256b1x::copy(
+                gate_tmem_addr | 0x00100000,
+                gate_values[4], gate_values[5], gate_values[6], gate_values[7]);
+            cute::SM100_TMEM_LOAD_16dp256b1x::copy(
+                up_tmem_addr,
+                up_values[0], up_values[1], up_values[2], up_values[3]);
+            cute::SM100_TMEM_LOAD_16dp256b1x::copy(
+                up_tmem_addr | 0x00100000,
+                up_values[4], up_values[5], up_values[6], up_values[7]);
+            cutlass::arch::fence_view_async_tmem_load();
+
+            #pragma unroll
+            for (uint32_t j = 0; j < kNumSwizzleAtomRows; ++j) {
+                const float gate = __uint_as_float(gate_values[j]);
+                const float up = __uint_as_float(up_values[j]);
+                const float value = (gate / (1.0f + expf(-gate))) * up;
+                gate_values[j] = __float_as_uint(value);
+            }
+
+            const uint32_t row = lane_idx % 8;
+            const uint32_t col = (epilogue_warp_idx % 2) * 4 + lane_idx / 8;
+            auto smem_ptr = smem_base_ptr +
+                            row * (kNumBankGroupBytes * 8) +
+                            (col ^ row) * kNumBankGroupBytes;
+            ptx::SM90_U32x4_STSM_T<int>::copy(
+                math::cast_into_bf16_and_pack(gate_values[0], gate_values[1]),
+                math::cast_into_bf16_and_pack(gate_values[2], gate_values[3]),
+                math::cast_into_bf16_and_pack(gate_values[4], gate_values[5]),
+                math::cast_into_bf16_and_pack(gate_values[6], gate_values[7]),
+                smem_ptr);
+        }
+
+        if (s == num_stores - 1) {
+            ptx::tcgen05_before_thread_sync();
+            tmem_empty_barrier->arrive(0u);
+        }
+
+        cute::tma_store_fence();
+        cutlass::arch::NamedBarrier::sync(kNumUMMAStoreThreads, 0);
+        if (epilogue_warp_idx == 0 and cute::elect_one_sync()) {
+            #pragma unroll
+            for (uint32_t i = 0; i < STORE_BLOCK_N / STORE_BLOCK_N_ATOM; ++i) {
+                auto smem_ptr = smem_cd[tma_stage_idx] +
+                                i * STORE_BLOCK_M * STORE_BLOCK_N_ATOM;
+                const uint32_t m_idx = base_m_idx + s * STORE_BLOCK_M;
+                const uint32_t n_idx = base_n_idx + i * STORE_BLOCK_N_ATOM;
+                cute::SM90_TMA_STORE_2D::copy(
+                    &tensor_map_cd, smem_ptr, n_idx, m_idx);
+            }
+            cute::tma_store_arrive();
+        }
+        __syncwarp();
+    }
+}
+
 } // namespace deep_gemm::epilogue

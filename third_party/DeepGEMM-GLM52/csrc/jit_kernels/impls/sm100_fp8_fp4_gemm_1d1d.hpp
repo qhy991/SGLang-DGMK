@@ -43,6 +43,8 @@ public:
         int sfa_s0 = 0, sfa_s1 = 0, sfb_s0 = 0, sfb_s1 = 0;
         // Opt-in span phase-decomposition probe (8 u64 slots per CTA; nullptr in production).
         unsigned long long* prof = nullptr;
+        // Goal 06 route B2. Dedicated entry only; false for every stock API.
+        bool task06_gated_dual = false;
     };
 
     static std::string generate_impl(const Args& args) {
@@ -66,7 +68,7 @@ static void __instantiate_kernel() {{
         {},
         {},
         {},
-        {}, {}, {}, {},
+        {}, {}, {}, {}, {},
         {}, {}, {},
         {}
     >);
@@ -85,7 +87,9 @@ static void __instantiate_kernel() {{
         args.gemm_config.layout.get_cluster_size(), args.gemm_config.layout.cluster_n > 1,
         args.gemm_config.launch_config.num_sms,
         args.gemm_config.layout.swap_ab, args.gemm_desc.ensure_zero_padding,
-        to_string(args.gemm_desc.gemm_type), args.gemm_desc.with_accumulation, (args.fuse_scale_pack ? "true" : "false"), (args.prof != nullptr ? "true" : "false"),
+        to_string(args.gemm_desc.gemm_type), args.gemm_desc.with_accumulation,
+        (args.fuse_scale_pack ? "true" : "false"), (args.prof != nullptr ? "true" : "false"),
+        (args.task06_gated_dual ? "true" : "false"),
         to_string(args.gemm_desc.a_dtype), to_string(args.gemm_desc.b_dtype), to_string(args.gemm_desc.cd_dtype),
         get_default_epilogue_type(args.epilogue_type));
     }
@@ -112,7 +116,9 @@ static void sm100_fp8_fp4_gemm_1d1d(const torch::Tensor& a, const torch::Tensor&
                                     const std::string& compiled_dims,
                                     const std::optional<std::string>& epilogue_type = std::nullopt,
                                     const bool& fuse_scale_pack = false,
-                                    unsigned long long* prof = nullptr) {
+                                    unsigned long long* prof = nullptr,
+                                    const bool& task06_one_sm = false,
+                                    const bool& task06_gated_dual = false) {
     const auto desc = GemmDesc {
         .gemm_type = GemmType::Normal,
         .kernel_type = KernelType::Kernel1D1D,
@@ -125,15 +131,70 @@ static void sm100_fp8_fp4_gemm_1d1d(const torch::Tensor& a, const torch::Tensor&
         .tc_util = device_runtime->get_tc_util(),
         .compiled_dims = compiled_dims
     };
-    const auto config = get_best_config<SM100ArchSpec>(desc);
+    auto config = get_best_config<SM100ArchSpec>(desc);
+    if (task06_one_sm or task06_gated_dual) {
+        // Goal 06 feasibility portfolio, routes B1/B2. Keep these out of the
+        // production heuristic: dedicated fail-closed APIs are the only callers.
+        // With SwapAB, (BLOCK_N, BLOCK_M, BLOCK_K) is the physical
+        // transpose-equivalent CUTLASS/CuTe tile: 128x{16,32}x128.
+        DG_HOST_ASSERT((m == 16 or m == 32) and
+                       n == (task06_gated_dual ? 2048 : 4096) and k == 6144);
+        DG_HOST_ASSERT(gran_k_a == 128 and gran_k_b == 128);
+        DG_HOST_ASSERT(major_a == cute::UMMA::Major::K and major_b == cute::UMMA::Major::K);
+        const auto layout = Layout{
+            /*swap_ab=*/true,
+            /*block_m=*/m,
+            /*block_n=*/128,
+            /*block_k=*/128,
+            /*cluster_m=*/1,
+            /*cluster_n=*/1
+        };
+        const auto storage_config = SM100ArchSpec::get_storage_config(desc, layout);
+        auto pipeline_config = SM100ArchSpec::get_pipeline_config(desc, layout, storage_config);
+        if (task06_gated_dual) {
+            // B2 carries one activation stream but two weight/SFB streams per
+            // stage. Derive the largest legal stage count from the pinned
+            // SM100 capacity rather than borrowing the single-GEMM allocation.
+            const auto [sf_block_m, sf_block_n] =
+                SM100ArchSpec::get_sf_uttcp_aligned_block_sizes(
+                    layout.block_m, layout.block_n, desc.get_mma_kind());
+            const int smem_a_per_stage =
+                storage_config.load_block_m * layout.block_k *
+                c10::elementSize(desc.a_dtype);
+            const int smem_b_per_stage =
+                storage_config.load_block_n * layout.block_k *
+                c10::elementSize(desc.b_dtype);
+            const int smem_sfa_per_stage = sf_block_m * 4;
+            const int smem_sfb_per_stage = sf_block_n * 4;
+            const int single_stream_per_stage =
+                smem_a_per_stage + smem_b_per_stage +
+                smem_sfa_per_stage + smem_sfb_per_stage;
+            const int fixed_smem =
+                pipeline_config.smem_size -
+                pipeline_config.num_stages * single_stream_per_stage;
+            const int dual_stream_per_stage =
+                single_stream_per_stage + smem_b_per_stage + smem_sfb_per_stage;
+            const int num_stages =
+                (SM100ArchSpec::smem_capacity - fixed_smem) /
+                dual_stream_per_stage;
+            DG_HOST_ASSERT(num_stages >= 2);
+            pipeline_config = PipelineConfig{
+                fixed_smem + num_stages * dual_stream_per_stage,
+                num_stages
+            };
+        }
+        const auto launch_config = SM100ArchSpec::get_launch_config(desc, layout);
+        config = GemmConfig{layout, storage_config, pipeline_config, launch_config};
+    }
 
     const auto cd = c.value_or(d);
+    const int weight_n = task06_gated_dual ? 4096 : n;
     const auto tensor_map_a = make_tma_a_desc(major_a, a, m, k,
                                               config.storage_config.load_block_m,
                                               config.layout.block_k,
                                               static_cast<int>(a.stride(get_non_contiguous_dim(major_a))), 1,
                                               config.storage_config.swizzle_a_mode);
-    const auto tensor_map_b = make_tma_b_desc(major_b, b, n, k,
+    const auto tensor_map_b = make_tma_b_desc(major_b, b, weight_n, k,
                                               config.storage_config.load_block_n,
                                               config.layout.block_k,
                                               static_cast<int>(b.stride(get_non_contiguous_dim(major_b))), 1,
@@ -150,7 +211,7 @@ static void sm100_fp8_fp4_gemm_1d1d(const torch::Tensor& a, const torch::Tensor&
     const auto tensor_map_sfa = fuse_scale_pack ? tensor_map_a
         : make_tma_sf_desc(cute::UMMA::Major::MN, sfa, m, k, config.layout.block_m, gran_k_a, 1, 0);
     const auto tensor_map_sfb = fuse_scale_pack ? tensor_map_a
-        : make_tma_sf_desc(cute::UMMA::Major::MN, sfb, n, k, config.layout.block_n, gran_k_b, 1, 0);
+        : make_tma_sf_desc(cute::UMMA::Major::MN, sfb, weight_n, k, config.layout.block_n, gran_k_b, 1, 0);
 
     // Launch
     const SM100FP8FP4Gemm1D1DRuntime::Args args = {
@@ -177,7 +238,8 @@ static void sm100_fp8_fp4_gemm_1d1d(const torch::Tensor& a, const torch::Tensor&
         .sfa_s1 = fuse_scale_pack ? static_cast<int>(sfa.stride(1)) : 0,
         .sfb_s0 = fuse_scale_pack ? static_cast<int>(sfb.stride(0)) : 0,
         .sfb_s1 = fuse_scale_pack ? static_cast<int>(sfb.stride(1)) : 0,
-        .prof = prof
+        .prof = prof,
+        .task06_gated_dual = task06_gated_dual
     };
     const auto code = SM100FP8FP4Gemm1D1DRuntime::generate(args);
     const auto runtime = compiler->build("sm100_fp8_fp4_gemm_1d1d", code);
