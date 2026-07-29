@@ -75,9 +75,18 @@ if _USE_TVM_FFI:
     # TGV kernel is experimental while its ABI uses the same cute.Tensor
     # and EnvStream argument types, so bind that shipped converter here.
     from cutlass.cute import _tvm_ffi_args_spec_converter
+    from cutlass.cutlass_dsl.tvm_ffi_provider import TVMFFIJitCompiledFunction
 
     _tvm_ffi_args_spec_converter.attach_args_spec_converter(
         cute_ext._dsl.CuteExperimentalDSL._get_dsl()
+    )
+    # CuteExperimentalDSL 4.5.2 unconditionally reassigns the compiled
+    # function's class after compilation.  Its normal driver class has an
+    # incompatible Python layout with TVMFFIJitCompiledFunction.  This exact
+    # GEMM has no compiler-added workspace arguments, so retain the FFI class
+    # at that final assignment instead of applying the driver-only checker.
+    cute_ext._dsl.CuteExperimentalDSL.JitCompiledFunction = (
+        TVMFFIJitCompiledFunction
     )
 
 
