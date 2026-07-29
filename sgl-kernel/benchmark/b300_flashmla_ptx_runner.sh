@@ -101,8 +101,19 @@ harness_paths = {
     / "sgl-kernel/benchmark/bench_flashmla_glm52_decode.py",
     "analyzer": source_root
     / "sgl-kernel/benchmark/analyze_flashmla_glm52.py",
+    "dispatch_contract": source_root
+    / "sgl-kernel/benchmark/flashmla_glm52_contract.py",
+    "nsys_dispatch_assertion": source_root
+    / "sgl-kernel/benchmark/assert_flashmla_glm52_nsys_dispatch.py",
+    "dispatch_contract_test": source_root
+    / "sgl-kernel/tests/test_flashmla_glm52_contract.py",
     "runner": source_root
     / "sgl-kernel/benchmark/b300_flashmla_ptx_runner.sh",
+    "candidate_patch": source_root
+    / "sgl-kernel/cmake/patches/flashmla/glm52_v32_flat_token_index.patch",
+    "flashmla_cmake": source_root / "sgl-kernel/cmake/flashmla.cmake",
+    "extension_registration": source_root
+    / "sgl-kernel/csrc/flashmla_extension.cc",
 }
 driver = subprocess.check_output(
     [
@@ -445,6 +456,7 @@ run_benchmark_process() {
     local label="$2"
     local batch_size="$3"
     local seed="$4"
+    local expected_dispatch="$5"
     local output="${B300_ARTIFACT_DIR}/benchmark/${label}.json"
     PYTHONPATH="${site}" python3 "${BENCHMARK}" \
         --output "${output}" \
@@ -456,7 +468,9 @@ run_benchmark_process() {
         --page-size 64 \
         --warmup 100 \
         --iterations 1000 \
-        --seed "${seed}"
+        --seed "${seed}" \
+        --expected-dispatch "${expected_dispatch}" \
+        --assert-production-abi
 }
 
 run_non_target_process() {
@@ -464,6 +478,7 @@ run_non_target_process() {
     local label="$2"
     local case_name="$3"
     local seed="$4"
+    local expected_dispatch="$5"
     local batch_size
     local heads_q
     local local_heads_q
@@ -504,7 +519,8 @@ run_non_target_process() {
         --page-size 64 \
         --warmup 100 \
         --iterations 1000 \
-        --seed "${seed}"
+        --seed "${seed}" \
+        --expected-dispatch "${expected_dispatch}"
 }
 
 run_correctness_case() {
@@ -514,6 +530,13 @@ run_correctness_case() {
     local active_tokens="$4"
     local topk="$5"
     local length_pattern="${6:-uniform}"
+    local expected_dispatch="${7:-ignore}"
+    local assert_production_abi="${8:-0}"
+    local kv_block_padding_rows="${9:-0}"
+    local -a extra_args=()
+    if [[ "${assert_production_abi}" == 1 ]]; then
+        extra_args+=(--assert-production-abi)
+    fi
     PYTHONPATH="${site}" python3 "${BENCHMARK}" \
         --output "${B300_ARTIFACT_DIR}/correctness/${label}.json" \
         --label "${label}" \
@@ -522,8 +545,11 @@ run_correctness_case() {
         --length-pattern "${length_pattern}" \
         --topk "${topk}" \
         --page-size 64 \
+        --kv-block-padding-rows "${kv_block_padding_rows}" \
         --seed 20260729 \
-        --correctness-only
+        --correctness-only \
+        --expected-dispatch "${expected_dispatch}" \
+        "${extra_args[@]}"
 }
 
 run_existing_sparse_decode_cases() {
@@ -614,13 +640,19 @@ run_stock_suite() {
     local round
     install_stock_site
     for round in 1 2 3; do
-        run_benchmark_process "${site}" "stock-b16-r${round}" 16 "$((20260729 + round))"
-        run_benchmark_process "${site}" "stock-b32-r${round}" 32 "$((20260729 + round))"
+        run_benchmark_process \
+            "${site}" "stock-b16-r${round}" 16 "$((20260729 + round))" unavailable
+        run_benchmark_process \
+            "${site}" "stock-b32-r${round}" 32 "$((20260729 + round))" unavailable
     done
-    run_correctness_case "${site}" "stock-production-irregular" 8 576 2048 mixed
-    run_correctness_case "${site}" "stock-fallback-topk128" 6 65 128
-    run_correctness_case "${site}" "stock-empty" 4 0 2048
-    run_correctness_case "${site}" "stock-endpoint576" 16 576 2048
+    run_correctness_case \
+        "${site}" "stock-production-irregular" 8 576 2048 mixed unavailable
+    run_correctness_case \
+        "${site}" "stock-fallback-topk128" 6 65 128 uniform unavailable
+    run_correctness_case \
+        "${site}" "stock-empty" 4 0 2048 uniform unavailable
+    run_correctness_case \
+        "${site}" "stock-endpoint576" 16 576 2048 uniform unavailable
 }
 
 run_ab_suite_for_batch() {
@@ -632,17 +664,17 @@ run_ab_suite_for_batch() {
         if (( pair % 2 == 1 )); then
             run_benchmark_process \
                 "${baseline_site}" "baseline-b${batch_size}-p${pair}" \
-                "${batch_size}" "$((20260729 + pair))"
+                "${batch_size}" "$((20260729 + pair))" disabled
             run_benchmark_process \
                 "${candidate_site}" "candidate-b${batch_size}-p${pair}" \
-                "${batch_size}" "$((20260729 + pair))"
+                "${batch_size}" "$((20260729 + pair))" hit
         else
             run_benchmark_process \
                 "${candidate_site}" "candidate-b${batch_size}-p${pair}" \
-                "${batch_size}" "$((20260729 + pair))"
+                "${batch_size}" "$((20260729 + pair))" hit
             run_benchmark_process \
                 "${baseline_site}" "baseline-b${batch_size}-p${pair}" \
-                "${batch_size}" "$((20260729 + pair))"
+                "${batch_size}" "$((20260729 + pair))" disabled
         fi
     done
 }
@@ -657,17 +689,17 @@ run_non_target_ab_suite() {
             if (( pair % 2 == 1 )); then
                 run_non_target_process \
                     "${baseline_site}" "baseline-nontarget-${case_name}-p${pair}" \
-                    "${case_name}" "$((20260729 + pair))"
+                    "${case_name}" "$((20260729 + pair))" disabled
                 run_non_target_process \
                     "${candidate_site}" "candidate-nontarget-${case_name}-p${pair}" \
-                    "${case_name}" "$((20260729 + pair))"
+                    "${case_name}" "$((20260729 + pair))" miss
             else
                 run_non_target_process \
                     "${candidate_site}" "candidate-nontarget-${case_name}-p${pair}" \
-                    "${case_name}" "$((20260729 + pair))"
+                    "${case_name}" "$((20260729 + pair))" miss
                 run_non_target_process \
                     "${baseline_site}" "baseline-nontarget-${case_name}-p${pair}" \
-                    "${case_name}" "$((20260729 + pair))"
+                    "${case_name}" "$((20260729 + pair))" disabled
             fi
         done
     done
@@ -675,15 +707,34 @@ run_non_target_ab_suite() {
 
 run_built_correctness() {
     local arm
+    local target_dispatch
+    local fallback_dispatch
     for arm in baseline candidate; do
+        if [[ "${arm}" == candidate ]]; then
+            target_dispatch=hit
+            fallback_dispatch=miss
+        else
+            target_dispatch=disabled
+            fallback_dispatch=disabled
+        fi
         run_correctness_case \
-            "${B300_BUILD_DIR}/${arm}/site" "${arm}-production-irregular" 8 576 2048 mixed
+            "${B300_BUILD_DIR}/${arm}/site" "${arm}-production-abi" \
+            16 576 2048 production "${target_dispatch}" 1
         run_correctness_case \
-            "${B300_BUILD_DIR}/${arm}/site" "${arm}-fallback-topk128" 6 65 128
+            "${B300_BUILD_DIR}/${arm}/site" "${arm}-production-irregular" \
+            8 576 2048 mixed "${target_dispatch}"
         run_correctness_case \
-            "${B300_BUILD_DIR}/${arm}/site" "${arm}-empty" 4 0 2048
+            "${B300_BUILD_DIR}/${arm}/site" "${arm}-fallback-topk128" \
+            6 65 128 uniform "${fallback_dispatch}"
         run_correctness_case \
-            "${B300_BUILD_DIR}/${arm}/site" "${arm}-endpoint576" 16 576 2048
+            "${B300_BUILD_DIR}/${arm}/site" "${arm}-fallback-padded-block-stride" \
+            6 65 2048 uniform "${fallback_dispatch}" 0 1
+        run_correctness_case \
+            "${B300_BUILD_DIR}/${arm}/site" "${arm}-empty" \
+            4 0 2048 uniform "${target_dispatch}"
+        run_correctness_case \
+            "${B300_BUILD_DIR}/${arm}/site" "${arm}-endpoint576" \
+            16 576 2048 uniform "${target_dispatch}"
         run_existing_sparse_decode_cases "${B300_BUILD_DIR}/${arm}/site" "${arm}"
     done
 }
@@ -751,6 +802,24 @@ extract_binary_evidence() {
         fi
     done
     ((target_hits > 0))
+    local named_flat_hits
+    named_flat_hits="$(
+        {
+            grep -a -l \
+                'flash_fwd_splitkv_mla_fp8_sparse_kernel_glm52_flat_page64_v32' \
+                "${arm_sass}"/*.symbols.txt \
+                "${arm_sass}"/*.cuobjdump.sass \
+                "${arm_sass}"/*.nvdisasm.txt \
+                2>/dev/null || true
+        } | wc -l
+    )"
+    printf '%s\n' "${named_flat_hits}" \
+        > "${arm_sass}/named-flat-kernel-file-count.txt"
+    if [[ "${arm}" == candidate ]]; then
+        ((named_flat_hits > 0))
+    else
+        ((named_flat_hits == 0))
+    fi
 }
 
 analyze_ab_results() {
@@ -764,6 +833,10 @@ run_ncu_capture() {
     local arm="$1"
     local site="${B300_BUILD_DIR}/${arm}/site"
     local prefix="${B300_ARTIFACT_DIR}/ncu/${arm}-main"
+    local expected_dispatch=disabled
+    if [[ "${arm}" == candidate ]]; then
+        expected_dispatch=hit
+    fi
     PYTHONPATH="${site}" "${NCU}" \
         --target-processes all \
         --profile-from-start off \
@@ -784,7 +857,9 @@ run_ncu_capture() {
             --page-size 64 \
             --profile-only \
             --profile-region operator \
-            --profile-iterations 1
+            --profile-iterations 1 \
+            --expected-dispatch "${expected_dispatch}" \
+            --assert-production-abi
     "${NCU}" --import "${prefix}.ncu-rep" --page details \
         > "${prefix}-details.txt"
     "${NCU}" --import "${prefix}.ncu-rep" --page raw --csv \
@@ -798,6 +873,15 @@ run_nsys_capture() {
     local pattern="$4"
     local active_tokens="$5"
     local region="${6:-containing}"
+    local heads_q="${7:-64}"
+    local local_heads_q="${8:-8}"
+    local expected_dispatch="${9:-ignore}"
+    local assert_production_abi="${10:-0}"
+    local kv_block_padding_rows="${11:-0}"
+    local -a extra_args=()
+    if [[ "${assert_production_abi}" == 1 ]]; then
+        extra_args+=(--assert-production-abi)
+    fi
     local prefix="${B300_ARTIFACT_DIR}/nsys/${label}-region"
     PYTHONPATH="${site}" "${NSYS}" profile \
         -t cuda,nvtx \
@@ -813,24 +897,55 @@ run_nsys_capture() {
             --output "${B300_ARTIFACT_DIR}/nsys/${label}-input.json" \
             --label "${label}-nsys" \
             --batch-size 16 \
+            --heads-q "${heads_q}" \
+            --local-heads-q "${local_heads_q}" \
             --active-tokens "${active_tokens}" \
             --length-pattern "${pattern}" \
             --topk "${topk}" \
             --page-size 64 \
+            --kv-block-padding-rows "${kv_block_padding_rows}" \
             --profile-only \
             --profile-region "${region}" \
-            --profile-iterations 5
+            --profile-iterations 5 \
+            --expected-dispatch "${expected_dispatch}" \
+            "${extra_args[@]}"
     "${NSYS}" stats --report cuda_gpu_kern_sum --format csv "${prefix}.nsys-rep" \
         > "${prefix}-cuda_gpu_kern_sum.csv"
     "${NSYS}" stats --report nvtx_kern_sum --format csv "${prefix}.nsys-rep" \
         > "${prefix}-nvtx_kern_sum.csv"
 }
 
+assert_nsys_dispatch() {
+    local label="$1"
+    local expected_state="$2"
+    local expected_h_q="$3"
+    local expected_flat="$4"
+    local expected_generic="$5"
+    local expected_region="$6"
+    local prefix="${B300_ARTIFACT_DIR}/nsys/${label}-region"
+    python3 \
+        "${B300_SOURCE_DIR}/sgl-kernel/benchmark/assert_flashmla_glm52_nsys_dispatch.py" \
+        --input "${B300_ARTIFACT_DIR}/nsys/${label}-input.json" \
+        --csv "${prefix}-cuda_gpu_kern_sum.csv" \
+        --output "${prefix}-dispatch-assertion.json" \
+        --expected-state "${expected_state}" \
+        --expected-h-q "${expected_h_q}" \
+        --expected-region "${expected_region}" \
+        --expected-iterations 5 \
+        --expected-flat "${expected_flat}" \
+        --expected-generic "${expected_generic}"
+}
+
 run_profile_suite() {
     local arm
     local extension
     local extension_sha
+    local expected_dispatch
     for arm in baseline candidate; do
+        expected_dispatch=disabled
+        if [[ "${arm}" == candidate ]]; then
+            expected_dispatch=hit
+        fi
         extension="$(find "${B300_BUILD_DIR}/${arm}/site/sgl_kernel" \
             -maxdepth 1 -type f -name 'flashmla_ops*.so' -print -quit)"
         test -n "${extension}"
@@ -841,12 +956,28 @@ run_profile_suite() {
             "${arm}-profile-preflight"
         run_ncu_capture "${arm}"
         run_nsys_capture \
-            "${arm}-target" "${B300_BUILD_DIR}/${arm}/site" 2048 production 576 containing
+            "${arm}-target" "${B300_BUILD_DIR}/${arm}/site" \
+            2048 production 576 containing 64 8 "${expected_dispatch}" 1
         run_nsys_capture \
-            "${arm}-graph" "${B300_BUILD_DIR}/${arm}/site" 2048 production 576 graph
+            "${arm}-graph" "${B300_BUILD_DIR}/${arm}/site" \
+            2048 production 576 graph 64 8 "${expected_dispatch}" 1
     done
     run_nsys_capture \
-        candidate-fallback "${B300_BUILD_DIR}/candidate/site" 128 uniform 65 containing
+        candidate-fallback "${B300_BUILD_DIR}/candidate/site" \
+        128 uniform 65 containing 64 8 miss
+    run_nsys_capture \
+        candidate-h128 "${B300_BUILD_DIR}/candidate/site" \
+        2048 production 576 operator 128 128 miss
+    run_nsys_capture \
+        candidate-padded-block-stride "${B300_BUILD_DIR}/candidate/site" \
+        2048 uniform 65 operator 64 8 miss 0 1
+    assert_nsys_dispatch baseline-target disabled 64 0 5 containing
+    assert_nsys_dispatch candidate-target hit 64 5 0 containing
+    assert_nsys_dispatch baseline-graph disabled 64 0 5 graph
+    assert_nsys_dispatch candidate-graph hit 64 5 0 graph
+    assert_nsys_dispatch candidate-fallback miss 64 0 5 containing
+    assert_nsys_dispatch candidate-h128 miss 128 0 10 operator
+    assert_nsys_dispatch candidate-padded-block-stride miss 64 0 5 operator
     {
         grep -h 'flash_fwd_splitkv_mla_fp8_sparse_kernel' \
             "${B300_ARTIFACT_DIR}"/nsys/*cuda_gpu_kern_sum.csv || true

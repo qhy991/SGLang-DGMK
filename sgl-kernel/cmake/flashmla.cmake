@@ -9,7 +9,7 @@ FetchContent_Populate(repo-flashmla)
 
 option(
     SGL_FLASHMLA_GLM52_FLAT_TOKEN_INDEX
-    "Specialize contiguous V3.2 sparse-decode token addressing"
+    "Specialize native-H64 contiguous V3.2 sparse-decode token addressing"
     OFF
 )
 if(SGL_FLASHMLA_GLM52_FLAT_TOKEN_INDEX)
@@ -25,8 +25,36 @@ if(SGL_FLASHMLA_GLM52_FLAT_TOKEN_INDEX)
         FLASHMLA_GLM52_CONFIG
         "${repo-flashmla_SOURCE_DIR}/csrc/sm100/decode/head64/config.h"
     )
+    set(
+        FLASHMLA_GLM52_API
+        "${repo-flashmla_SOURCE_DIR}/csrc/api/sparse_decode.h"
+    )
+    set(
+        FLASHMLA_GLM52_HEADER
+        "${repo-flashmla_SOURCE_DIR}/csrc/sm100/decode/head64/kernel.h"
+    )
+    set(
+        FLASHMLA_GLM52_V32_INSTANTIATION
+        "${repo-flashmla_SOURCE_DIR}/csrc/sm100/decode/head64/instantiations/v32.cu"
+    )
+    set(
+        FLASHMLA_GLM52_MODEL1_INSTANTIATION
+        "${repo-flashmla_SOURCE_DIR}/csrc/sm100/decode/head64/instantiations/model1.cu"
+    )
     file(READ "${FLASHMLA_GLM52_KERNEL}" FLASHMLA_GLM52_KERNEL_CONTENT)
     file(READ "${FLASHMLA_GLM52_CONFIG}" FLASHMLA_GLM52_CONFIG_CONTENT)
+    file(READ "${FLASHMLA_GLM52_API}" FLASHMLA_GLM52_API_CONTENT)
+    file(READ "${FLASHMLA_GLM52_HEADER}" FLASHMLA_GLM52_HEADER_CONTENT)
+    file(
+        READ
+        "${FLASHMLA_GLM52_V32_INSTANTIATION}"
+        FLASHMLA_GLM52_V32_INSTANTIATION_CONTENT
+    )
+    file(
+        READ
+        "${FLASHMLA_GLM52_MODEL1_INSTANTIATION}"
+        FLASHMLA_GLM52_MODEL1_INSTANTIATION_CONTENT
+    )
     string(
         FIND
         "${FLASHMLA_GLM52_KERNEL_CONTENT}"
@@ -41,14 +69,63 @@ if(SGL_FLASHMLA_GLM52_FLAT_TOKEN_INDEX)
     )
     string(
         FIND
+        "${FLASHMLA_GLM52_KERNEL_CONTENT}"
+        "flash_fwd_splitkv_mla_fp8_sparse_kernel_glm52_flat_page64_v32"
+        FLASHMLA_GLM52_NAMED_KERNEL_PATCHED
+    )
+    string(
+        FIND
         "${FLASHMLA_GLM52_CONFIG_CONTENT}"
         "template<ModelType MODEL_TYPE, bool FLAT_PAGE64_V32 = false>"
         FLASHMLA_GLM52_CONFIG_PATCHED
     )
+    string(
+        FIND
+        "${FLASHMLA_GLM52_API_CONTENT}"
+        "run_flash_splitkv_mla_fp8_sparse_kernel<MODEL_TYPE>(params, params.h_q)"
+        FLASHMLA_GLM52_H64_SCOPE_PATCHED
+    )
+    string(
+        FIND
+        "${FLASHMLA_GLM52_API_CONTENT}"
+        "run_flash_splitkv_mla_fp8_sparse_kernel<MODEL_TYPE>(cur_params, params.h_q)"
+        FLASHMLA_GLM52_H128_SCOPE_PATCHED
+    )
+    string(
+        FIND
+        "${FLASHMLA_GLM52_HEADER_CONTENT}"
+        "use_glm52_flat_token_index"
+        FLASHMLA_GLM52_HEADER_PATCHED
+    )
+    string(
+        FIND
+        "${FLASHMLA_GLM52_HEADER_CONTENT}"
+        "params, int original_h_q);"
+        FLASHMLA_GLM52_DECLARATION_PATCHED
+    )
+    string(
+        FIND
+        "${FLASHMLA_GLM52_V32_INSTANTIATION_CONTENT}"
+        "const SparseAttnDecodeParams &params, int original_h_q"
+        FLASHMLA_GLM52_V32_INSTANTIATION_PATCHED
+    )
+    string(
+        FIND
+        "${FLASHMLA_GLM52_MODEL1_INSTANTIATION_CONTENT}"
+        "const SparseAttnDecodeParams &params, int original_h_q"
+        FLASHMLA_GLM52_MODEL1_INSTANTIATION_PATCHED
+    )
     if(
         FLASHMLA_GLM52_KERNEL_PATCHED EQUAL -1
         AND FLASHMLA_GLM52_DISPATCH_PATCHED EQUAL -1
+        AND FLASHMLA_GLM52_NAMED_KERNEL_PATCHED EQUAL -1
         AND FLASHMLA_GLM52_CONFIG_PATCHED EQUAL -1
+        AND FLASHMLA_GLM52_H64_SCOPE_PATCHED EQUAL -1
+        AND FLASHMLA_GLM52_H128_SCOPE_PATCHED EQUAL -1
+        AND FLASHMLA_GLM52_HEADER_PATCHED EQUAL -1
+        AND FLASHMLA_GLM52_DECLARATION_PATCHED EQUAL -1
+        AND FLASHMLA_GLM52_V32_INSTANTIATION_PATCHED EQUAL -1
+        AND FLASHMLA_GLM52_MODEL1_INSTANTIATION_PATCHED EQUAL -1
     )
         execute_process(
             COMMAND patch -p1 --forward --input=${FLASHMLA_GLM52_PATCH}
@@ -66,12 +143,38 @@ if(SGL_FLASHMLA_GLM52_FLAT_TOKEN_INDEX)
         endif()
         file(READ "${FLASHMLA_GLM52_KERNEL}" FLASHMLA_GLM52_KERNEL_CONTENT)
         file(READ "${FLASHMLA_GLM52_CONFIG}" FLASHMLA_GLM52_CONFIG_CONTENT)
+        file(READ "${FLASHMLA_GLM52_API}" FLASHMLA_GLM52_API_CONTENT)
+        file(READ "${FLASHMLA_GLM52_HEADER}" FLASHMLA_GLM52_HEADER_CONTENT)
+        file(
+            READ
+            "${FLASHMLA_GLM52_V32_INSTANTIATION}"
+            FLASHMLA_GLM52_V32_INSTANTIATION_CONTENT
+        )
+        file(
+            READ
+            "${FLASHMLA_GLM52_MODEL1_INSTANTIATION}"
+            FLASHMLA_GLM52_MODEL1_INSTANTIATION_CONTENT
+        )
         if(
             NOT FLASHMLA_GLM52_KERNEL_CONTENT MATCHES "use_flat_page64_v32"
             OR NOT FLASHMLA_GLM52_KERNEL_CONTENT MATCHES
                 "KernelTemplate<MODEL_TYPE, true>::run\\(params\\)"
+            OR NOT FLASHMLA_GLM52_KERNEL_CONTENT MATCHES
+                "flash_fwd_splitkv_mla_fp8_sparse_kernel_glm52_flat_page64_v32"
             OR NOT FLASHMLA_GLM52_CONFIG_CONTENT MATCHES
                 "bool FLAT_PAGE64_V32 = false"
+            OR NOT FLASHMLA_GLM52_API_CONTENT MATCHES
+                "run_flash_splitkv_mla_fp8_sparse_kernel<MODEL_TYPE>\\(params, params.h_q\\)"
+            OR NOT FLASHMLA_GLM52_API_CONTENT MATCHES
+                "run_flash_splitkv_mla_fp8_sparse_kernel<MODEL_TYPE>\\(cur_params, params.h_q\\)"
+            OR NOT FLASHMLA_GLM52_HEADER_CONTENT MATCHES
+                "use_glm52_flat_token_index"
+            OR NOT FLASHMLA_GLM52_HEADER_CONTENT MATCHES
+                "params, int original_h_q\\);"
+            OR NOT FLASHMLA_GLM52_V32_INSTANTIATION_CONTENT MATCHES
+                "const SparseAttnDecodeParams &params, int original_h_q"
+            OR NOT FLASHMLA_GLM52_MODEL1_INSTANTIATION_CONTENT MATCHES
+                "const SparseAttnDecodeParams &params, int original_h_q"
         )
             message(FATAL_ERROR "GLM-5.2 FlashMLA patch verification failed")
         endif()
@@ -79,11 +182,47 @@ if(SGL_FLASHMLA_GLM52_FLAT_TOKEN_INDEX)
     elseif(
         NOT FLASHMLA_GLM52_KERNEL_PATCHED EQUAL -1
         AND NOT FLASHMLA_GLM52_DISPATCH_PATCHED EQUAL -1
+        AND NOT FLASHMLA_GLM52_NAMED_KERNEL_PATCHED EQUAL -1
         AND NOT FLASHMLA_GLM52_CONFIG_PATCHED EQUAL -1
+        AND NOT FLASHMLA_GLM52_H64_SCOPE_PATCHED EQUAL -1
+        AND NOT FLASHMLA_GLM52_H128_SCOPE_PATCHED EQUAL -1
+        AND NOT FLASHMLA_GLM52_HEADER_PATCHED EQUAL -1
+        AND NOT FLASHMLA_GLM52_DECLARATION_PATCHED EQUAL -1
+        AND NOT FLASHMLA_GLM52_V32_INSTANTIATION_PATCHED EQUAL -1
+        AND NOT FLASHMLA_GLM52_MODEL1_INSTANTIATION_PATCHED EQUAL -1
     )
         message(STATUS "GLM-5.2 V3.2 flat-token-index specialization already applied")
     else()
         message(FATAL_ERROR "Partially patched GLM-5.2 FlashMLA dependency")
+    endif()
+else()
+    file(
+        READ
+        "${repo-flashmla_SOURCE_DIR}/csrc/sm100/decode/head64/kernel.h"
+        FLASHMLA_GLM52_DISABLED_HEADER_CONTENT
+    )
+    file(
+        READ
+        "${repo-flashmla_SOURCE_DIR}/csrc/sm100/decode/head64/kernel.cuh"
+        FLASHMLA_GLM52_DISABLED_KERNEL_CONTENT
+    )
+    file(
+        READ
+        "${repo-flashmla_SOURCE_DIR}/csrc/api/sparse_decode.h"
+        FLASHMLA_GLM52_DISABLED_API_CONTENT
+    )
+    if(
+        FLASHMLA_GLM52_DISABLED_HEADER_CONTENT MATCHES
+            "use_glm52_flat_token_index"
+        OR FLASHMLA_GLM52_DISABLED_KERNEL_CONTENT MATCHES
+            "flash_fwd_splitkv_mla_fp8_sparse_kernel_glm52_flat_page64_v32"
+        OR FLASHMLA_GLM52_DISABLED_API_CONTENT MATCHES
+            "cur_params, params.h_q"
+    )
+        message(
+            FATAL_ERROR
+            "SGL_FLASHMLA_GLM52_FLAT_TOKEN_INDEX=OFF requires a clean, unpatched FlashMLA source tree"
+        )
     endif()
 endif()
 
@@ -287,6 +426,12 @@ if(SGL_FLASHMLA_SM103_ONLY)
 endif()
 if(FLASHMLA_ENABLE_SM100)
     target_compile_definitions(flashmla_ops PRIVATE FLASHMLA_ENABLE_SM100)
+endif()
+if(SGL_FLASHMLA_GLM52_FLAT_TOKEN_INDEX)
+    target_compile_definitions(
+        flashmla_ops
+        PRIVATE SGL_FLASHMLA_GLM52_FLAT_TOKEN_INDEX=1
+    )
 endif()
 
 # CUDA 13 moved cuda/std/* under cccl/cuda/std/*. The vendored cutlass routes

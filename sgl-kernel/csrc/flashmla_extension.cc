@@ -21,6 +21,52 @@ limitations under the License.
 #include "api/sparse_fwd.h"
 #include "sgl_kernel_ops.h"
 
+static int64_t sgl_flashmla_glm52_flat_index_dispatch_state(
+    int64_t original_h_q,
+    int64_t kernel_h_q,
+    int64_t s_q,
+    int64_t d_qk,
+    int64_t topk,
+    int64_t page_block_size,
+    int64_t stride_kv_row,
+    int64_t stride_kv_block,
+    int64_t extra_topk,
+    bool has_topk_length,
+    bool has_extra_topk_length,
+    bool has_attn_sink) {
+#ifdef SGL_FLASHMLA_GLM52_FLAT_TOKEN_INDEX
+  return sm100::decode::head64::use_glm52_flat_token_index(
+             static_cast<int>(original_h_q),
+             static_cast<int>(kernel_h_q),
+             static_cast<int>(s_q),
+             static_cast<int>(d_qk),
+             static_cast<int>(topk),
+             static_cast<int>(page_block_size),
+             stride_kv_row,
+             stride_kv_block,
+             static_cast<int>(extra_topk),
+             has_topk_length,
+             has_extra_topk_length,
+             has_attn_sink)
+             ? 2
+             : 1;
+#else
+  (void)original_h_q;
+  (void)kernel_h_q;
+  (void)s_q;
+  (void)d_qk;
+  (void)topk;
+  (void)page_block_size;
+  (void)stride_kv_row;
+  (void)stride_kv_block;
+  (void)extra_topk;
+  (void)has_topk_length;
+  (void)has_extra_topk_length;
+  (void)has_attn_sink;
+  return 0;
+#endif
+}
+
 static std::tuple<at::Tensor, at::Tensor, std::optional<at::Tensor>, std::optional<at::Tensor>> sgl_sparse_decode_fwd(
     const at::Tensor& q,
     const at::Tensor& kv,
@@ -75,6 +121,14 @@ TORCH_LIBRARY_FRAGMENT(sgl_kernel, m) {
   /*
    * From FlashMLA
    */
+  m.def(
+      "flashmla_glm52_flat_index_dispatch_state(int original_h_q, int kernel_h_q, int s_q, int d_qk, int topk, "
+      "int page_block_size, int stride_kv_row, int stride_kv_block, int extra_topk, bool has_topk_length, bool "
+      "has_extra_topk_length, bool has_attn_sink) -> int");
+  m.impl(
+      "flashmla_glm52_flat_index_dispatch_state",
+      &sgl_flashmla_glm52_flat_index_dispatch_state);
+
   m.def(
       "get_mla_decoding_metadata(Tensor seqlens_k, int num_q_tokens_per_head_k, int h_k, int? h_q, bool "
       "is_fp8_kvcache, int? topk) -> Tensor[]");

@@ -19,6 +19,11 @@ from typing import Callable
 
 import torch
 
+from flashmla_glm52_contract import (
+    DISPATCH_STATE_NAMES,
+    flat_index_dispatch_hit,
+    production_abi_failures,
+)
 from sgl_kernel import flashmla_ops
 from sgl_kernel.flash_mla import flash_mla_with_kvcache, get_mla_metadata
 
@@ -42,6 +47,7 @@ class Fixture:
     valid_lengths: tuple[int, ...]
     topk: int
     page_size: int
+    kv_block_padding_rows: int
     row_cache_tokens: int
     q: torch.Tensor
     packed_kv: torch.Tensor
@@ -149,12 +155,15 @@ def make_fixture(
     valid_lengths: tuple[int, ...],
     topk: int,
     page_size: int,
+    kv_block_padding_rows: int,
     seed: int,
 ) -> Fixture:
     if len(valid_lengths) != batch_size:
         raise ValueError("valid_lengths must have one entry per batch row")
     if topk <= 0 or topk % 64:
         raise ValueError("topk must be a positive multiple of 64")
+    if kv_block_padding_rows < 0:
+        raise ValueError("kv_block_padding_rows must be nonnegative")
     if any(length < 0 or length > topk for length in valid_lengths):
         raise ValueError("valid lengths must be within [0, topk]")
     if heads_q not in (64, 128) or not 0 < local_heads_q <= heads_q:
@@ -196,6 +205,19 @@ def make_fixture(
         / 10
     ).clamp_(-1, 1)
     packed_kv = _quantize_v32_kv(unpacked_kv)
+    if kv_block_padding_rows:
+        padded_kv = torch.empty(
+            (
+                num_blocks,
+                page_size + kv_block_padding_rows,
+                1,
+                PACKED_ROW_BYTES,
+            ),
+            dtype=packed_kv.dtype,
+            device=packed_kv.device,
+        )
+        padded_kv[:, :page_size].copy_(packed_kv)
+        packed_kv = padded_kv[:, :page_size]
     dequant_kv = _dequantize_v32_kv(packed_kv)
 
     indices = torch.full(
@@ -243,6 +265,7 @@ def make_fixture(
         valid_lengths=valid_lengths,
         topk=topk,
         page_size=page_size,
+        kv_block_padding_rows=kv_block_padding_rows,
         row_cache_tokens=row_cache_tokens,
         q=q,
         packed_kv=packed_kv,
@@ -584,6 +607,7 @@ def fixture_record(fixture: Fixture, length_pattern: str) -> dict[str, object]:
         "attn_sink": None,
         "extra_topk_length": None,
         "length_pattern": length_pattern,
+        "kv_block_padding_rows": fixture.kv_block_padding_rows,
         "valid_lengths": list(fixture.valid_lengths),
         "row_cache_tokens": fixture.row_cache_tokens,
         "valid_index_count": int(valid.sum().item()),
@@ -597,6 +621,121 @@ def fixture_record(fixture: Fixture, length_pattern: str) -> dict[str, object]:
             "metadata": _tensor_fingerprint(fixture.metadata),
             "num_splits": _tensor_fingerprint(fixture.num_splits),
         },
+    }
+
+
+def dispatch_record(fixture: Fixture) -> dict[str, object]:
+    inputs = {
+        "original_h_q": fixture.heads_q,
+        "kernel_h_q": 64 if fixture.heads_q == 128 else fixture.heads_q,
+        "s_q": int(fixture.q.shape[1]),
+        "d_qk": int(fixture.q.shape[3]),
+        "topk": int(fixture.indices.shape[2]),
+        "page_block_size": int(fixture.packed_kv.shape[1]),
+        "stride_kv_row": int(fixture.packed_kv.stride(1)),
+        "stride_kv_block": int(fixture.packed_kv.stride(0)),
+        "extra_topk": 0,
+        "has_topk_length": False,
+        "has_extra_topk_length": False,
+        "has_attn_sink": False,
+    }
+    contract_hit = flat_index_dispatch_hit(**inputs)
+    try:
+        operator = torch.ops.sgl_kernel.flashmla_glm52_flat_index_dispatch_state
+        state_code = int(
+            operator.default(
+                inputs["original_h_q"],
+                inputs["kernel_h_q"],
+                inputs["s_q"],
+                inputs["d_qk"],
+                inputs["topk"],
+                inputs["page_block_size"],
+                inputs["stride_kv_row"],
+                inputs["stride_kv_block"],
+                inputs["extra_topk"],
+                inputs["has_topk_length"],
+                inputs["has_extra_topk_length"],
+                inputs["has_attn_sink"],
+            )
+        )
+    except AttributeError:
+        return {
+            "available": False,
+            "state": "unavailable",
+            "state_code": None,
+            "contract_hit": contract_hit,
+            "inputs": inputs,
+        }
+    if state_code not in DISPATCH_STATE_NAMES:
+        raise AssertionError(f"unknown dispatch state code: {state_code}")
+    state = DISPATCH_STATE_NAMES[state_code]
+    if state != "disabled" and (state == "hit") != contract_hit:
+        raise AssertionError(
+            f"extension dispatch state {state!r} disagrees with contract "
+            f"hit={contract_hit}"
+        )
+    return {
+        "available": True,
+        "state": state,
+        "state_code": state_code,
+        "contract_hit": contract_hit,
+        "inputs": inputs,
+    }
+
+
+def assert_expected_dispatch(
+    record: dict[str, object],
+    expected: str,
+) -> None:
+    if expected == "ignore":
+        return
+    actual = record["state"]
+    if actual != expected:
+        raise AssertionError(
+            f"flat-index dispatch state {actual!r}, expected {expected!r}"
+        )
+
+
+def production_abi_record(fixture: Fixture) -> dict[str, object]:
+    zero_padded_heads = fixture.q[:, :, fixture.local_heads_q :]
+    valid_indices = fixture.indices >= 0
+    physical_indices_within_batch_rows = True
+    for batch_index in range(fixture.batch_size):
+        row = fixture.indices[batch_index][valid_indices[batch_index]]
+        lower = batch_index * fixture.row_cache_tokens
+        upper = lower + fixture.row_cache_tokens
+        if row.numel() and not ((row >= lower) & (row < upper)).all().item():
+            physical_indices_within_batch_rows = False
+            break
+    return {
+        "batch_size": fixture.batch_size,
+        "local_heads_q": fixture.local_heads_q,
+        "padded_heads_q": fixture.heads_q,
+        "page_size": fixture.page_size,
+        "topk": fixture.topk,
+        "head_dim_qk": HEAD_DIM_QK,
+        "head_dim_v": HEAD_DIM_V,
+        "packed_row_bytes": PACKED_ROW_BYTES,
+        "zero_padded_heads_all_zero": bool(
+            zero_padded_heads.numel() > 0
+            and (zero_padded_heads == 0).all().item()
+        ),
+        "topk_length_present": False,
+        "extra_topk_length_present": False,
+        "attn_sink_present": False,
+        "extra_kv_present": False,
+        "invalid_indices_all_minus_one": bool(
+            (fixture.indices[~valid_indices] == -1).all().item()
+        ),
+        "physical_indices_within_batch_rows": physical_indices_within_batch_rows,
+        "valid_lengths": list(fixture.valid_lengths),
+        "cache_seqlens_values": fixture.cache_seqlens.cpu().tolist(),
+        "valid_index_count": int(valid_indices.sum().item()),
+        "q": _tensor_fingerprint(fixture.q),
+        "packed_kv": _tensor_fingerprint(fixture.packed_kv),
+        "indices": _tensor_fingerprint(fixture.indices),
+        "block_table": _tensor_fingerprint(fixture.block_table),
+        "cache_seqlens": _tensor_fingerprint(fixture.cache_seqlens),
     }
 
 
@@ -614,10 +753,17 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--topk", type=int, default=2048)
     parser.add_argument("--page-size", type=int, default=64)
+    parser.add_argument("--kv-block-padding-rows", type=int, default=0)
     parser.add_argument("--warmup", type=int, default=100)
     parser.add_argument("--iterations", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=20260729)
     parser.add_argument("--label", default="unknown")
+    parser.add_argument(
+        "--expected-dispatch",
+        choices=("ignore", "unavailable", "disabled", "miss", "hit"),
+        default="ignore",
+    )
+    parser.add_argument("--assert-production-abi", action="store_true")
     parser.add_argument("--correctness-only", action="store_true")
     parser.add_argument("--profile-only", action="store_true")
     parser.add_argument("--profile-iterations", type=int, default=5)
@@ -645,6 +791,7 @@ def main() -> None:
             "active_tokens": args.active_tokens,
             "topk": args.topk,
             "page_size": args.page_size,
+            "kv_block_padding_rows": args.kv_block_padding_rows,
             "packed_row_bytes": PACKED_ROW_BYTES,
             "length_pattern": args.length_pattern,
             "seed": args.seed,
@@ -666,10 +813,25 @@ def main() -> None:
             valid_lengths=valid_lengths,
             topk=args.topk,
             page_size=args.page_size,
+            kv_block_padding_rows=args.kv_block_padding_rows,
             seed=args.seed,
         )
-        correctness = validate(fixture)
         result["fixture"] = fixture_record(fixture, args.length_pattern)
+        result["dispatch"] = dispatch_record(fixture)
+        assert_expected_dispatch(result["dispatch"], args.expected_dispatch)
+        if args.assert_production_abi:
+            abi = production_abi_record(fixture)
+            failures = production_abi_failures(abi)
+            result["production_abi"] = {
+                "verdict": "PASS" if not failures else "FAIL",
+                "failures": failures,
+                "record": abi,
+            }
+            if failures:
+                raise AssertionError(
+                    "production ABI mismatch: " + "; ".join(failures)
+                )
+        correctness = validate(fixture)
         result["schedule"] = {
             "metadata_shape": list(fixture.metadata.shape),
             "num_splits": fixture.num_splits.cpu().tolist(),

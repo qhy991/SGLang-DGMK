@@ -69,6 +69,13 @@ def load_records(
                 raise ValueError(f"correctness did not pass in {path}")
             if record.get("timings") is None:
                 raise ValueError(f"timings missing in {path}")
+            expected_dispatch = "disabled" if arm == "baseline" else "miss"
+            if record.get("dispatch", {}).get("state") != expected_dispatch:
+                raise ValueError(
+                    f"dispatch mismatch in {path}: "
+                    f"{record.get('dispatch', {}).get('state')!r} != "
+                    f"{expected_dispatch!r}"
+                )
             if record.get("shape", {}).get("seed") != 20260729 + pair:
                 raise ValueError(f"seed mismatch in {path}")
             extension_hash = record.get("environment", {}).get("extension_sha256")
@@ -99,6 +106,15 @@ def load_records(
             )
         if record.get("fixture", {}).get("tensors") is None:
             raise ValueError(f"fixture provenance missing in {path}")
+        expected_dispatch = "disabled" if arm == "baseline" else "hit"
+        if record.get("dispatch", {}).get("state") != expected_dispatch:
+            raise ValueError(
+                f"dispatch mismatch in {path}: "
+                f"{record.get('dispatch', {}).get('state')!r} != "
+                f"{expected_dispatch!r}"
+            )
+        if record.get("production_abi", {}).get("verdict") != "PASS":
+            raise ValueError(f"production ABI assertion missing or failed in {path}")
         extension_hash = record.get("environment", {}).get("extension_sha256")
         if not extension_hash:
             raise ValueError(f"extension SHA256 missing in {path}")

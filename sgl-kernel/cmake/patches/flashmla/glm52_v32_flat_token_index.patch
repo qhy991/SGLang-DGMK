@@ -1,65 +1,226 @@
+diff --git a/csrc/api/sparse_decode.h b/csrc/api/sparse_decode.h
+--- a/csrc/api/sparse_decode.h
++++ b/csrc/api/sparse_decode.h
+@@ -101,7 +101,7 @@ public:
+ protected:
+     void run_(const SparseAttnDecodeParams &params, const std::vector<FeatureT> &required_features) override {
+         DISPATCH_MODEL_TYPE(params.model_type, MODEL_TYPE, [&]() {
+-            sm100::decode::head64::run_flash_splitkv_mla_fp8_sparse_kernel<MODEL_TYPE>(params);
++            sm100::decode::head64::run_flash_splitkv_mla_fp8_sparse_kernel<MODEL_TYPE>(params, params.h_q);
+         });
+     }
+ };
+@@ -146,7 +146,8 @@ protected:
+                 cur_params.lse_accum += start_head_idx;
+                 cur_params.o_accum += start_head_idx * params.stride_o_accum_h_q;
+                 cur_params.h_q = 64;
+-                sm100::decode::head64::run_flash_splitkv_mla_fp8_sparse_kernel<MODEL_TYPE>(cur_params);
++                // Preserve original H128 provenance after narrowing this half to H64.
++                sm100::decode::head64::run_flash_splitkv_mla_fp8_sparse_kernel<MODEL_TYPE>(cur_params, params.h_q);
+             }
+         });
+     }
+diff --git a/csrc/sm100/decode/head64/config.h b/csrc/sm100/decode/head64/config.h
 --- a/csrc/sm100/decode/head64/config.h
 +++ b/csrc/sm100/decode/head64/config.h
-@@ -31 +31 @@
+@@ -28,7 +28,7 @@ enum NamedBarriers : uint32_t {
+     everyone_sync = 4
+ };
+
 -template<ModelType MODEL_TYPE>
 +template<ModelType MODEL_TYPE, bool FLAT_PAGE64_V32 = false>
+ struct KernelTemplate {
+
+ static constexpr int D_Q = MODEL_TYPE == ModelType::V32 ? 576 : 512;
+diff --git a/csrc/sm100/decode/head64/instantiations/model1.cu b/csrc/sm100/decode/head64/instantiations/model1.cu
+--- a/csrc/sm100/decode/head64/instantiations/model1.cu
++++ b/csrc/sm100/decode/head64/instantiations/model1.cu
+@@ -3,6 +3,6 @@
+ namespace sm100::decode::head64 {
+
+ template
+-void run_flash_splitkv_mla_fp8_sparse_kernel<ModelType::MODEL1>(const SparseAttnDecodeParams &params);
++void run_flash_splitkv_mla_fp8_sparse_kernel<ModelType::MODEL1>(const SparseAttnDecodeParams &params, int original_h_q);
+
+ }
+diff --git a/csrc/sm100/decode/head64/instantiations/v32.cu b/csrc/sm100/decode/head64/instantiations/v32.cu
+--- a/csrc/sm100/decode/head64/instantiations/v32.cu
++++ b/csrc/sm100/decode/head64/instantiations/v32.cu
+@@ -3,6 +3,6 @@
+ namespace sm100::decode::head64 {
+
+ template
+-void run_flash_splitkv_mla_fp8_sparse_kernel<ModelType::V32>(const SparseAttnDecodeParams &params);
++void run_flash_splitkv_mla_fp8_sparse_kernel<ModelType::V32>(const SparseAttnDecodeParams &params, int original_h_q);
+
+ }
+diff --git a/csrc/sm100/decode/head64/kernel.cuh b/csrc/sm100/decode/head64/kernel.cuh
 --- a/csrc/sm100/decode/head64/kernel.cuh
 +++ b/csrc/sm100/decode/head64/kernel.cuh
-@@ -19 +19 @@
+@@ -16,10 +16,10 @@
+
+ namespace sm100::decode::head64 {
+
 -template<ModelType MODEL_TYPE>
 +template<ModelType MODEL_TYPE, bool FLAT_PAGE64_V32>
-@@ -22 +22 @@
+ template<typename TmaParam>
+ __device__ void
 -KernelTemplate<MODEL_TYPE>
 +KernelTemplate<MODEL_TYPE, FLAT_PAGE64_V32>
-@@ -698,3 +697,0 @@
+ ::flash_fwd_splitkv_mla_fp8_sparse_kernel_devfunc(const SparseAttnDecodeParams &params, const TmaParam &tma_params) {
+ #if defined(KERUTILS_ENABLE_SM100A)
+     const int s_q_idx = blockIdx.x;
+@@ -695,14 +695,20 @@ KernelTemplate<MODEL_TYPE>
+                     char valid_mask = 0;
+                     CUTE_UNROLL
+                     for (int i = 0; i < 2; ++i) {
 -                        int block_idx, idx_in_block;
 -                        block_idx = (unsigned int)my_indices[i] / cur_block_size;
 -                        idx_in_block = (unsigned int)my_indices[i] % cur_block_size;
-@@ -703 +699,0 @@
+                         bool is_token_valid = my_indices[i] != -1 && (abs_pos+i < (IS_EXTRA_BLOCK?args.extra_topk_length:args.topk_length));
+                         valid_mask |= is_token_valid << i;
 -                        tma_coords[i] = is_token_valid ? block_idx*cur_tma_coords_step_per_block + idx_in_block*tma_coords_step_per_token : -1; // If the token is invalid because it topk position exceeds topk_length, we must manually fill tma_coords with -1 to avoid copying-in NaN.
-@@ -705 +701,11 @@
+                         if constexpr (MODEL_TYPE == ModelType::V32) {
 -                            int64_t offset = is_token_valid ? block_idx*cur_k_block_stride + idx_in_block*cur_k_row_stride : 0;
 +                            int64_t offset;
 +                            if constexpr (FLAT_PAGE64_V32 && !IS_EXTRA_BLOCK) {
 +                                static_assert(TMA_K_STRIDE == 656);
 +                                tma_coords[i] = is_token_valid ? my_indices[i] : -1;
-+                                offset = is_token_valid ? (int64_t)my_indices[i] * TMA_K_STRIDE : 0;
++                                offset = is_token_valid ? static_cast<int64_t>(my_indices[i]) * TMA_K_STRIDE : 0;
 +                            } else {
 +                                int block_idx = (unsigned int)my_indices[i] / cur_block_size;
 +                                int idx_in_block = (unsigned int)my_indices[i] % cur_block_size;
 +                                tma_coords[i] = is_token_valid ? block_idx*cur_tma_coords_step_per_block + idx_in_block*tma_coords_step_per_token : -1;
 +                                offset = is_token_valid ? block_idx*cur_k_block_stride + idx_in_block*cur_k_row_stride : 0;
 +                            }
-@@ -714,0 +721,3 @@
+                             float4 cur_scale_fp32 = __ldg((float4*)(cur_k_scales_ptr + offset));
+                             __nv_bfloat16 res[4];
+                             res[0] = __float2bfloat16(cur_scale_fp32.x);
+@@ -712,6 +718,9 @@ KernelTemplate<MODEL_TYPE>
+                             if (!is_token_valid) *(uint64_t*)res = (uint64_t)0;
+                             *(uint64_t*)(scales+i*NUM_SCALES_EACH_TOKEN) = *(uint64_t*)(res);
+                         } else {
 +                            int block_idx = (unsigned int)my_indices[i] / cur_block_size;
 +                            int idx_in_block = (unsigned int)my_indices[i] % cur_block_size;
 +                            tma_coords[i] = is_token_valid ? block_idx*cur_tma_coords_step_per_block + idx_in_block*tma_coords_step_per_token : -1; // If the token is invalid because it topk position exceeds topk_length, we must manually fill tma_coords with -1 to avoid copying-in NaN.
-@@ -856,2 +865,2 @@
+                             int64_t offset = block_idx*cur_k_block_stride + idx_in_block*8; // Each token has 7 scale factors with an extra 1B padding
+                             uint64_t scalesx8 = is_token_valid ? __ldg((uint64_t*)(cur_k_scales_ptr + offset)) : 0;
+                             *(uint64_t*)(scales+i*NUM_SCALES_EACH_TOKEN) = scalesx8;
+@@ -853,8 +862,16 @@ flash_fwd_splitkv_mla_fp8_sparse_kernel(__grid_constant__ const SparseAttnDecode
+     Kernel::flash_fwd_splitkv_mla_fp8_sparse_kernel_devfunc(params, tma_params);
+ }
+
 -template<ModelType MODEL_TYPE>
 -void KernelTemplate<MODEL_TYPE>::run(const SparseAttnDecodeParams &params) {
++template<typename Kernel, typename TmaParams>
++__global__ void __launch_bounds__(Kernel::NUM_THREADS, 1, 1)
++flash_fwd_splitkv_mla_fp8_sparse_kernel_glm52_flat_page64_v32(
++    __grid_constant__ const SparseAttnDecodeParams params,
++    __grid_constant__ const TmaParams tma_params) {
++    Kernel::flash_fwd_splitkv_mla_fp8_sparse_kernel_devfunc(params, tma_params);
++}
++
 +template<ModelType MODEL_TYPE, bool FLAT_PAGE64_V32>
 +void KernelTemplate<MODEL_TYPE, FLAT_PAGE64_V32>::run(const SparseAttnDecodeParams &params) {
-@@ -951 +960 @@
+     KU_ASSERT(params.topk % B_TOPK == 0, "topk (%d) mod B_TOPK (%d) must be 0", params.topk, B_TOPK);
+     KU_ASSERT(params.extra_topk % B_TOPK == 0, "extra_topk (%d) mod B_TOPK (%d) must be 0", params.extra_topk, B_TOPK);
+     KU_ASSERT(params.h_q == B_H);
+@@ -948,7 +965,17 @@ void KernelTemplate<MODEL_TYPE>::run(const SparseAttnDecodeParams &params) {
+         tensor_map_extra_kv_nope,
+         tensor_map_extra_kv_rope
+     };
 -    auto mla_kernel = &flash_fwd_splitkv_mla_fp8_sparse_kernel<KernelTemplate<MODEL_TYPE>, decltype(tma_params)>;
-+    auto mla_kernel = &flash_fwd_splitkv_mla_fp8_sparse_kernel<KernelTemplate<MODEL_TYPE, FLAT_PAGE64_V32>, decltype(tma_params)>;
-@@ -964 +973,19 @@
++    auto mla_kernel = [&]() {
++        if constexpr (FLAT_PAGE64_V32) {
++            return &flash_fwd_splitkv_mla_fp8_sparse_kernel_glm52_flat_page64_v32<
++                KernelTemplate<MODEL_TYPE, FLAT_PAGE64_V32>,
++                decltype(tma_params)>;
++        } else {
++            return &flash_fwd_splitkv_mla_fp8_sparse_kernel<
++                KernelTemplate<MODEL_TYPE, FLAT_PAGE64_V32>,
++                decltype(tma_params)>;
++        }
++    }();
+
+     constexpr size_t smem_size = sizeof(SharedMemoryPlan);
+     static_assert(smem_size < 227*1024);
+@@ -960,8 +987,28 @@ void KernelTemplate<MODEL_TYPE>::run(const SparseAttnDecodeParams &params) {
+ }
+
+ template<ModelType MODEL_TYPE>
+-void run_flash_splitkv_mla_fp8_sparse_kernel(const SparseAttnDecodeParams &params) {
 -    KernelTemplate<MODEL_TYPE>::run(params);
++void run_flash_splitkv_mla_fp8_sparse_kernel(const SparseAttnDecodeParams &params, int original_h_q) {
 +    if constexpr (MODEL_TYPE == ModelType::V32) {
-+        constexpr int BYTES_PER_TOKEN = 656;
-+        bool use_flat_page64_v32 =
-+            params.s_q == 1 &&
-+            params.h_q == 64 &&
-+            params.topk == 2048 &&
-+            params.page_block_size == 64 &&
-+            params.stride_kv_row == BYTES_PER_TOKEN &&
-+            params.stride_kv_block == 64 * BYTES_PER_TOKEN &&
-+            params.extra_topk == 0 &&
-+            params.topk_length == nullptr &&
-+            params.extra_topk_length == nullptr &&
-+            params.attn_sink == nullptr;
++        bool use_flat_page64_v32 = use_glm52_flat_token_index(
++            original_h_q,
++            params.h_q,
++            params.s_q,
++            params.d_qk,
++            params.topk,
++            params.page_block_size,
++            params.stride_kv_row,
++            params.stride_kv_block,
++            params.extra_topk,
++            params.topk_length != nullptr,
++            params.extra_topk_length != nullptr,
++            params.attn_sink != nullptr
++        );
 +        if (use_flat_page64_v32) {
 +            KernelTemplate<MODEL_TYPE, true>::run(params);
 +            return;
 +        }
 +    }
 +    KernelTemplate<MODEL_TYPE, false>::run(params);
+ }
+
+ }
+diff --git a/csrc/sm100/decode/head64/kernel.h b/csrc/sm100/decode/head64/kernel.h
+--- a/csrc/sm100/decode/head64/kernel.h
++++ b/csrc/sm100/decode/head64/kernel.h
+@@ -4,8 +4,43 @@
+
+ namespace sm100::decode::head64 {
+
++// kernel_h_q is 64 for both native H64 and each rewritten half of H128.
++inline constexpr bool use_glm52_flat_token_index(
++    int original_h_q,
++    int kernel_h_q,
++    int s_q,
++    int d_qk,
++    int topk,
++    int page_block_size,
++    int64_t stride_kv_row,
++    int64_t stride_kv_block,
++    int extra_topk,
++    bool has_topk_length,
++    bool has_extra_topk_length,
++    bool has_attn_sink
++) {
++    constexpr int BYTES_PER_TOKEN = 656;
++    return original_h_q == 64 && kernel_h_q == 64 && s_q == 1 && d_qk == 576 &&
++        topk == 2048 && page_block_size == 64 &&
++        stride_kv_row == BYTES_PER_TOKEN &&
++        stride_kv_block == 64 * BYTES_PER_TOKEN && extra_topk == 0 &&
++        !has_topk_length && !has_extra_topk_length && !has_attn_sink;
++}
++
++static_assert(use_glm52_flat_token_index(
++    64, 64, 1, 576, 2048, 64, 656, 64 * 656, 0, false, false, false
++));
++static_assert(!use_glm52_flat_token_index(
++    128, 64, 1, 576, 2048, 64, 656, 64 * 656, 0, false, false, false
++));
++static_assert(!use_glm52_flat_token_index(
++    64, 64, 2, 576, 2048, 64, 656, 64 * 656, 0, false, false, false
++));
++static_assert(!use_glm52_flat_token_index(
++    64, 64, 1, 576, 2048, 64, 656, 65 * 656, 0, false, false, false
++));
++
+ template<ModelType MODEL_TYPE>
+-void run_flash_splitkv_mla_fp8_sparse_kernel(const SparseAttnDecodeParams &params);
++void run_flash_splitkv_mla_fp8_sparse_kernel(const SparseAttnDecodeParams &params, int original_h_q);
+
+ }
+-
