@@ -190,7 +190,7 @@ def _compiled_router_prefill_kernel(
             a_,
             b_,
             c_,
-            make_fake_stream(use_tvm_ffi_env_stream=_USE_TVM_FFI),
+            make_fake_stream(),
         )
         _COMPILE_CACHE[key] = compiled
     return compiled, a_, b_, c_
@@ -213,13 +213,13 @@ def _router_logit_gemm_prefill_run(
         out,
         tactic_id,
     )
-    if _USE_TVM_FFI:
-        compiled(a_, b_, c_)
-    else:
-        stream = cuda.CUstream(
-            torch.cuda.current_stream(hidden_states.device).cuda_stream
-        )
-        compiled(a_, b_, c_, stream)
+    # Keep the stream explicit for both launch backends. TVM-FFI's
+    # environment-stream shortcut launches outside torch's active capture
+    # stream when reached through a Python CUDA custom-op implementation.
+    stream = cuda.CUstream(
+        torch.cuda.current_stream(hidden_states.device).cuda_stream
+    )
+    compiled(a_, b_, c_, stream)
     return out
 
 
