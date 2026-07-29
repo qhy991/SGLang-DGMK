@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Build same-base stock and explicit-config W13 DeepGEMM modules.
 
-The immutable source denominator is SGL DeepGEMM v0.1.4 at commit
-731e7c7a97d269e4b9f482ea18d0e709a948f293.  The candidate differs only by the
-checked-in patch in ``patches/``.  Neither module is installed into the active
-Python environment; both are staged under the task-local cache for side-by-side
+The immutable source denominator is SGL DeepGEMM v0.1.4.post1 at commit
+edcf77b276965de8f03cdc47c23f01b08bf7c7ab. The candidate differs only by the
+checked-in patch in ``patches/``. Neither module is installed into the active
+Python environment; both are staged under the selected output for side-by-side
 loading.
 """
 
@@ -24,14 +24,24 @@ import tarfile
 import tempfile
 from pathlib import Path
 
-BASE_COMMIT = "731e7c7a97d269e4b9f482ea18d0e709a948f293"
+BASE_COMMIT = "edcf77b276965de8f03cdc47c23f01b08bf7c7ab"
 CUTLASS_COMMIT = "f3fde58372d33e9a5650ba7b80fc48b3b49d40c8"
 FMT_COMMIT = "553ec11ec06fbe0beebfbb45f9dc3c9eabd83d28"
-DEFAULT_UPSTREAM = Path("/home/qinhaiyan/DeepGEMM-GLM52")
-DEFAULT_OUTPUT = Path(
-    "/home/qinhaiyan/glm52-v2-goal-runs/cache/24-moe_w13_decode/deepgemm/w13_variants"
-)
+BUILD_MAX_JOBS = "1"
 HERE = Path(__file__).resolve().parent
+REPO_ROOT = HERE.parents[1]
+DEFAULT_UPSTREAM = Path(
+    os.environ.get(
+        "DEEPGEMM_W13_BASE_REPO",
+        str(REPO_ROOT.parent / "DeepGEMM-GLM52"),
+    )
+)
+DEFAULT_OUTPUT = Path(
+    os.environ.get(
+        "DEEPGEMM_W13_OUTPUT",
+        str(REPO_ROOT / "build" / "deepgemm-w13-variants"),
+    )
+)
 PATCH = HERE / "patches" / "0001-explicit-w13-config.patch"
 BASE_BLOB_SHA256 = {
     "csrc/apis/gemm.hpp": "0840d64249e2a5a4a994d495e8320a0fff26bad9ca107426a1a1226e7d621186",
@@ -42,21 +52,21 @@ BASE_BLOB_SHA256 = {
         "cca1ddb5b5787942c31b39a9d5618929ee609c6c3b57b877fe636df39540366b"
     ),
     "csrc/tvm_ffi_api.cpp": (
-        "d1e5dbd833f257d2c4be516772404c02f1747247eef5075315ff2d1220a64c1f"
+        "c09aeec8187a2e29a3ebfc61c9ce1168a89fea775040a47bcf73739131ea57c0"
     ),
     "sgl_deep_gemm/__init__.py": (
-        "243eeaa71fa65cecaddd7298245438cb371ca765d7bf914a9427e132be8d5f26"
+        "b33e89deacdce241f01f5070d321918f5e5480e3e6d3af569678d4192db4f2a7"
     ),
 }
 EXPECTED_SOURCE_TREE_SHA256 = {
     "stock_source_tree_sha256": (
-        "917592ab68ea0608c9be33208c2c609bc7f20bd9b1603f32743dd0d1ae03d0ed"
+        "4bfc233540d0478bf88860d924c53e105be29e01ddd039a68a8c5242addb2af5"
     ),
     "candidate_source_tree_sha256": (
-        "d38d8bf9a2118a2506be0fd71827568e70a20839505238a36a9c0325415332ef"
+        "1e23f011428ca83bcc3fe1a2e990b62ed82abbba65a291a61db9cf4a729cf657"
     ),
     "complete_source_diff_sha256": (
-        "997348b6498aa18a7d70a5b1d36249b356b508cdc71e2f514a979818c48490a5"
+        "056c90d416f2278c23bcb495d41ecf28f82e7047f220f4acc8321e8f1436a458"
     ),
 }
 BASE_CFLAGS = [
@@ -168,6 +178,18 @@ def extract_git_archive(repository: Path, commit: str, destination: Path) -> Non
             )
         with tarfile.open(archive) as bundle:
             bundle.extractall(destination, filter="data")
+        # `git archive` tar umasks can vary with repository configuration.
+        # Normalize to canonical Git file modes so source-tree identities are
+        # reproducible across users and so the POSIX `patch` tool cannot
+        # change only the five touched files from 0664 to 0644.
+        for path in destination.rglob("*"):
+            if path.is_symlink():
+                continue
+            if path.is_dir():
+                path.chmod(0o755)
+            elif path.is_file():
+                executable = bool(stat.S_IMODE(path.stat().st_mode) & 0o111)
+                path.chmod(0o755 if executable else 0o644)
     finally:
         archive.unlink(missing_ok=True)
 
@@ -195,9 +217,28 @@ def materialize_source(upstream: Path, destination: Path, patched: bool) -> str:
             )
         if patched:
             subprocess.run(
-                ["git", "apply", "--check", str(PATCH)], cwd=source, check=True
+                [
+                    "patch",
+                    f"--directory={source}",
+                    "--strip=1",
+                    "--batch",
+                    "--forward",
+                    "--dry-run",
+                    f"--input={PATCH}",
+                ],
+                check=True,
             )
-            subprocess.run(["git", "apply", str(PATCH)], cwd=source, check=True)
+            subprocess.run(
+                [
+                    "patch",
+                    f"--directory={source}",
+                    "--strip=1",
+                    "--batch",
+                    "--forward",
+                    f"--input={PATCH}",
+                ],
+                check=True,
+            )
         digest = tree_sha256(source)
         if destination.exists():
             shutil.rmtree(destination)
@@ -342,11 +383,15 @@ def main() -> int:
             "reproducible W13 builds require --force so no prior object or DSO "
             "can be reused"
         )
+    # Do not let a caller's shell change the compilation schedule recorded in
+    # the runtime-attested build contract.
+    os.environ["MAX_JOBS"] = BUILD_MAX_JOBS
 
     variants: dict[str, dict[str, object]] = {}
     for variant, patched in (("stock", False), ("candidate", True)):
         source = output / "sources" / variant
-        package = output / "artifacts" / variant / "site" / f"deep_gemm_w13_{variant}"
+        package_name = "deep_gemm" if variant == "stock" else "deep_gemm_w13_candidate"
+        package = output / "artifacts" / variant / "site" / package_name
         shared_object = package / "_C.so"
         build_directory = output / "compile" / variant
         if build_directory.exists():
@@ -415,7 +460,7 @@ def main() -> int:
         "source": {
             "repository": str(upstream),
             "remote": "https://github.com/sgl-project/DeepGEMM",
-            "tag": "v0.1.4",
+            "tag": "v0.1.4.post1",
             "commit": BASE_COMMIT,
             "cutlass_commit": CUTLASS_COMMIT,
             "fmt_commit": FMT_COMMIT,
@@ -444,7 +489,7 @@ def main() -> int:
             "stock_candidate_command_identical": True,
             "normalized_build_plan_sha256": normalized_build_plan_sha256,
             "force_clean_build_directories": True,
-            "max_jobs": os.environ.get("MAX_JOBS"),
+            "max_jobs": BUILD_MAX_JOBS,
             "source_materialization": (
                 "git archive(base) + git archive(CUTLASS) + "
                 "git archive(fmt) + candidate-only tracked patch"
@@ -464,7 +509,8 @@ def main() -> int:
             "cpp_files_template": ["<SOURCE>/csrc/tvm_ffi_api.cpp"],
             "build_directory_template": "<OUTPUT>/compile/<VARIANT>",
             "package_template": (
-                "<OUTPUT>/artifacts/<VARIANT>/site/deep_gemm_w13_<VARIANT>"
+                "<OUTPUT>/artifacts/stock/site/deep_gemm or "
+                "<OUTPUT>/artifacts/candidate/site/deep_gemm_w13_candidate"
             ),
             "jit_cache_template": "<OUTPUT>/jit/<VARIANT>",
         },

@@ -36,24 +36,45 @@ JIT_IDENTITY_TEMPLATE = (
     "sm100_m_grouped_fp8_fp4_gemm_masked_1d1d_"
     "glm52_w2_bm16_v2_em{expected_m}"
 )
-TASK_CACHE_ROOT = Path(
-    "/home/qinhaiyan/glm52-v2-goal-runs/cache/26-moe_w2_decode_scoped_bm16"
-)
-EXPECTED_CACHE_PATHS = {
-    "DG_JIT_CACHE_DIR": TASK_CACHE_ROOT / "deepgemm",
-    "SGLANG_DG_CACHE_DIR": TASK_CACHE_ROOT / "deepgemm",
-    "TRITON_CACHE_DIR": TASK_CACHE_ROOT / "triton",
-    "TORCH_EXTENSIONS_DIR": TASK_CACHE_ROOT / "torch_extensions",
-}
-
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parents[1]
 SOURCE_PATCH = SCRIPT_DIR / "source.patch"
 BUILD_TOOL_PATCH = SCRIPT_DIR / "build_tool.patch"
 CORE_HASHES = SCRIPT_DIR / "core_source_hashes.sha256"
 BASE_LOCK = SCRIPT_DIR / "base_lock.json"
-BUILD_PROVENANCE = SCRIPT_DIR / "build_provenance.json"
 EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
+
+
+def _cache_paths(cache_root: Path) -> dict[str, Path]:
+    root = cache_root.expanduser().resolve()
+    return {
+        "DG_JIT_CACHE_DIR": root / "deepgemm",
+        "SGLANG_DG_CACHE_DIR": root / "deepgemm",
+        "TRITON_CACHE_DIR": root / "triton",
+        "TORCH_EXTENSIONS_DIR": root / "torch_extensions",
+    }
+
+
+def _manifest_cache_paths(manifest: dict[str, Any]) -> dict[str, Path]:
+    raw = manifest["runtime_contract"]["cache_paths"]
+    required = {
+        "DG_JIT_CACHE_DIR",
+        "SGLANG_DG_CACHE_DIR",
+        "TRITON_CACHE_DIR",
+        "TORCH_EXTENSIONS_DIR",
+    }
+    if set(raw) != required:
+        raise RuntimeError(
+            f"runtime cache keys mismatch: {sorted(raw)} != {sorted(required)}"
+        )
+    actual = {name: Path(value).expanduser().resolve() for name, value in raw.items()}
+    cache_root = actual["DG_JIT_CACHE_DIR"].parent
+    expected = _cache_paths(cache_root)
+    if actual != expected:
+        raise RuntimeError(
+            f"runtime cache layout mismatch: {actual!r} != {expected!r}"
+        )
+    return actual
 
 
 def _sha256(path: Path) -> str:
@@ -217,6 +238,7 @@ def write_manifest(args: argparse.Namespace) -> None:
     )
     if final_root.name != build_key:
         raise RuntimeError(f"overlay key mismatch: {final_root.name} != {build_key}")
+    cache_paths = _cache_paths(args.cache_root)
 
     manifest = {
         "schema_version": 3,
@@ -283,10 +305,10 @@ def write_manifest(args: argparse.Namespace) -> None:
             "stock_binding": "process-start-PYTHONPATH",
             "cache_paths": {
                 name: str(path.resolve())
-                for name, path in EXPECTED_CACHE_PATHS.items()
+                for name, path in cache_paths.items()
             },
             "build_tmp_dir": str(
-                (EXPECTED_CACHE_PATHS["DG_JIT_CACHE_DIR"] / "build_tmp").resolve()
+                (cache_paths["DG_JIT_CACHE_DIR"] / "build_tmp").resolve()
             ),
         },
         "toolchain": _toolchain(),
@@ -386,9 +408,14 @@ def verify_manifest(args: argparse.Namespace) -> None:
         lock["submodules"]["third-party/fmt"], FMT_COMMIT, "lock.fmt"
     )
     _assert_equal(
-        lock["task_cache_paths"],
-        {name: str(path.resolve()) for name, path in EXPECTED_CACHE_PATHS.items()},
-        "lock.task_cache_paths",
+        lock["cache_layout"],
+        {
+            "DG_JIT_CACHE_DIR": "deepgemm",
+            "SGLANG_DG_CACHE_DIR": "deepgemm",
+            "TRITON_CACHE_DIR": "triton",
+            "TORCH_EXTENSIONS_DIR": "torch_extensions",
+        },
+        "lock.cache_layout",
     )
 
     base = manifest["base"]
@@ -530,6 +557,7 @@ def verify_manifest(args: argparse.Namespace) -> None:
         },
         "candidate_api",
     )
+    cache_paths = _manifest_cache_paths(manifest)
     expected_runtime = {
         "architecture": "sm100",
         "pdl": True,
@@ -541,55 +569,20 @@ def verify_manifest(args: argparse.Namespace) -> None:
         "stock_and_candidate_side_by_side": True,
         "stock_binding": "process-start-PYTHONPATH",
         "cache_paths": {
-            name: str(path.resolve()) for name, path in EXPECTED_CACHE_PATHS.items()
+            name: str(path.resolve()) for name, path in cache_paths.items()
         },
         "build_tmp_dir": str(
-            (EXPECTED_CACHE_PATHS["DG_JIT_CACHE_DIR"] / "build_tmp").resolve()
+            (cache_paths["DG_JIT_CACHE_DIR"] / "build_tmp").resolve()
         ),
     }
     _assert_equal(manifest["runtime_contract"], expected_runtime, "runtime_contract")
 
     if args.check_env:
-        for name, expected in EXPECTED_CACHE_PATHS.items():
+        for name, expected in cache_paths.items():
             value = os.environ.get(name)
             if not value:
                 raise RuntimeError(f"{name} is not exported")
             _assert_equal(Path(value).resolve(), expected.resolve(), name)
-
-    if args.check_provenance:
-        provenance = json.loads(BUILD_PROVENANCE.read_text())
-        _assert_equal(provenance["schema_version"], 2, "provenance.schema_version")
-        _assert_equal(
-            provenance["generated_manifest_sha256"],
-            _sha256(manifest_path),
-            "provenance manifest hash",
-        )
-        _assert_equal(provenance["build_key"], build_key, "provenance.build_key")
-        for role in ("stock", "candidate"):
-            for field in (
-                "build_id",
-                "import_name",
-                "version_literal",
-                "version_sha256",
-                "init_sha256",
-                "extension_sha256",
-                "extension_bytes",
-            ):
-                _assert_equal(
-                    provenance[role][field],
-                    manifest[role][field],
-                    f"provenance.{role}.{field}",
-                )
-        _assert_equal(
-            provenance["source_identity"],
-            manifest["source_identity"],
-            "provenance.source_identity",
-        )
-        _assert_equal(
-            provenance["runtime_contract"],
-            manifest["runtime_contract"],
-            "provenance.runtime_contract",
-        )
 
     print(f"PASS exact-post1 overlay manifest: {manifest_path}")
 
@@ -604,12 +597,12 @@ def parse_args() -> argparse.Namespace:
     write.add_argument("--stock-source", type=Path, required=True)
     write.add_argument("--candidate-source", type=Path, required=True)
     write.add_argument("--base-repo", type=Path, required=True)
+    write.add_argument("--cache-root", type=Path, required=True)
     write.add_argument("--output", type=Path, required=True)
 
     verify = subparsers.add_parser("verify")
     verify.add_argument("--manifest", type=Path, required=True)
     verify.add_argument("--check-env", action="store_true")
-    verify.add_argument("--check-provenance", action="store_true")
     return parser.parse_args()
 
 

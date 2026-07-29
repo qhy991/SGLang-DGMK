@@ -11,6 +11,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
 import torch
 from sglang.srt.layers.glm52_opt import w13_decode
 from sglang.srt.layers.glm52_opt.w13_context import (
@@ -65,6 +66,52 @@ def test_default_is_off():
     assert not w13_decode.dispatch_state()["enabled"]
 
 
+def test_hotspot_registry_selects_only_w13_and_defaults_to_bm32_2sm():
+    with (
+        patch(
+            "sglang.srt.layers.glm52_opt.config.is_enabled",
+            return_value=True,
+        ),
+        patch(
+            "sglang.srt.layers.glm52_opt.config.profile_name",
+            return_value="hotspot_candidates",
+        ),
+        patch(
+            "sglang.srt.layers.glm52_opt.config.hotspot_candidate_ops",
+            return_value=frozenset({"moe_gate_proj"}),
+        ),
+        patch.dict(
+            os.environ,
+            {"SGLANG_GLM52_W13_DECODE_VARIANT": ""},
+            clear=False,
+        ),
+    ):
+        assert w13_decode.requested_variant() == "bm32_2sm"
+        assert w13_decode.initialization_requested()
+
+    with (
+        patch(
+            "sglang.srt.layers.glm52_opt.config.is_enabled",
+            return_value=True,
+        ),
+        patch(
+            "sglang.srt.layers.glm52_opt.config.profile_name",
+            return_value="hotspot_candidates",
+        ),
+        patch(
+            "sglang.srt.layers.glm52_opt.config.hotspot_candidate_ops",
+            return_value=frozenset({"moe_down_proj"}),
+        ),
+        patch.dict(
+            os.environ,
+            {"SGLANG_GLM52_W13_DECODE_VARIANT": "bm32_2sm"},
+            clear=False,
+        ),
+    ):
+        assert w13_decode.requested_variant() == ""
+        assert not w13_decode.initialization_requested()
+
+
 def test_import_performs_no_cuda_query_dso_load_or_cache_mutation():
     script = r"""
 import os
@@ -82,7 +129,7 @@ before = {
         "DG_JIT_CACHE_DIR",
         "SGLANG_DG_CACHE_DIR",
         "DG_JIT_USE_NVRTC",
-        "SGL_DG_USE_NVRTC",
+        "SGLANG_DG_USE_NVRTC",
     )
 }
 import sglang.srt.layers.glm52_opt.w13_decode as module
@@ -93,7 +140,7 @@ assert before == {
         "DG_JIT_CACHE_DIR",
         "SGLANG_DG_CACHE_DIR",
         "DG_JIT_USE_NVRTC",
-        "SGL_DG_USE_NVRTC",
+        "SGLANG_DG_USE_NVRTC",
     )
 }
 assert not any(name.startswith("deep_gemm_w13_") for name in sys.modules)
@@ -302,10 +349,48 @@ def test_dispatch_requires_private_marker_and_bucket_expected_m_pair():
         assert not w13_decode.try_dispatch_w13_decode(lhs, rhs, out, mask, 4, **kwargs)
         with w13_decode_forward_scope(_forward_batch(), 16, graph_capture=False):
             assert w13_decode.try_dispatch_w13_decode(lhs, rhs, out, mask, 4, **kwargs)
-            assert not w13_decode.try_dispatch_w13_decode(
-                lhs, rhs, out, mask, 8, **kwargs
-            )
+            with pytest.raises(RuntimeError, match="unexpected expected_m"):
+                w13_decode.try_dispatch_w13_decode(
+                    lhs, rhs, out, mask, 8, **kwargs
+                )
         assert len(candidate.calls) == 1
+    finally:
+        w13_decode._STATE = old_state
+
+
+def test_selected_w13_bucket_abi_drift_fails_without_candidate_launch():
+    old_state = w13_decode._STATE
+    candidate = _FakeModule("candidate")
+    w13_decode._STATE = w13_decode._DispatchState(
+        True,
+        "ready",
+        variant="bm32_2sm",
+        config=w13_decode.VARIANT_CONFIGS["bm32_2sm"],
+        gpu_id=0,
+        candidate_module=candidate,
+    )
+    lhs, rhs, out, mask = _exact_inputs()
+    try:
+        with (
+            w13_decode_forward_scope(
+                _forward_batch(),
+                16,
+                graph_capture=False,
+            ),
+            pytest.raises(RuntimeError, match="no longer matches"),
+        ):
+            w13_decode.try_dispatch_w13_decode(
+                lhs,
+                rhs,
+                out,
+                mask,
+                4,
+                overlap_args=object(),
+                max_block_n=256,
+                recipe_a=None,
+                recipe_b=None,
+            )
+        assert candidate.calls == []
     finally:
         w13_decode._STATE = old_state
 
@@ -340,14 +425,20 @@ def test_post_assignment_initializer_binds_stock_before_compile_utils_and_restor
                 "shared_object_sha256": w13_decode._sha256(package / "_C.so"),
                 "jit_cache": str(cache),
             }
+        stock.__file__ = str(Path(records["stock"]["package"]) / "__init__.py")
+        candidate.__file__ = str(
+            Path(records["candidate"]["package"]) / "__init__.py"
+        )
 
         def load_variant(_manifest, name, **_kwargs):
             events.append(("load", name, os.environ["DG_JIT_CACHE_DIR"]))
-            return (
-                stock if name == "stock" else candidate,
-                records[name],
-                {},
-            )
+            assert name == "candidate"
+            return candidate, records[name], {}
+
+        def import_stock(name):
+            assert name == "deep_gemm"
+            events.append(("load", "stock", os.environ["DG_JIT_CACHE_DIR"]))
+            return stock
 
         def launch(module, _tensors, expected_m, config):
             events.append(("launch", module.name, expected_m, config))
@@ -360,7 +451,7 @@ def test_post_assignment_initializer_binds_stock_before_compile_utils_and_restor
         original_dg = os.environ.get("DG_JIT_CACHE_DIR")
         original_sglang = os.environ.get("SGLANG_DG_CACHE_DIR")
         original_nvrtc = os.environ.get("DG_JIT_USE_NVRTC")
-        original_sgl_nvrtc = os.environ.get("SGL_DG_USE_NVRTC")
+        original_sgl_nvrtc = os.environ.get("SGLANG_DG_USE_NVRTC")
         with (
             patch.dict(
                 os.environ,
@@ -370,7 +461,7 @@ def test_post_assignment_initializer_binds_stock_before_compile_utils_and_restor
                     "DG_JIT_CACHE_DIR": "before-dg",
                     "SGLANG_DG_CACHE_DIR": "before-sglang",
                     "DG_JIT_USE_NVRTC": "before-nvrtc",
-                    "SGL_DG_USE_NVRTC": "before-sgl-nvrtc",
+                    "SGLANG_DG_USE_NVRTC": "before-sgl-nvrtc",
                 },
                 clear=False,
             ),
@@ -378,6 +469,11 @@ def test_post_assignment_initializer_binds_stock_before_compile_utils_and_restor
                 w13_decode,
                 "_variant_record",
                 side_effect=lambda _path, name: (records[name], {}),
+            ),
+            patch.object(
+                w13_decode.importlib,
+                "import_module",
+                side_effect=import_stock,
             ),
             patch.object(w13_decode, "load_variant", side_effect=load_variant),
             patch.object(w13_decode, "_allocate_warm_inputs", return_value={}),
@@ -406,7 +502,7 @@ def test_post_assignment_initializer_binds_stock_before_compile_utils_and_restor
             assert os.environ["DG_JIT_CACHE_DIR"] == "before-dg"
             assert os.environ["SGLANG_DG_CACHE_DIR"] == "before-sglang"
             assert os.environ["DG_JIT_USE_NVRTC"] == "before-nvrtc"
-            assert os.environ["SGL_DG_USE_NVRTC"] == "before-sgl-nvrtc"
+            assert os.environ["SGLANG_DG_USE_NVRTC"] == "before-sgl-nvrtc"
 
         load_stock_index = next(
             index
@@ -445,7 +541,7 @@ def test_post_assignment_initializer_binds_stock_before_compile_utils_and_restor
         else:
             os.environ["DG_JIT_USE_NVRTC"] = original_nvrtc
         if original_sgl_nvrtc is None:
-            os.environ.pop("SGL_DG_USE_NVRTC", None)
+            os.environ.pop("SGLANG_DG_USE_NVRTC", None)
         else:
-            os.environ["SGL_DG_USE_NVRTC"] = original_sgl_nvrtc
+            os.environ["SGLANG_DG_USE_NVRTC"] = original_sgl_nvrtc
     w13_decode._STATE = old_state

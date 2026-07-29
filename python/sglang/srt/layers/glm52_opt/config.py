@@ -147,7 +147,11 @@ _E2E_ALLOWED_OPS = _E2E_DEFAULT_OPS | _E2E_EXPLICIT_OPS
 # Exact production-interface hooks for out-of-tree PTX/SASS, CUDA/CuTe, or
 # Triton experiments.  These are intentionally isolated from e2e_candidates:
 # selecting the hotspot profile must never also turn on an older archive swap.
-_HOTSPOT_DEFAULT_OPS = frozenset({"dsa_decode_attn", "moe_gate_proj", "moe_down_proj"})
+_HOTSPOT_ALLOWED_OPS = frozenset(
+    {"dsa_decode_attn", "moe_gate_proj", "moe_down_proj"}
+)
+_HOTSPOT_EXTERNAL_OPS = frozenset({"dsa_decode_attn"})
+_HOTSPOT_BUILTIN_OPS = frozenset({"moe_gate_proj", "moe_down_proj"})
 _HOTSPOT_OP_ALIASES = {
     "flashmla_sparse_decode": "dsa_decode_attn",
     "flashmla_kv": "dsa_decode_attn",
@@ -160,7 +164,11 @@ W2_BM16_PROFILE = "moe_w2_bm16"
 
 def w2_bm16_enabled() -> bool:
     """Whether the exact source-scoped W2/BM16 production trial is armed."""
-    if not is_enabled() or profile_name() != W2_BM16_PROFILE:
+    if not is_enabled():
+        return False
+    if profile_name() == "hotspot_candidates":
+        return "moe_down_proj" in hotspot_candidate_ops()
+    if profile_name() != W2_BM16_PROFILE:
         return False
     allow = opt_ops_allowlist()
     return allow is None or "moe_down_proj" in allow
@@ -202,15 +210,33 @@ def hotspot_candidate_ops() -> frozenset[str]:
     """
     allow = opt_ops_allowlist()
     if allow is None:
-        return _HOTSPOT_DEFAULT_OPS
+        raise ValueError(
+            "hotspot_candidates requires an explicit SGLANG_GLM52_OPT_OPS; "
+            "run one operator per fresh server process for attributable A/B tests"
+        )
     normalized = {_HOTSPOT_OP_ALIASES.get(op, op) for op in allow}
-    unknown = normalized - _HOTSPOT_DEFAULT_OPS
+    unknown = normalized - _HOTSPOT_ALLOWED_OPS
     if unknown:
         raise ValueError(
             "Unsupported SGLANG_GLM52_OPT_OPS for hotspot_candidates: "
             + ", ".join(sorted(unknown))
         )
+    if len(allow) != 1 or len(normalized) != 1:
+        raise ValueError(
+            "hotspot_candidates requires exactly one selected operator per "
+            "fresh server process"
+        )
     return frozenset(normalized)
+
+
+def hotspot_external_ops() -> frozenset[str]:
+    """Selected ops that still require an out-of-tree provider module."""
+    return hotspot_candidate_ops() & _HOTSPOT_EXTERNAL_OPS
+
+
+def hotspot_builtin_ops() -> frozenset[str]:
+    """Selected MoE ops backed by source-scoped in-tree registrations."""
+    return hotspot_candidate_ops() & _HOTSPOT_BUILTIN_OPS
 
 
 def hotspot_module_ref() -> str:

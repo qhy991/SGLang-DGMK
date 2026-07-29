@@ -26,19 +26,16 @@ def _restore_env(saved: dict[str, str | None]) -> None:
             os.environ[name] = value
 
 
-def test_hotspot_profile_registers_exact_three_decode_ops():
+def test_hotspot_profile_requires_explicit_ops_and_registers_exact_three():
     names = ("SGLANG_GLM52_OPT_PROFILE", "SGLANG_GLM52_OPT_OPS")
     saved = {name: os.environ.get(name) for name in names}
     try:
         os.environ["SGLANG_GLM52_OPT_PROFILE"] = "hotspot_candidates"
         os.environ.pop("SGLANG_GLM52_OPT_OPS", None)
-        specs = {spec.op: spec for spec in list_enabled("decode")}
-        assert set(specs) == {
-            "dsa_decode_attn",
-            "moe_gate_proj",
-            "moe_down_proj",
-        }
+        with TestCase().assertRaisesRegex(ValueError, "explicit"):
+            list_enabled("decode")
 
+        os.environ["SGLANG_GLM52_OPT_OPS"] = "flashmla_sparse_decode"
         flashmla = lookup("dsa_decode_attn", "decode", m=16)
         assert flashmla is not None
         assert flashmla.implementation == "hotspot_plugin"
@@ -49,27 +46,32 @@ def test_hotspot_profile_registers_exact_three_decode_ops():
         )
         assert lookup("dsa_decode_attn", "decode", m=64) is None
 
+        os.environ["SGLANG_GLM52_OPT_OPS"] = "moe_w13"
         w13 = lookup("moe_gate_proj", "decode", m=32)
         assert w13 is not None
+        assert w13.implementation == "builtin_deepgemm"
         assert (w13.num_groups, w13.slab_m, w13.n, w13.k) == (
             32,
             1024,
             4096,
             6144,
         )
+        os.environ["SGLANG_GLM52_OPT_OPS"] = "moe_w2"
         w2 = lookup("moe_down_proj", "decode", m=16)
         assert w2 is not None
+        assert w2.implementation == "builtin_deepgemm"
         assert (w2.n, w2.k) == (6144, 2048)
 
         # User-facing fused names normalize to existing SGLang op contexts.
-        os.environ["SGLANG_GLM52_OPT_OPS"] = "flashmla_sparse_decode,moe_w13,moe_w2"
-        assert config.hotspot_candidate_ops() == {
-            "dsa_decode_attn",
-            "moe_gate_proj",
-            "moe_down_proj",
-        }
         os.environ["SGLANG_GLM52_OPT_OPS"] = "moe_w13"
+        assert config.hotspot_candidate_ops() == {"moe_gate_proj"}
         assert [spec.op for spec in list_enabled("decode")] == ["moe_gate_proj"]
+        os.environ["SGLANG_GLM52_OPT_OPS"] = "moe_w13,moe_w2"
+        with TestCase().assertRaisesRegex(ValueError, "exactly one"):
+            config.hotspot_candidate_ops()
+        os.environ["SGLANG_GLM52_OPT_OPS"] = "moe_w13,moe_gate_proj"
+        with TestCase().assertRaisesRegex(ValueError, "exactly one"):
+            config.hotspot_candidate_ops()
         os.environ["SGLANG_GLM52_OPT_OPS"] = "moe_w13,moe_typo"
         with TestCase().assertRaisesRegex(ValueError, "moe_typo"):
             config.hotspot_candidate_ops()
@@ -82,7 +84,7 @@ def test_hotspot_profile_isolated_from_legacy_e2e_candidates():
     saved = {name: os.environ.get(name) for name in names}
     try:
         os.environ["SGLANG_GLM52_OPT_PROFILE"] = "hotspot_candidates"
-        os.environ.pop("SGLANG_GLM52_OPT_OPS", None)
+        os.environ["SGLANG_GLM52_OPT_OPS"] = "flashmla_sparse_decode"
         assert lookup("o_proj", "decode", m=16) is None
         assert lookup("index_q_upproj", "decode", m=16) is None
         assert lookup("dsa_decode_attn", "prefill", m=16) is None
@@ -108,8 +110,14 @@ def test_provider_requires_version_and_selected_callbacks():
         patch.object(
             config,
             "hotspot_candidate_ops",
-            return_value=frozenset({"dsa_decode_attn", "moe_gate_proj"}),
+            return_value=frozenset({"dsa_decode_attn"}),
         ),
+        patch.object(
+            config,
+            "hotspot_external_ops",
+            return_value=frozenset({"dsa_decode_attn"}),
+        ),
+        patch.object(config, "hotspot_builtin_ops", return_value=frozenset()),
         patch.object(config, "hotspot_module_ref", return_value="provider.module"),
         patch.object(hotspot_provider, "_load_module", return_value=provider),
     ):
@@ -117,11 +125,40 @@ def test_provider_requires_version_and_selected_callbacks():
         initializer.assert_called_once_with(gpu_id=2)
         state = hotspot_provider.provider_state()
         assert state["ready"] is True
-        assert state["selected_ops"] == ["dsa_decode_attn", "moe_gate_proj"]
+        assert state["selected_ops"] == ["dsa_decode_attn"]
         assert state["provider_info"] == {"build": "unit-test"}
 
     hotspot_provider._reset_hotspot_provider_for_tests()
-    del provider.moe_w13
+    del provider.flashmla_sparse_decode
+    with (
+        patch.object(config, "is_enabled", return_value=True),
+        patch.object(config, "profile_name", return_value="hotspot_candidates"),
+        patch.object(
+            config,
+            "hotspot_candidate_ops",
+            return_value=frozenset({"dsa_decode_attn"}),
+        ),
+        patch.object(
+            config,
+            "hotspot_external_ops",
+            return_value=frozenset({"dsa_decode_attn"}),
+        ),
+        patch.object(config, "hotspot_builtin_ops", return_value=frozenset()),
+        patch.object(config, "hotspot_module_ref", return_value="provider.module"),
+        patch.object(hotspot_provider, "_load_module", return_value=provider),
+        TestCase().assertRaisesRegex(RuntimeError, "initialization failed"),
+    ):
+        hotspot_provider.initialize_hotspot_provider(gpu_id=2)
+
+
+def test_builtin_moe_registration_needs_no_external_provider():
+    hotspot_provider._reset_hotspot_provider_for_tests()
+    w13_state = {
+        "enabled": True,
+        "reason": "ready",
+        "variant": "bm32_2sm",
+        "manifest": "/artifact/w13/manifest.json",
+    }
     with (
         patch.object(config, "is_enabled", return_value=True),
         patch.object(config, "profile_name", return_value="hotspot_candidates"),
@@ -130,14 +167,32 @@ def test_provider_requires_version_and_selected_callbacks():
             "hotspot_candidate_ops",
             return_value=frozenset({"moe_gate_proj"}),
         ),
-        patch.object(config, "hotspot_module_ref", return_value="provider.module"),
-        patch.object(hotspot_provider, "_load_module", return_value=provider),
-        TestCase().assertRaisesRegex(RuntimeError, "initialization failed"),
+        patch.object(config, "hotspot_external_ops", return_value=frozenset()),
+        patch.object(
+            config,
+            "hotspot_builtin_ops",
+            return_value=frozenset({"moe_gate_proj"}),
+        ),
+        patch.object(config, "hotspot_module_ref", return_value=""),
+        patch(
+            "sglang.srt.layers.glm52_opt.w13_decode.dispatch_state",
+            return_value=w13_state,
+        ),
+        patch.object(
+            hotspot_provider,
+            "_load_module",
+            side_effect=AssertionError("built-in W13 must not load a provider"),
+        ),
     ):
-        hotspot_provider.initialize_hotspot_provider(gpu_id=2)
+        assert hotspot_provider.initialize_hotspot_provider(gpu_id=0)
+
+    state = hotspot_provider.provider_state()
+    assert state["module_name"] == "sglang.builtin_deepgemm_moe"
+    assert state["selected_ops"] == ["moe_gate_proj"]
+    assert state["provider_info"]["builtin_deepgemm"]["moe_w13"] == w13_state
 
 
-def test_selected_moe_candidate_launches_once_and_errors_propagate():
+def test_builtin_moe_registry_never_uses_the_external_generic_callback():
     names = (
         "SGLANG_GLM52_OPT",
         "SGLANG_GLM52_OPT_PROFILE",
@@ -155,31 +210,11 @@ def test_selected_moe_candidate_launches_once_and_errors_propagate():
         with (
             op_context("moe_gate_proj"),
             patch(
-                "sglang.srt.layers.glm52_opt.dispatch._moe_hotspot_abi_matches",
-                return_value=True,
-            ),
-            patch(
                 "sglang.srt.layers.glm52_opt.dispatch.run_hotspot_moe_masked",
-                return_value=None,
             ) as candidate,
-            patch("sglang.srt.layers.glm52_opt.dispatch._record_hit"),
         ):
-            assert try_dispatch_moe_masked(lhs, rhs, fake, fake, 4)
-        candidate.assert_called_once()
-
-        with (
-            op_context("moe_gate_proj"),
-            patch(
-                "sglang.srt.layers.glm52_opt.dispatch._moe_hotspot_abi_matches",
-                return_value=True,
-            ),
-            patch(
-                "sglang.srt.layers.glm52_opt.dispatch.run_hotspot_moe_masked",
-                side_effect=RuntimeError("candidate launch failed"),
-            ),
-            TestCase().assertRaisesRegex(RuntimeError, "candidate launch failed"),
-        ):
-            try_dispatch_moe_masked(lhs, rhs, fake, fake, 4)
+            assert not try_dispatch_moe_masked(lhs, rhs, fake, fake, 4)
+        candidate.assert_not_called()
     finally:
         set_forward_mode(None)
         _restore_env(saved)

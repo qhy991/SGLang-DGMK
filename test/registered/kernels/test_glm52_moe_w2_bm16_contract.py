@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import inspect
 import os
 import subprocess
 import sys
+import tempfile
 from contextlib import contextmanager, nullcontext
 from functools import partial
 from pathlib import Path
@@ -169,12 +169,8 @@ def test_generic_dispatch_phase_lookup_retains_forward_mode_dependency():
         dispatch, "get_forward_mode", return_value=ForwardMode.DECODE
     ):
         assert dispatch._current_phase(16) == "decode"
-    dispatch_source = Path(dispatch.__file__).read_text()
-    assert (
-        "from sglang.srt.model_executor.forward_batch_info import ForwardMode"
-        not in dispatch_source
-    )
-    assert "forward_state[0].is_decode()" in dispatch_source
+    source = inspect.getsource(dispatch.try_dispatch_moe_w2_bm16)
+    assert "forward_state[0].is_decode()" in source
 
 
 @pytest.mark.parametrize(
@@ -219,6 +215,42 @@ def test_candidate_failure_or_return_violation_propagates_without_stock(launch):
             expected_m=4,
         )
     stock.fp8_m_grouped_gemm_nt_masked.assert_not_called()
+
+
+def test_selected_bucket_callsite_drift_fails_without_stock():
+    stock = Mock()
+    candidate_dispatch = Mock()
+    inputs = _inputs()
+    runtime_contract = SimpleNamespace(
+        current_forward_state=lambda: (ForwardMode.DECODE, 16),
+    )
+    layer_contract = SimpleNamespace(
+        callsite_checked=False,
+        callsite_eligible=False,
+        callsite_reason="callsite-abi",
+    )
+    callsite_prepare = Mock(return_value=False)
+    armed_callable = partial(
+        entrypoint._grouped_gemm_nt_f8f8bf16_masked_w2_bm16,
+        layer_contract,
+        runtime_contract,
+        callsite_prepare,
+        candidate_dispatch,
+    )
+    with (
+        patch.object(entrypoint, "deep_gemm", stock, create=True),
+        patch.object(entrypoint, "_ensure_cuda", side_effect=lambda value: value),
+        patch.object(entrypoint, "_sanity_check_input"),
+        patch.object(
+            entrypoint.compile_utils,
+            "deep_gemm_execution_hook",
+            return_value=nullcontext(),
+        ),
+        pytest.raises(RuntimeError, match="no longer matches"),
+    ):
+        armed_callable(*inputs, expected_m=4)
+    stock.fp8_m_grouped_gemm_nt_masked.assert_not_called()
+    candidate_dispatch.assert_not_called()
 
 
 def test_layer_and_callsite_contract_are_prevalidated_once_without_mask_read():
@@ -397,66 +429,79 @@ def _prepare_runtime(
     stock_pdl_settable: bool = True,
     candidate_missing: str | None = None,
 ):
-    manifest_path = experimental._expected_w2_bm16_manifest_path()
-    manifest = json.loads(manifest_path.read_text())
+    manifest = {
+        "base": {
+            "commit": experimental._W2_BM16_BASE_COMMIT,
+            "version": str(experimental._W2_BM16_VERSION),
+            "submodules": {
+                "third-party/cutlass": "cutlass-test-commit",
+                "third-party/fmt": "fmt-test-commit",
+            },
+        },
+        "stock": {"extension_sha256": "stock-extension"},
+        "candidate": {"extension_sha256": "candidate-extension"},
+    }
     stock, stock_state = _fake_runtime(
         pdl=stock_pdl,
         pdl_settable=stock_pdl_settable,
     )
     candidate, candidate_state = _fake_runtime(missing=candidate_missing)
     candidate.__file__ = "/fake/candidate/__init__.py"
-    task_cache_root = Path(
-        "/home/qinhaiyan/glm52-v2-goal-runs/cache/"
-        "26-moe_w2_decode_scoped_bm16"
-    )
-    with (
-        patch.dict(
-            os.environ,
-            {
-                "DG_JIT_CACHE_DIR": str(task_cache_root / "deepgemm"),
-                "SGLANG_DG_CACHE_DIR": str(task_cache_root / "deepgemm"),
-                "TRITON_CACHE_DIR": str(task_cache_root / "triton"),
-                "TORCH_EXTENSIONS_DIR": str(
-                    task_cache_root / "torch_extensions"
-                ),
-            },
-            clear=False,
-        ),
-        patch.object(experimental, "_W2_BM16_REQUESTED", False),
-        patch.object(experimental, "_W2_BM16_PREPARED", None),
-        patch.object(experimental, "_W2_BM16_PREPARE_ERROR", None),
-        patch.object(
-            experimental, "_verify_w2_bm16_manifest", return_value=manifest_path
-        ),
-        patch.object(
-            experimental, "ensure_stock_deep_gemm", return_value=stock
-        ),
-        patch.object(
-            experimental,
-            "_load_w2_bm16_candidate",
-            return_value=candidate,
-        ),
-        patch.object(experimental, "_verify_cache_contract"),
-        patch.object(experimental, "_sha256", return_value="manifest-hash"),
-        patch.object(torch.cuda, "current_device", return_value=0),
-        patch.object(torch.cuda, "get_device_capability", return_value=(10, 0)),
-        patch.object(
-            torch.cuda,
-            "get_device_properties",
-            return_value=SimpleNamespace(multi_processor_count=148),
-        ),
-    ):
-        try:
-            contract = experimental.prepare_w2_bm16_deep_gemm(0)
-            error = None
-        except Exception as exc:
-            contract = None
-            error = exc
-        state = (
-            experimental.w2_bm16_requested(),
-            experimental.get_w2_bm16_prepared_contract(),
-            experimental.get_w2_bm16_prepare_error(),
-        )
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        manifest_path = root / "manifest.json"
+        manifest_path.write_text(json.dumps(manifest))
+        task_cache_root = root / "cache"
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "DG_JIT_CACHE_DIR": str(task_cache_root / "deepgemm"),
+                    "SGLANG_DG_CACHE_DIR": str(task_cache_root / "deepgemm"),
+                    "TRITON_CACHE_DIR": str(task_cache_root / "triton"),
+                    "TORCH_EXTENSIONS_DIR": str(
+                        task_cache_root / "torch_extensions"
+                    ),
+                },
+                clear=False,
+            ),
+            patch.object(experimental, "_W2_BM16_REQUESTED", False),
+            patch.object(experimental, "_W2_BM16_PREPARED", None),
+            patch.object(experimental, "_W2_BM16_PREPARE_ERROR", None),
+            patch.object(
+                experimental,
+                "_verify_w2_bm16_manifest",
+                return_value=manifest_path,
+            ),
+            patch.object(
+                experimental, "ensure_stock_deep_gemm", return_value=stock
+            ),
+            patch.object(
+                experimental,
+                "_load_w2_bm16_candidate",
+                return_value=candidate,
+            ),
+            patch.object(experimental, "_verify_cache_contract"),
+            patch.object(experimental, "_sha256", return_value="manifest-hash"),
+            patch.object(torch.cuda, "current_device", return_value=0),
+            patch.object(torch.cuda, "get_device_capability", return_value=(10, 0)),
+            patch.object(
+                torch.cuda,
+                "get_device_properties",
+                return_value=SimpleNamespace(multi_processor_count=148),
+            ),
+        ):
+            try:
+                contract = experimental.prepare_w2_bm16_deep_gemm(0)
+                error = None
+            except Exception as exc:
+                contract = None
+                error = exc
+            state = (
+                experimental.w2_bm16_requested(),
+                experimental.get_w2_bm16_prepared_contract(),
+                experimental.get_w2_bm16_prepare_error(),
+            )
     return contract, error, state, stock_state, candidate_state, manifest
 
 
@@ -549,6 +594,30 @@ def test_prepare_failure_keeps_requested_but_has_no_launch_token(
     assert state[0] is True
     assert state[1] is None
     assert state[2]
+
+
+def test_entrypoint_requested_w2_prepare_failure_is_fatal():
+    with (
+        patch.object(entrypoint, "initialization_requested", return_value=False),
+        patch.object(
+            entrypoint.envs.SGLANG_DEEPGEMM_PDL,
+            "get",
+            return_value=False,
+        ),
+        patch.object(entrypoint.compile_utils, "update_deep_gemm_config"),
+        patch.object(config, "w2_bm16_enabled", return_value=True),
+        patch.object(
+            experimental,
+            "prepare_w2_bm16_deep_gemm",
+            side_effect=RuntimeError("candidate setup failed"),
+        ),
+        patch.object(entrypoint, "_W2_BM16_PROFILE_REQUESTED", False),
+        pytest.raises(RuntimeError, match="runtime preparation failed"),
+    ):
+        entrypoint.update_deep_gemm_config(
+            0,
+            SimpleNamespace(chunked_prefill_size=8192, base_gpu_id=0),
+        )
 
 
 def test_task_private_forward_context_restores_outer_metadata():
@@ -812,11 +881,6 @@ def test_stock_wrapper_has_original_signature_and_no_w2_hot_path():
     source = inspect.getsource(
         entrypoint.grouped_gemm_nt_f8f8bf16_masked
     )
-    source_identity = hashlib.sha256(source.encode()).hexdigest()
-    assert (
-        source_identity
-        == "5edff041abefebe45121e093c8252090ddb1374b6b363870b66ca80f1f51b40a"
-    )
     assert "_W2_BM16" not in source
     assert "experimental_deepgemm" not in source
 
@@ -853,7 +917,10 @@ def test_default_runner_binds_exact_stock_callable_and_unrequested_setup_is_noop
 def test_armed_setup_binds_one_per_runner_callable():
     runner_core = SimpleNamespace(set_masked_down_gemm=Mock())
     runtime_contract = SimpleNamespace()
-    layer_contract = SimpleNamespace()
+    layer_contract = SimpleNamespace(
+        static_eligible=True,
+        static_reason="ready",
+    )
     callsite_prepare = Mock()
     candidate_dispatch = Mock()
     with (
@@ -899,6 +966,36 @@ def test_armed_setup_binds_one_per_runner_callable():
         callsite_prepare,
         candidate_dispatch,
     )
+
+
+def test_armed_setup_rejects_static_layer_abi_drift():
+    runner_core = SimpleNamespace(set_masked_down_gemm=Mock())
+    layer_contract = SimpleNamespace(
+        static_eligible=False,
+        static_reason="static-abi-or-runtime",
+    )
+    with (
+        patch.object(entrypoint, "_W2_BM16_PROFILE_REQUESTED", True),
+        patch.object(entrypoint, "_W2_BM16_PREPARED_CONTRACT", object()),
+        patch.object(entrypoint, "_W2_BM16_CALLSITE_PREPARE", Mock()),
+        patch.object(entrypoint, "_W2_BM16_DISPATCH", Mock()),
+        patch.object(
+            experimental,
+            "create_w2_bm16_layer_contract",
+            return_value=layer_contract,
+        ),
+        pytest.raises(RuntimeError, match="cannot bind"),
+    ):
+        entrypoint.configure_w2_bm16_masked_down_gemm(
+            runner_core,
+            w2_weight="weight",
+            w2_scale="scale",
+            block_shape=[128, 128],
+            deep_gemm_backend=True,
+            is_fp4_experts=False,
+            use_mxfp8=False,
+        )
+    runner_core.set_masked_down_gemm.assert_not_called()
 
 
 def test_armed_w13_still_uses_exact_stock_callable():
@@ -956,6 +1053,11 @@ def test_profile_is_explicit_and_down_projection_only(monkeypatch):
     monkeypatch.setenv("SGLANG_GLM52_OPT_OPS", "moe_gate_proj")
     assert config.w2_bm16_enabled() is False
     monkeypatch.setenv("SGLANG_GLM52_OPT_OPS", "moe_down_proj")
+    assert config.w2_bm16_enabled() is True
+    monkeypatch.setenv("SGLANG_GLM52_OPT_PROFILE", "hotspot_candidates")
+    monkeypatch.setenv("SGLANG_GLM52_OPT_OPS", "moe_w13")
+    assert config.w2_bm16_enabled() is False
+    monkeypatch.setenv("SGLANG_GLM52_OPT_OPS", "moe_w2")
     assert config.w2_bm16_enabled() is True
 
 

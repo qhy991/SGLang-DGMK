@@ -18,10 +18,6 @@ from typing import List, Optional, Tuple
 import deep_gemm
 import torch
 from sglang.srt.layers.glm52_opt.config import allow_abi_adapter
-from sglang.srt.layers.glm52_opt.experimental_deepgemm import (
-    get_experimental_deep_gemm,
-    has_fused_fp8_gemm_nt,
-)
 from sglang.srt.layers.glm52_opt.kernels.scale_pack import pack_scales
 
 logger = logging.getLogger(__name__)
@@ -65,8 +61,8 @@ def ensure_f32_block_scales(
     weight_shape: Tuple[int, int],
     block_size: List[int],
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    block_n, block_k = block_size[0], block_size[1]
-    n, k = weight_shape
+    block_k = block_size[1]
+    _, k = weight_shape
     x_f = _unpack_act_scale_f32(x_scale, m, k, block_k)
     w_f = _unpack_weight_scale_f32(w_scale, weight_shape, block_size)
     return x_f, w_f
@@ -79,6 +75,10 @@ def _run_q_b_fused(
     w_scale: torch.Tensor,
     out: torch.Tensor,
 ) -> None:
+    from sglang.srt.layers.glm52_opt.experimental_deepgemm import (
+        get_experimental_deep_gemm,
+    )
+
     fork = get_experimental_deep_gemm()
     if fork is not None and hasattr(fork, "fp8_gemm_nt_fused"):
         # Fused entry accepts f32 UE8M0-valued scales (packs inside the kernel).
@@ -206,10 +206,18 @@ def run_fp8_gemm(
     # silently unpack production UE8M0 scales unless this legacy adapter is
     # explicitly enabled: its conversion kernels were absent from the harness
     # score but are paid on every serving invocation.
+    if op_name in _NATIVE_FORK_OPS and phase == "decode":
+        from sglang.srt.layers.glm52_opt.experimental_deepgemm import (
+            has_fused_fp8_gemm_nt,
+        )
+
+        fused_fork_available = has_fused_fp8_gemm_nt()
+    else:
+        fused_fork_available = False
     if (
         op_name in _NATIVE_FORK_OPS
         and phase == "decode"
-        and has_fused_fp8_gemm_nt()
+        and fused_fork_available
     ):
         if packed_scales and not allow_abi_adapter():
             return False, "packed_abi_requires_adapter"

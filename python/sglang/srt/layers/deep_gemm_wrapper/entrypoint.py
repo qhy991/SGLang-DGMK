@@ -19,10 +19,12 @@ from sglang.srt.layers.glm52_opt.w13_decode import (
     REQUIRED_NUM_SMS,
     REQUIRED_PDL,
     REQUIRED_TC_UTIL,
+    dispatch_enabled as w13_dispatch_enabled,
     dispatch_state,
     initialization_requested,
     initialize_w13_decode_after_assignment,
     is_exact_w13_tensor_call,
+    is_w13_tensor_shape_family,
     try_dispatch_w13_decode,
 )
 from sglang.srt.server_args import ServerArgs
@@ -93,11 +95,17 @@ def grouped_gemm_nt_f8f8bf16_masked(
     num_groups, _, k = lhs[0].shape
     _, n, _ = rhs[0].shape
 
-    # The selected exact W13 route must contain no generic hook, precompile,
-    # statistics, lock, file write, NVTX range, scale adapter, or stock retry.
-    # Its launcher checks every shape/stride/dtype/metadata guard again.
-    exact_w13_tensors = is_exact_w13_tensor_call(lhs, rhs, out, masked_m)
-    if exact_w13_tensors and try_dispatch_w13_decode(
+    # The selected exact W13 route contains no generic hook, precompile,
+    # statistics, lock, file write, scale adapter, or stock retry. The optional
+    # cached profiler flag adds only the explicitly requested NVTX range.
+    exact_w13_tensors = False
+    w13_tensor_family = False
+    if w13_dispatch_enabled():
+        exact_w13_tensors = is_exact_w13_tensor_call(lhs, rhs, out, masked_m)
+        w13_tensor_family = exact_w13_tensors or is_w13_tensor_shape_family(
+            lhs, rhs, out, masked_m
+        )
+    if w13_tensor_family and try_dispatch_w13_decode(
         lhs,
         rhs,
         out,
@@ -203,14 +211,41 @@ def _grouped_gemm_nt_f8f8bf16_masked_w2_bm16(
                 and recipe_b is None
                 and not _NUM_SMS_OVERRIDE_ACTIVE.get()
             )
-            callsite_eligible = False
-            if (
-                compatible
-                and layer_contract is not None
-                and runtime_contract is not None
-                and callsite_prepare is not None
-                and candidate_dispatch is not None
-            ):
+            current_forward_state = (
+                getattr(runtime_contract, "current_forward_state", None)
+                if compatible
+                else None
+            )
+            forward_state = (
+                current_forward_state()
+                if callable(current_forward_state)
+                else None
+            )
+            selected_bucket = bool(
+                forward_state is not None
+                and forward_state[0].is_decode()
+                and (
+                    (
+                        int(forward_state[1]) == 16
+                        and int(expected_m) in (4, 5)
+                    )
+                    or (
+                        int(forward_state[1]) == 32
+                        and int(expected_m) in (8, 9)
+                    )
+                )
+            )
+            if selected_bucket:
+                if (
+                    layer_contract is None
+                    or runtime_contract is None
+                    or callsite_prepare is None
+                    or candidate_dispatch is None
+                ):
+                    raise RuntimeError(
+                        "selected W2/BM16 decode bucket has no prepared "
+                        "runtime/layer contract"
+                    )
                 if layer_contract.callsite_checked:
                     callsite_eligible = layer_contract.callsite_eligible
                 else:
@@ -225,7 +260,12 @@ def _grouped_gemm_nt_f8f8bf16_masked_w2_bm16(
                         recipe_b=recipe_b,
                         overlap_args=overlap_args,
                     )
-                if callsite_eligible and candidate_dispatch(
+                if not callsite_eligible:
+                    raise RuntimeError(
+                        "selected W2/BM16 decode call no longer matches the "
+                        f"prepared ABI: {layer_contract.callsite_reason}"
+                    )
+                if candidate_dispatch(
                     runtime_contract,
                     lhs,
                     rhs,
@@ -236,8 +276,11 @@ def _grouped_gemm_nt_f8f8bf16_masked_w2_bm16(
                 ):
                     # The stock no-overlap ABI writes `out` and returns None.
                     return None
+                raise RuntimeError(
+                    "selected W2/BM16 candidate unexpectedly declined before launch"
+                )
 
-            # An armed-profile decline is final before launch: go directly to
+            # Unrelated prefill/speculative modes and unregistered buckets use
             # authoritative stock and suppress the legacy generic replacement.
             fp4_kwargs = {}
             if recipe_a is not None:
@@ -277,27 +320,36 @@ def configure_w2_bm16_masked_down_gemm(
     if not _W2_BM16_PROFILE_REQUESTED:
         return
 
-    layer_contract = None
     if (
-        _W2_BM16_PREPARED_CONTRACT is not None
-        and _W2_BM16_CALLSITE_PREPARE is not None
-        and _W2_BM16_DISPATCH is not None
+        _W2_BM16_PREPARED_CONTRACT is None
+        or _W2_BM16_CALLSITE_PREPARE is None
+        or _W2_BM16_DISPATCH is None
     ):
-        try:
-            from sglang.srt.layers.glm52_opt.experimental_deepgemm import (
-                create_w2_bm16_layer_contract,
-            )
+        raise RuntimeError(
+            "requested W2/BM16 profile has no prepared runtime contract"
+        )
+    from sglang.srt.layers.glm52_opt.experimental_deepgemm import (
+        create_w2_bm16_layer_contract,
+    )
 
-            layer_contract = create_w2_bm16_layer_contract(
-                w2_weight=w2_weight,
-                w2_scale=w2_scale,
-                block_shape=block_shape,
-                deep_gemm_backend=deep_gemm_backend,
-                is_fp4_experts=is_fp4_experts,
-                use_mxfp8=use_mxfp8,
-            )
-        except Exception as exc:
-            logger.warning("GLM-5.2 W2/BM16 layer preparation skipped: %s", exc)
+    layer_contract = create_w2_bm16_layer_contract(
+        w2_weight=w2_weight,
+        w2_scale=w2_scale,
+        block_shape=block_shape,
+        deep_gemm_backend=deep_gemm_backend,
+        is_fp4_experts=is_fp4_experts,
+        use_mxfp8=use_mxfp8,
+    )
+    if layer_contract is None or not layer_contract.static_eligible:
+        reason = (
+            "missing-layer-contract"
+            if layer_contract is None
+            else layer_contract.static_reason
+        )
+        raise RuntimeError(
+            "requested W2/BM16 profile cannot bind the GLM-5.2 W2 layer: "
+            f"{reason}"
+        )
 
     runner_core.set_masked_down_gemm(
         partial(
@@ -578,6 +630,10 @@ def update_deep_gemm_config(gpu_id: int, server_args: ServerArgs):
                 deepgemm_variant(),
             )
     except Exception as exc:
+        if _W2_BM16_PROFILE_REQUESTED:
+            raise RuntimeError(
+                "requested GLM-5.2 W2/BM16 runtime preparation failed"
+            ) from exc
         logger.warning("GLM-5.2 DeepGEMM overlay load skipped: %s", exc)
     return w2_forward_context
 

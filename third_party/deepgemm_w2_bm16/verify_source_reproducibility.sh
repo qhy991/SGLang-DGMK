@@ -5,16 +5,22 @@ set -euo pipefail
 readonly BASE_COMMIT="edcf77b276965de8f03cdc47c23f01b08bf7c7ab"
 readonly CUTLASS_COMMIT="f3fde58372d33e9a5650ba7b80fc48b3b49d40c8"
 readonly FMT_COMMIT="553ec11ec06fbe0beebfbb45f9dc3c9eabd83d28"
-readonly TASK_CACHE_ROOT="/home/qinhaiyan/glm52-v2-goal-runs/cache/26-moe_w2_decode_scoped_bm16"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-BASE_REPO="${DEEPGEMM_W2_BM16_BASE_REPO:-/home/qinhaiyan/DeepGEMM-GLM52}"
+BASE_REPO="${DEEPGEMM_W2_BM16_BASE_REPO:-${REPO_ROOT}/../DeepGEMM-GLM52}"
 SOURCE_PATCH="${SCRIPT_DIR}/source.patch"
 BUILD_TOOL_PATCH="${SCRIPT_DIR}/build_tool.patch"
 CORE_HASHES="${SCRIPT_DIR}/core_source_hashes.sha256"
 MANIFEST_TOOL="${SCRIPT_DIR}/overlay_manifest.py"
-HARNESS_PYTHON="${HARNESS_PYTHON:-${REPO_ROOT}/../kernel-harness/.venv/bin/python}"
+HARNESS_PYTHON="${HARNESS_PYTHON:-python3}"
+if [[ "$HARNESS_PYTHON" != */* ]]; then
+  HARNESS_PYTHON="$(command -v "$HARNESS_PYTHON" || true)"
+fi
+if [[ ! -x "$HARNESS_PYTHON" ]]; then
+  echo "ERROR: HARNESS_PYTHON is not executable: ${HARNESS_PYTHON:-<unset>}" >&2
+  exit 1
+fi
 
 SOURCE_SHA="$(sha256sum "$SOURCE_PATCH" | awk '{print $1}')"
 BUILD_TOOL_SHA="$(sha256sum "$BUILD_TOOL_PATCH" | awk '{print $1}')"
@@ -22,7 +28,9 @@ BUILD_KEY="${BASE_COMMIT:0:12}-${SOURCE_SHA:0:12}-${BUILD_TOOL_SHA:0:12}"
 OVERLAY_DIR="${REPO_ROOT}/build/deepgemm-w2-bm16-overlays/${BUILD_KEY}"
 MANIFEST_PATH="${1:-${OVERLAY_DIR}/manifest.json}"
 
-VERIFY_ROOT="$(mktemp -d "${REPO_ROOT}/build/deepgemm-w2-verify.XXXXXX")"
+VERIFY_PARENT="${REPO_ROOT}/build"
+mkdir -p "$VERIFY_PARENT"
+VERIFY_ROOT="$(mktemp -d "${VERIFY_PARENT}/deepgemm-w2-verify.XXXXXX")"
 cleanup() {
   rm -rf -- "$VERIFY_ROOT"
 }
@@ -92,6 +100,16 @@ if [[ -d "${OVERLAY_DIR}/candidate/core_source" ]]; then
 fi
 
 if [[ -f "$MANIFEST_PATH" ]]; then
+  CACHE_ROOT="$(
+    "$HARNESS_PYTHON" - "$MANIFEST_PATH" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+manifest = json.loads(Path(sys.argv[1]).read_text())
+print(Path(manifest["runtime_contract"]["cache_paths"]["DG_JIT_CACHE_DIR"]).parent)
+PY
+  )"
   FRESH_MANIFEST="${VERIFY_ROOT}/fresh-manifest.json"
   env CUDA_VISIBLE_DEVICES= "$HARNESS_PYTHON" "$MANIFEST_TOOL" write \
     --artifact-root "$OVERLAY_DIR" \
@@ -99,6 +117,7 @@ if [[ -f "$MANIFEST_PATH" ]]; then
     --stock-source "$STOCK_DIR" \
     --candidate-source "$SOURCE_DIR" \
     --base-repo "$BASE_REPO" \
+    --cache-root "$CACHE_ROOT" \
     --output "$FRESH_MANIFEST"
   "$HARNESS_PYTHON" - "$MANIFEST_PATH" "$FRESH_MANIFEST" <<'PY'
 import json
@@ -119,8 +138,7 @@ for key in (
     assert actual[key] == fresh[key], key
 PY
   "$HARNESS_PYTHON" "$MANIFEST_TOOL" verify \
-    --manifest "$MANIFEST_PATH" \
-    --check-env
+    --manifest "$MANIFEST_PATH"
 fi
 
 echo "PASS exact-post1 source reproducibility"

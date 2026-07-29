@@ -8,6 +8,7 @@ import torch
 
 from sglang.srt.layers.deep_gemm_wrapper import entrypoint
 from sglang.srt.layers.glm52_opt import dispatch
+from sglang.srt.model_executor.forward_batch_info import ForwardMode
 
 
 class _FakeDeepGemm:
@@ -102,11 +103,16 @@ class TestGlm52MoeOverlapContract(unittest.TestCase):
             layer_contract = SimpleNamespace(
                 callsite_checked=True,
                 callsite_eligible=w2_bm16_eligible,
+                callsite_reason=(
+                    "ready" if w2_bm16_eligible else "callsite-abi"
+                ),
             )
             gemm = partial(
                 entrypoint._grouped_gemm_nt_f8f8bf16_masked_w2_bm16,
                 layer_contract,
-                SimpleNamespace(),
+                SimpleNamespace(
+                    current_forward_state=lambda: (ForwardMode.DECODE, 16)
+                ),
                 Mock(side_effect=AssertionError("latched ABI was rescanned")),
                 w2_bm16_replacement,
             )
@@ -117,6 +123,11 @@ class TestGlm52MoeOverlapContract(unittest.TestCase):
             patch.object(
                 entrypoint,
                 "is_exact_w13_tensor_call",
+                return_value=exact_w13_tensors,
+            ),
+            patch.object(
+                entrypoint,
+                "w13_dispatch_enabled",
                 return_value=exact_w13_tensors,
             ),
             patch.object(
@@ -244,19 +255,13 @@ class TestGlm52MoeOverlapContract(unittest.TestCase):
         self.assertEqual(run.events, ["sms_enter", "w2_bm16_call", "sms_exit"])
 
     def test_requested_but_ineligible_bypasses_legacy_replacement(self):
-        run = self._run_wrapper(
-            replacement_result=True,
-            stock_return=None,
-            w2_bm16_result=False,
-            w2_bm16_eligible=True,
-        )
-
-        self.assertIsNone(run.result)
-        self.assertEqual(len(run.w2_bm16_calls), 1)
-        self.assertEqual(run.replacement_calls, [])
-        self.assertEqual(len(run.stock_calls), 1)
-        self._assert_stock_positional_abi(run.stock_calls[0], run)
-        self.assertEqual(run.stock_calls[0][1], {})
+        with self.assertRaisesRegex(RuntimeError, "unexpectedly declined"):
+            self._run_wrapper(
+                replacement_result=True,
+                stock_return=None,
+                w2_bm16_result=False,
+                w2_bm16_eligible=True,
+            )
 
     def test_eligible_replacement_decline_has_no_overlap_keywords(self):
         sentinel = object()

@@ -69,10 +69,18 @@ index c8e9e2e07..5bb857ad8 100644
              smem_extra + num_stages * smem_per_stage,
              num_stages
 diff --git a/csrc/jit_kernels/impls/sm100_fp8_fp4_gemm_1d1d.hpp b/csrc/jit_kernels/impls/sm100_fp8_fp4_gemm_1d1d.hpp
-index b203bb3ef..71f69764b 100644
+index b203bb3..e392047 100644
 --- a/csrc/jit_kernels/impls/sm100_fp8_fp4_gemm_1d1d.hpp
 +++ b/csrc/jit_kernels/impls/sm100_fp8_fp4_gemm_1d1d.hpp
-@@ -249,7 +249,8 @@ static void sm100_m_grouped_fp8_fp4_gemm_masked_1d1d(const torch::Tensor& a, con
+@@ -38,6 +38,7 @@ public:
+     static std::string generate_impl(const Args& args) {
+         // TODO: rename files
+         return fmt::format(R"(
++#define sm100_fp8_fp4_gemm_1d1d_impl infini_kernel_glm52_moe_w13_decode
+ #include <deep_gemm/impls/sm100_fp8_fp4_gemm_1d1d.cuh>
+ 
+ using namespace deep_gemm;
+@@ -249,7 +250,8 @@ static void sm100_m_grouped_fp8_fp4_gemm_masked_1d1d(const torch::Tensor& a, con
                                                       const int& expected_m,
                                                       const int& gran_k_a, const int& gran_k_b,
                                                       const cute::UMMA::Major& major_a, const cute::UMMA::Major& major_b,
@@ -82,7 +90,7 @@ index b203bb3ef..71f69764b 100644
      const auto desc = GemmDesc {
          .gemm_type = GemmType::MGroupedMasked,
          .kernel_type = KernelType::Kernel1D1D,
-@@ -263,7 +264,29 @@ static void sm100_m_grouped_fp8_fp4_gemm_masked_1d1d(const torch::Tensor& a, con
+@@ -263,7 +265,29 @@ static void sm100_m_grouped_fp8_fp4_gemm_masked_1d1d(const torch::Tensor& a, con
          .compiled_dims = compiled_dims,
          .expected_m = expected_m, .expected_n = n, .expected_k = k, .expected_num_groups = num_groups
      };

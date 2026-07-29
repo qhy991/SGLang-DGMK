@@ -1,0 +1,2 @@
+third_party/deepgemm_w13/patches/*.patch whitespace=-blank-at-eol
+third_party/deepgemm_w2_bm16/*.patch whitespace=-blank-at-eol

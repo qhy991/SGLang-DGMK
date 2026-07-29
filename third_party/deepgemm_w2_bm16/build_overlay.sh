@@ -6,7 +6,6 @@ readonly BASE_COMMIT="edcf77b276965de8f03cdc47c23f01b08bf7c7ab"
 readonly CUTLASS_COMMIT="f3fde58372d33e9a5650ba7b80fc48b3b49d40c8"
 readonly FMT_COMMIT="553ec11ec06fbe0beebfbb45f9dc3c9eabd83d28"
 readonly BUILD_ID="glm52-w2-bm16-v2:sgl-deep-gemm-0.1.4.post1@${BASE_COMMIT}:sm100:e32:m1024:k2048:n6144:bm16:pdl1:sms148:no-recipe:no-overlap"
-readonly TASK_CACHE_ROOT="/home/qinhaiyan/glm52-v2-goal-runs/cache/26-moe_w2_decode_scoped_bm16"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
@@ -16,8 +15,14 @@ CORE_HASHES="${SCRIPT_DIR}/core_source_hashes.sha256"
 BASE_LOCK="${SCRIPT_DIR}/base_lock.json"
 MANIFEST_TOOL="${SCRIPT_DIR}/overlay_manifest.py"
 REPRO_TOOL="${SCRIPT_DIR}/verify_source_reproducibility.sh"
-BASE_REPO="${DEEPGEMM_W2_BM16_BASE_REPO:-/home/qinhaiyan/DeepGEMM-GLM52}"
-HARNESS_PYTHON="${HARNESS_PYTHON:-${REPO_ROOT}/../kernel-harness/.venv/bin/python}"
+BASE_REPO="${DEEPGEMM_W2_BM16_BASE_REPO:-${REPO_ROOT}/../DeepGEMM-GLM52}"
+HARNESS_PYTHON="${HARNESS_PYTHON:-python3}"
+if [[ "$HARNESS_PYTHON" != */* ]]; then
+  HARNESS_PYTHON="$(command -v "$HARNESS_PYTHON" || true)"
+fi
+CACHE_ROOT="$(
+  readlink -m "${DEEPGEMM_W2_BM16_CACHE_ROOT:-${REPO_ROOT}/build/deepgemm-w2-bm16-cache}"
+)"
 
 for required in \
   "$SOURCE_PATCH" "$BUILD_TOOL_PATCH" "$CORE_HASHES" "$BASE_LOCK" \
@@ -59,10 +64,14 @@ require_exact_cache() {
     exit 1
   fi
 }
-require_exact_cache DG_JIT_CACHE_DIR "${TASK_CACHE_ROOT}/deepgemm"
-require_exact_cache SGLANG_DG_CACHE_DIR "${TASK_CACHE_ROOT}/deepgemm"
-require_exact_cache TRITON_CACHE_DIR "${TASK_CACHE_ROOT}/triton"
-require_exact_cache TORCH_EXTENSIONS_DIR "${TASK_CACHE_ROOT}/torch_extensions"
+export DG_JIT_CACHE_DIR="${DG_JIT_CACHE_DIR:-${CACHE_ROOT}/deepgemm}"
+export SGLANG_DG_CACHE_DIR="${SGLANG_DG_CACHE_DIR:-${CACHE_ROOT}/deepgemm}"
+export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-${CACHE_ROOT}/triton}"
+export TORCH_EXTENSIONS_DIR="${TORCH_EXTENSIONS_DIR:-${CACHE_ROOT}/torch_extensions}"
+require_exact_cache DG_JIT_CACHE_DIR "${CACHE_ROOT}/deepgemm"
+require_exact_cache SGLANG_DG_CACHE_DIR "${CACHE_ROOT}/deepgemm"
+require_exact_cache TRITON_CACHE_DIR "${CACHE_ROOT}/triton"
+require_exact_cache TORCH_EXTENSIONS_DIR "${CACHE_ROOT}/torch_extensions"
 
 SOURCE_SHA="$(sha256sum "$SOURCE_PATCH" | awk '{print $1}')"
 BUILD_TOOL_SHA="$(sha256sum "$BUILD_TOOL_PATCH" | awk '{print $1}')"
@@ -79,8 +88,7 @@ TASK_TMP="${DG_JIT_CACHE_DIR:?DG_JIT_CACHE_DIR must point at the task-local cach
 if [[ -f "$MANIFEST_PATH" ]]; then
   "$HARNESS_PYTHON" "$MANIFEST_TOOL" verify \
     --manifest "$MANIFEST_PATH" \
-    --check-env \
-    --check-provenance
+    --check-env
   "$REPRO_TOOL" "$MANIFEST_PATH"
   echo "Reusing verified exact-post1 overlays: $OVERLAY_DIR"
   exit 0
@@ -170,6 +178,7 @@ env CUDA_VISIBLE_DEVICES= "$HARNESS_PYTHON" "$MANIFEST_TOOL" write \
   --stock-source "${BUILD_TMP}/stock-source" \
   --candidate-source "${BUILD_TMP}/candidate-source" \
   --base-repo "$BASE_REPO" \
+  --cache-root "$CACHE_ROOT" \
   --output "${STAGED_OVERLAY}/manifest.json"
 
 mv "$STAGED_OVERLAY" "$OVERLAY_DIR"

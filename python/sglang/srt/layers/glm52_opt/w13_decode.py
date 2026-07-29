@@ -9,6 +9,7 @@ candidate launch; it never catches a launch failure or launches stock second.
 from __future__ import annotations
 
 import hashlib
+import importlib
 import importlib.util
 import json
 import logging
@@ -30,10 +31,10 @@ from sglang.srt.layers.glm52_opt.w13_context import (
 
 logger = logging.getLogger(__name__)
 
-BASE_COMMIT = "731e7c7a97d269e4b9f482ea18d0e709a948f293"
+BASE_COMMIT = "edcf77b276965de8f03cdc47c23f01b08bf7c7ab"
 CUTLASS_COMMIT = "f3fde58372d33e9a5650ba7b80fc48b3b49d40c8"
 FMT_COMMIT = "553ec11ec06fbe0beebfbb45f9dc3c9eabd83d28"
-PATCH_SHA256 = "997348b6498aa18a7d70a5b1d36249b356b508cdc71e2f514a979818c48490a5"
+PATCH_SHA256 = "056c90d416f2278c23bcb495d41ecf28f82e7047f220f4acc8321e8f1436a458"
 BASE_BLOB_SHA256 = {
     "csrc/apis/gemm.hpp": "0840d64249e2a5a4a994d495e8320a0fff26bad9ca107426a1a1226e7d621186",
     "csrc/jit_kernels/heuristics/sm100.hpp": (
@@ -43,18 +44,18 @@ BASE_BLOB_SHA256 = {
         "cca1ddb5b5787942c31b39a9d5618929ee609c6c3b57b877fe636df39540366b"
     ),
     "csrc/tvm_ffi_api.cpp": (
-        "d1e5dbd833f257d2c4be516772404c02f1747247eef5075315ff2d1220a64c1f"
+        "c09aeec8187a2e29a3ebfc61c9ce1168a89fea775040a47bcf73739131ea57c0"
     ),
     "sgl_deep_gemm/__init__.py": (
-        "243eeaa71fa65cecaddd7298245438cb371ca765d7bf914a9427e132be8d5f26"
+        "b33e89deacdce241f01f5070d321918f5e5480e3e6d3af569678d4192db4f2a7"
     ),
 }
 SOURCE_TREE_SHA256 = {
     "stock_source_tree_sha256": (
-        "917592ab68ea0608c9be33208c2c609bc7f20bd9b1603f32743dd0d1ae03d0ed"
+        "4bfc233540d0478bf88860d924c53e105be29e01ddd039a68a8c5242addb2af5"
     ),
     "candidate_source_tree_sha256": (
-        "d38d8bf9a2118a2506be0fd71827568e70a20839505238a36a9c0325415332ef"
+        "1e23f011428ca83bcc3fe1a2e990b62ed82abbba65a291a61db9cf4a729cf657"
     ),
     "complete_source_diff_sha256": PATCH_SHA256,
 }
@@ -262,6 +263,29 @@ def load_variant(
     return module, record, manifest
 
 
+def _verify_bound_stock_module(
+    module: ModuleType,
+    record: dict[str, Any],
+) -> None:
+    """Require SGLang's authoritative fallback to be the manifest stock."""
+
+    package = Path(record["package"]).resolve()
+    actual_init = Path(getattr(module, "__file__", "") or "").resolve()
+    expected_init = package / "__init__.py"
+    if actual_init != expected_init:
+        raise RuntimeError(
+            "SGLang DeepGEMM is not bound to the W13 same-source stock: "
+            f"{actual_init} != {expected_init}; launch through "
+            "third_party/deepgemm_w13/run_with_stock.sh"
+        )
+    shared_object = package / "_C.so"
+    if (
+        not shared_object.is_file()
+        or _sha256(shared_object) != record["shared_object_sha256"]
+    ):
+        raise RuntimeError("bound W13 stock shared object identity drifted")
+
+
 @dataclass(frozen=True)
 class _DispatchState:
     enabled: bool
@@ -276,14 +300,35 @@ class _DispatchState:
     runtime_state: dict[str, dict[str, Any]] = field(default_factory=dict)
     state_independence: dict[str, Any] = field(default_factory=dict)
     jit_use_nvrtc: bool | None = None
+    emit_nvtx: bool = False
 
 
 _STATE = _DispatchState(False, "not_initialized")
 _INITIALIZE_LOCK = threading.Lock()
 
 
+def dispatch_enabled() -> bool:
+    """Cheap hot-path flag; default-off callers avoid all W13 ABI scans."""
+
+    return _STATE.enabled
+
+
 def requested_variant() -> str:
-    return os.environ.get("SGLANG_GLM52_W13_DECODE_VARIANT", "").strip().lower()
+    explicit = (
+        os.environ.get("SGLANG_GLM52_W13_DECODE_VARIANT", "").strip().lower()
+    )
+    # Preserve the legacy explicit switch. Under the unified hotspot profile,
+    # however, W13 is armed only when its registry op is selected so a stale
+    # W13 variable cannot contaminate a W2 A/B process.
+    from sglang.srt.layers.glm52_opt import config
+
+    if config.is_enabled() and config.profile_name() == "hotspot_candidates":
+        if "moe_gate_proj" not in config.hotspot_candidate_ops():
+            return ""
+        # This is the only historical W13 variant close to the strict
+        # graph-containing-region promotion gate.
+        return explicit or "bm32_2sm"
+    return explicit
 
 
 def initialization_requested() -> bool:
@@ -460,10 +505,9 @@ def initialize_w13_decode_after_assignment(
                 "DG_JIT_CACHE_DIR",
                 "SGLANG_DG_CACHE_DIR",
                 "DG_JIT_USE_NVRTC",
-                "SGL_DG_USE_NVRTC",
+                "SGLANG_DG_USE_NVRTC",
             )
         }
-        compile_utils_configured = False
         try:
             current_device = int(torch.cuda.current_device())
             if current_device != int(gpu_id):
@@ -485,14 +529,11 @@ def initialize_w13_decode_after_assignment(
             # before importing compile_utils, whose import otherwise rewrites
             # DG_JIT_CACHE_DIR.  Only then bind/warm the candidate compiler.
             os.environ["DG_JIT_USE_NVRTC"] = "0"
-            os.environ["SGL_DG_USE_NVRTC"] = "0"
+            os.environ["SGLANG_DG_USE_NVRTC"] = "0"
             os.environ["DG_JIT_CACHE_DIR"] = str(stock_cache)
             os.environ["SGLANG_DG_CACHE_DIR"] = str(stock_cache)
-            stock, stock_record, _ = load_variant(
-                manifest_path,
-                "stock",
-                module_name="deep_gemm_w13_stock_production",
-            )
+            stock = importlib.import_module("deep_gemm")
+            _verify_bound_stock_module(stock, stock_record)
             stock_runtime = _set_required_runtime_state(stock, "stock")
 
             # The first named stock launch binds its lazy Compiler to stock_cache.
@@ -508,7 +549,6 @@ def initialize_w13_decode_after_assignment(
             compile_utils = compile_utils_loader()
             compile_utils._ENABLE_JIT_DEEPGEMM_PRECOMPILE = False
             compile_utils.update_deep_gemm_config(gpu_id, server_args)
-            compile_utils_configured = True
 
             os.environ["DG_JIT_CACHE_DIR"] = str(candidate_cache)
             os.environ["SGLANG_DG_CACHE_DIR"] = str(candidate_cache)
@@ -562,6 +602,8 @@ def initialize_w13_decode_after_assignment(
                 raise RuntimeError("W13 candidate cache changed after freeze probe")
             del tensors
 
+            from sglang.srt.layers.glm52_opt import config
+
             _STATE = _DispatchState(
                 True,
                 "ready",
@@ -581,6 +623,7 @@ def initialize_w13_decode_after_assignment(
                 },
                 state_independence=independence,
                 jit_use_nvrtc=bool(int(os.environ["DG_JIT_USE_NVRTC"])),
+                emit_nvtx=config.emit_infini_kernel_nvtx(),
             )
             logger.info(
                 "GLM-5.2 W13 decode candidate ready: variant=%s gpu=%d",
@@ -669,6 +712,27 @@ def is_exact_w13_tensor_call(
     return _exact_tensor_contract(lhs, rhs, out, masked_m)
 
 
+def is_w13_tensor_shape_family(
+    lhs: tuple[torch.Tensor, torch.Tensor],
+    rhs: tuple[torch.Tensor, torch.Tensor],
+    out: torch.Tensor,
+    masked_m: torch.Tensor,
+) -> bool:
+    """Identify the target W13 call before enforcing dtype/stride details."""
+
+    try:
+        return bool(
+            tuple(lhs[0].shape) == _A_SHAPE
+            and tuple(lhs[1].shape) == _AS_SHAPE
+            and tuple(rhs[0].shape) == _B_SHAPE
+            and tuple(rhs[1].shape) == _BS_SHAPE
+            and tuple(out.shape) == _OUT_SHAPE
+            and tuple(masked_m.shape) == _MASK_SHAPE
+        )
+    except (AttributeError, IndexError, TypeError):
+        return False
+
+
 def _marker_matches(
     marker: W13DecodeForwardMarker | None,
     expected_m: int,
@@ -719,8 +783,16 @@ def try_dispatch_w13_decode(
     if not state.enabled:
         return False
     marker = get_w13_decode_forward_marker()
-    if not _marker_matches(marker, expected_m):
+    if marker is None:
         return False
+    allowed_expected_m = EXPECTED_M_BY_TOKEN_BUCKET.get(marker.token_bucket)
+    if allowed_expected_m is None:
+        return False
+    if expected_m not in allowed_expected_m:
+        raise RuntimeError(
+            "selected W13 decode bucket received an unexpected expected_m: "
+            f"token_bucket={marker.token_bucket}, expected_m={expected_m}"
+        )
     if not _contract_matches(
         lhs,
         rhs,
@@ -732,20 +804,55 @@ def try_dispatch_w13_decode(
         recipe_a,
         recipe_b,
     ):
-        return False
+        raise RuntimeError(
+            "selected W13 decode call no longer matches its exact "
+            "shape/stride/dtype/no-overlap ABI"
+        )
     if lhs[0].device.index != state.gpu_id:
-        return False
+        raise RuntimeError(
+            "selected W13 decode call reached the wrong worker device: "
+            f"{lhs[0].device.index} != {state.gpu_id}"
+        )
     assert state.candidate_module is not None
-    returned = state.candidate_module.fp8_m_grouped_gemm_nt_masked(
+    launch_args = (
         lhs,
         rhs,
         out,
         masked_m,
         expected_m,
-        compiled_dims="nk",
-        disable_ue8m0_cast=True,
-        w13_config=state.config,
     )
+    launch_kwargs = {
+        "compiled_dims": "nk",
+        "disable_ue8m0_cast": True,
+        "w13_config": state.config,
+    }
+    if state.emit_nvtx:
+        range_name = (
+            "infini_kernel_glm52_moe_w13_decode"
+            f"[M={marker.token_bucket},N=4096,K=6144]"
+        )
+        pushed = False
+        try:
+            torch.cuda.nvtx.range_push(range_name)
+            pushed = True
+        except Exception:
+            pass
+        try:
+            returned = state.candidate_module.fp8_m_grouped_gemm_nt_masked(
+                *launch_args,
+                **launch_kwargs,
+            )
+        finally:
+            if pushed:
+                try:
+                    torch.cuda.nvtx.range_pop()
+                except Exception:
+                    pass
+    else:
+        returned = state.candidate_module.fp8_m_grouped_gemm_nt_masked(
+            *launch_args,
+            **launch_kwargs,
+        )
     if returned is not None:
         raise RuntimeError("W13 candidate violated the stock None return contract")
     return True
@@ -766,4 +873,5 @@ def dispatch_state() -> dict[str, Any]:
         "runtime_state": state.runtime_state,
         "state_independence": state.state_independence,
         "jit_use_nvrtc": state.jit_use_nvrtc,
+        "emit_nvtx": state.emit_nvtx,
     }

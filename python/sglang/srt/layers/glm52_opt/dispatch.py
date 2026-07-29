@@ -547,14 +547,29 @@ def try_dispatch_moe_w2_bm16(
 
     # Crossing this line commits to one candidate launch. Exceptions and return
     # contract violations propagate; stock must never execute afterward.
-    result = contract.launch(
-        lhs,
-        rhs,
-        out,
-        masked_m,
-        int(expected_m),
-        masked_block_m_override=16,
+    range_name = (
+        "infini_kernel_glm52_moe_w2_decode"
+        f"[M={int(forward_state[1])},N=6144,K=2048]"
     )
+    if getattr(contract, "emit_nvtx", False):
+        with _nvtx_range(range_name):
+            result = contract.launch(
+                lhs,
+                rhs,
+                out,
+                masked_m,
+                int(expected_m),
+                masked_block_m_override=16,
+            )
+    else:
+        result = contract.launch(
+            lhs,
+            rhs,
+            out,
+            masked_m,
+            int(expected_m),
+            masked_block_m_override=16,
+        )
     if result is not None:
         raise RuntimeError(
             "W2/BM16 candidate violated the stock non-overlap None return contract"
@@ -625,6 +640,11 @@ def try_dispatch_moe_masked(
             )
         _record_hit("hotspot_plugin", spec.op, phase, m=forward_m)
         return True
+    if spec.implementation == "builtin_deepgemm":
+        # Exact built-in W13 calls are intercepted before this generic
+        # dispatcher; W2 is bound only to the down-projection runner. Reaching
+        # this branch therefore means the direct call-site contract declined.
+        return False
 
     try:
         range_name = (

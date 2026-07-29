@@ -5,12 +5,18 @@ set -euo pipefail
 readonly BASE_COMMIT="edcf77b276965de8f03cdc47c23f01b08bf7c7ab"
 readonly CUTLASS_COMMIT="f3fde58372d33e9a5650ba7b80fc48b3b49d40c8"
 readonly FMT_COMMIT="553ec11ec06fbe0beebfbb45f9dc3c9eabd83d28"
-readonly TASK_CACHE_ROOT="/home/qinhaiyan/glm52-v2-goal-runs/cache/26-moe_w2_decode_scoped_bm16"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-BASE_REPO="${DEEPGEMM_W2_BM16_BASE_REPO:-/home/qinhaiyan/DeepGEMM-GLM52}"
-HARNESS_PYTHON="${HARNESS_PYTHON:-${REPO_ROOT}/../kernel-harness/.venv/bin/python}"
+BASE_REPO="${DEEPGEMM_W2_BM16_BASE_REPO:-${REPO_ROOT}/../DeepGEMM-GLM52}"
+HARNESS_PYTHON="${HARNESS_PYTHON:-python3}"
+if [[ "$HARNESS_PYTHON" != */* ]]; then
+  HARNESS_PYTHON="$(command -v "$HARNESS_PYTHON" || true)"
+fi
+if [[ ! -x "$HARNESS_PYTHON" ]]; then
+  echo "ERROR: HARNESS_PYTHON is not executable: ${HARNESS_PYTHON:-<unset>}" >&2
+  exit 1
+fi
 SOURCE_PATCH="${SCRIPT_DIR}/source.patch"
 BUILD_TOOL_PATCH="${SCRIPT_DIR}/build_tool.patch"
 
@@ -25,23 +31,35 @@ if (( available_kib < 8 * 1024 * 1024 )); then
   echo "ERROR: fewer than 8 GiB remain; refusing fresh source expansion" >&2
   exit 1
 fi
-for name in DG_JIT_CACHE_DIR SGLANG_DG_CACHE_DIR TRITON_CACHE_DIR TORCH_EXTENSIONS_DIR; do
-  case "$name" in
-    DG_JIT_CACHE_DIR) expected="${TASK_CACHE_ROOT}/deepgemm" ;;
-    SGLANG_DG_CACHE_DIR) expected="${TASK_CACHE_ROOT}/deepgemm" ;;
-    TRITON_CACHE_DIR) expected="${TASK_CACHE_ROOT}/triton" ;;
-    TORCH_EXTENSIONS_DIR) expected="${TASK_CACHE_ROOT}/torch_extensions" ;;
-  esac
-  actual="${!name:-}"
-  if [[ -z "$actual" || "$(readlink -m "$actual")" != "$expected" ]]; then
-    echo "ERROR: $name must be exactly $expected (got ${actual:-<unset>})" >&2
-    exit 1
-  fi
-done
 if [[ ! -f "${MANIFEST_PATH}" ]]; then
   echo "ERROR: existing overlay artifact is missing: ${MANIFEST_PATH}" >&2
   exit 1
 fi
+mapfile -t CACHE_PATHS < <(
+  "$HARNESS_PYTHON" - "$MANIFEST_PATH" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+manifest = json.loads(Path(sys.argv[1]).read_text())
+for name in (
+    "DG_JIT_CACHE_DIR",
+    "SGLANG_DG_CACHE_DIR",
+    "TRITON_CACHE_DIR",
+    "TORCH_EXTENSIONS_DIR",
+):
+    print(manifest["runtime_contract"]["cache_paths"][name])
+PY
+)
+if (( ${#CACHE_PATHS[@]} != 4 )); then
+  echo "ERROR: malformed cache paths in ${MANIFEST_PATH}" >&2
+  exit 1
+fi
+export DG_JIT_CACHE_DIR="${CACHE_PATHS[0]}"
+export SGLANG_DG_CACHE_DIR="${CACHE_PATHS[1]}"
+export TRITON_CACHE_DIR="${CACHE_PATHS[2]}"
+export TORCH_EXTENSIONS_DIR="${CACHE_PATHS[3]}"
+CACHE_ROOT="$(dirname "$DG_JIT_CACHE_DIR")"
 
 VERIFY_PARENT="${REPO_ROOT}/build/deepgemm-w2-manifest-refresh"
 mkdir -p "$VERIFY_PARENT"
@@ -84,6 +102,7 @@ env CUDA_VISIBLE_DEVICES= "$HARNESS_PYTHON" "${SCRIPT_DIR}/overlay_manifest.py" 
   --stock-source "$STOCK_SOURCE" \
   --candidate-source "$CANDIDATE_SOURCE" \
   --base-repo "$BASE_REPO" \
+  --cache-root "$CACHE_ROOT" \
   --output "$REFRESHED"
 mv "$REFRESHED" "$MANIFEST_PATH"
 "$HARNESS_PYTHON" "${SCRIPT_DIR}/overlay_manifest.py" verify \

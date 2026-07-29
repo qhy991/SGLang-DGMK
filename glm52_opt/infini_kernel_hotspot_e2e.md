@@ -3,19 +3,21 @@
 ## Outcome and safety boundary
 
 This branch registers three decode hotspots at their real SGLang production
-call sites:
+call sites. W13 and W2 now have concrete, source-scoped DeepGEMM
+implementations; FlashMLA remains an external provider interface:
 
-| User-facing operator | Registry op | Exact local ABI | Nsys NVTX identity |
-|---|---|---|---|
-| FlashMLA sparse decode | `dsa_decode_attn` | M=16/32, Q `[M,1,64,576]` BF16, FP8 KV page 64×656, top-k 2048 | `infini_kernel_glm52_flashmla_sparse_decode_fp8_topk2048` |
-| MoE gate+up (fused W13) | `moe_gate_proj` | E32, slab 1024, K6144, N4096, packed int32 UE8M0 | `infini_kernel_glm52_moe_w13_decode` |
-| MoE down (W2) | `moe_down_proj` | E32, slab 1024, K2048, N6144, packed int32 UE8M0 | `infini_kernel_glm52_moe_w2_decode` |
+| User-facing operator | Registry op | Implementation | Exact local ABI | Nsys NVTX identity |
+|---|---|---|---|---|
+| FlashMLA sparse decode | `dsa_decode_attn` | external API-v1 provider | M=16/32, Q `[M,1,64,576]` BF16, FP8 KV page 64×656, top-k 2048 | `infini_kernel_glm52_flashmla_sparse_decode_fp8_topk2048` |
+| MoE gate+up (fused W13) | `moe_gate_proj` | built-in post1 DeepGEMM BM32/2SM per-call config | E32, slab 1024, K6144, N4096, packed int32 UE8M0 | `infini_kernel_glm52_moe_w13_decode` |
+| MoE down (W2) | `moe_down_proj` | built-in post1 DeepGEMM scoped BM16 per-call override | E32, slab 1024, K2048, N6144, packed int32 UE8M0 | `infini_kernel_glm52_moe_w2_decode` |
 
-The profile is default-off. It does not contain a disguised stock provider and
-does not promote any historical leaf result. An optimized CUDA/CuTe, CUTLASS,
-Triton, or inline-PTX extension is supplied as a Python provider module. SGLang
-loads it once after worker GPU assignment and before warmup or CUDA Graph
-capture.
+The profile is default-off and requires exactly one explicit
+`SGLANG_GLM52_OPT_OPS` value per fresh process. W13/W2 are hypotheses for
+end-to-end validation, not promoted production winners. Their candidate and
+authoritative fallback are built from the same immutable DeepGEMM
+`v0.1.4.post1` commit. An optimized CUDA/CuTe, CUTLASS, Triton, or inline-PTX
+FlashMLA extension is still supplied as a Python provider module.
 
 “FlashMLA sparse decode” is the semantic workload name here: the production
 hook is `flash_mla_with_kvcache` with sparse physical indices and paged FP8 KV.
@@ -23,14 +25,17 @@ It is deliberately not the separate `flash_mla_sparse_fwd` ABI.
 
 Selection is fail-closed:
 
-- unsupported phase, M bucket, expected-M, dtype, shape, stride, scale layout,
-  device, recipe, or overlap mode returns to the unmodified stock path before
-  a candidate launch;
+- unrelated phases, speculative modes, unregistered M/expected-M buckets, and
+  explicitly unsupported recipe/overlap paths return to the unmodified stock
+  path before a candidate launch;
+- after a supported no-overlap W13/W2 decode bucket reaches its target route,
+  shape-family, dtype, stride, scale-layout, device, call-site, or layer-binding
+  drift is fatal instead of silently measuring stock;
 - a selected provider launches exactly once;
-- provider initialization, launch, or return-contract errors are fatal and
-  cannot fall through to stock;
-- unknown `SGLANG_GLM52_OPT_OPS` names are fatal instead of silently running
-  stock after a spelling error;
+- selected artifact/provider initialization, launch, or return-contract errors
+  are fatal and cannot fall through to stock;
+- missing, multiple, or unknown `SGLANG_GLM52_OPT_OPS` values are fatal instead
+  of silently running stock after a spelling error;
 - a candidate run therefore cannot report a false hit after silently executing
   the baseline.
 
@@ -82,10 +87,10 @@ Local evidence:
 - [W2 BM16 leaf/profile history](history/e2e_candidates_20260723/07_moe_w2_decode_bm16/FINAL_REPORT.md);
 - [why leaf gains can disappear under CUDA Graph replay](sglang_integration_cuda_graph_replay_analysis_zh.md).
 
-## Provider API
+## FlashMLA provider API
 
-Set `INFINI_KERNEL_API_VERSION = 1` and implement only the callbacks selected
-by `SGLANG_GLM52_OPT_OPS`.
+Only FlashMLA needs an out-of-tree provider. Set
+`INFINI_KERNEL_API_VERSION = 1` and implement:
 
 ```python
 INFINI_KERNEL_API_VERSION = 1
@@ -118,16 +123,6 @@ def flashmla_sparse_decode(
     # Same public contract as sgl_kernel.flash_mla.flash_mla_with_kvcache.
     # Return exactly (output, lse).
     ...
-
-
-def moe_w13(*, lhs, rhs, out, masked_m, expected_m):
-    # Mutate out and return None, matching DeepGEMM's masked W13 call.
-    ...
-
-
-def moe_w2(*, lhs, rhs, out, masked_m, expected_m):
-    # Mutate out and return None, matching DeepGEMM's masked W2 call.
-    ...
 ```
 
 The module reference can be an importable module name or an absolute `.py`
@@ -156,19 +151,59 @@ python -m sglang.launch_server \
   --dsa-decode-backend flashmla_kv
 ```
 
-Fused W13:
+Fused W13 first materializes one post1 stock and one post1 candidate:
 
 ```bash
+export DEEPGEMM_W13_BASE_REPO=/path/to/sgl-deep-gemm
+export PYTHON_BIN=/path/to/sglang/python
+CUDA_VISIBLE_DEVICES='' "$PYTHON_BIN" \
+  third_party/deepgemm_w13/build_variants.py --force
+
+export SGLANG_GLM52_OPT=1
+export SGLANG_GLM52_OPT_PROFILE=hotspot_candidates
 export SGLANG_GLM52_OPT_OPS=moe_w13
 export SGLANG_GLM52_OPT_M_BUCKETS='moe_gate_proj:16|32'
+export SGLANG_GLM52_INFINI_KERNEL_NVTX=0
+
+third_party/deepgemm_w13/run_with_stock.sh \
+  python -m sglang.launch_server <unchanged GLM-5.2 arguments>
 ```
 
-W2:
+W2 first materializes its post1 stock/candidate overlay:
 
 ```bash
+export DEEPGEMM_W2_BM16_BASE_REPO=/path/to/sgl-deep-gemm
+export HARNESS_PYTHON=/path/to/sglang/python
+third_party/deepgemm_w2_bm16/build_overlay.sh
+
+export SGLANG_GLM52_OPT=1
+export SGLANG_GLM52_OPT_PROFILE=hotspot_candidates
 export SGLANG_GLM52_OPT_OPS=moe_w2
 export SGLANG_GLM52_OPT_M_BUCKETS='moe_down_proj:16|32'
+export SGLANG_GLM52_INFINI_KERNEL_NVTX=0
+
+third_party/deepgemm_w2_bm16/run_with_exact_post1_stock.sh \
+  python -m sglang.launch_server <unchanged GLM-5.2 arguments>
 ```
+
+Before a checkpoint-backed server run, exercise the same registered entrypoint
+and one CUDA Graph capture/replay with:
+
+```bash
+# Keep the W13 environment above.
+third_party/deepgemm_w13/run_with_stock.sh \
+  python scripts/glm52_moe_registration_smoke.py --op w13
+
+# Or, in a fresh process, keep the W2 environment above.
+third_party/deepgemm_w2_bm16/run_with_exact_post1_stock.sh \
+  python scripts/glm52_moe_registration_smoke.py --op w2
+```
+
+This zero-input smoke is not a performance or full numerical benchmark. It
+proves that SGLang binds the manifest stock, reaches the distinct candidate
+through the production wrapper, captures it, replays without Python re-entry,
+and matches stock on active rows. Both modes passed on a 148-SM B200 on
+2026-07-29.
 
 Aliases are normalized as follows:
 
@@ -178,9 +213,13 @@ moe_w13 / moe_gate_up  -> moe_gate_proj
 moe_w2                 -> moe_down_proj
 ```
 
-Use a fresh server process for each stock/candidate arm. Do not switch a
-provider inside one live process unless the experiment explicitly proves that
-all JIT, global-state, graph, and cache identities remain independent.
+Use a fresh server process for each stock/candidate arm. For the W13 and W2
+stock arm, use the same operator-specific launcher but unset
+`SGLANG_GLM52_OPT`, `SGLANG_GLM52_OPT_PROFILE`, `SGLANG_GLM52_OPT_OPS`, and
+`SGLANG_GLM52_OPT_M_BUCKETS`. This keeps the exact manifest stock, JIT/cache
+layout, server command, and workload unchanged. Do not enable W13 and W2 in
+one process: their separately attested stock artifacts are intentionally
+tested as independent single-op ablations.
 
 ## Exact guards
 
@@ -218,6 +257,12 @@ W13 is one fused N4096 call; there is no separate gate and up launch in the
 production path. Measuring two historical N2048 GEMMs is an interface
 mismatch.
 
+Once a supported no-overlap M16/M32 decode bucket reaches the target W13 shape
+family or the rebound W2 runner, target ABI drift aborts that candidate
+process. Explicitly unsupported recipe/overlap calls remain stock-compatible,
+so an end-to-end A/B must still require the candidate NVTX range and graph
+node; startup readiness alone is not a hit.
+
 ## Nsys and hit verification
 
 Enable NVTX only for profiler collection:
@@ -231,6 +276,10 @@ nsys profile \
   python -m sglang.launch_server <unchanged arguments>
 ```
 
+For W13/W2, place the corresponding `run_with_stock.sh` or
+`run_with_exact_post1_stock.sh` before `nsys` so the profiled process still
+uses the manifest stock denominator.
+
 Expected ranges include:
 
 ```text
@@ -239,20 +288,25 @@ infini_kernel_glm52_moe_w13_decode[M=16,N=4096,K=6144]
 infini_kernel_glm52_moe_w2_decode[M=16,N=6144,K=2048]
 ```
 
-Also require the first-hit counter for the exact op/M bucket. A provider-ready
-startup log without a hit is not evidence that the candidate ran. Turn NVTX
-back off for authoritative latency measurements.
+For FlashMLA, also require the existing first-hit counter for the exact op/M
+bucket. For the built-in W13/W2 direct paths, require the exact NVTX range and
+inspect CUDA Graph nodes/kernel identities; a startup-ready record alone is
+not evidence that the candidate ran. Turn NVTX back off for authoritative
+latency measurements.
 
-The names above are NVTX ranges around the provider calls. To make the CUDA
-kernel table itself searchable in Nsys/NCU, provider authors should also give
-the compiled `__global__` symbols an `infini_kernel_...` prefix; Python cannot
-rename a cubin's kernel symbol after compilation.
+For W13/W2, the candidate-only JIT source also renames the compiled
+`__global__` template to `infini_kernel_glm52_moe_w13_decode` or
+`infini_kernel_glm52_moe_w2_decode`. The prefix therefore remains searchable
+on CUDA Graph replay nodes even though replay does not re-enter the Python
+NVTX context. The FlashMLA name above is only an NVTX range until its external
+provider gives the compiled symbol an `infini_kernel_...` prefix; Python
+cannot rename a cubin symbol after compilation.
 
 ## Fair promotion gate
 
 For each M/expected-M bucket:
 
-1. Compare against the production stock symbol with identical input bytes,
+1. Compare against the same manifest's post1 stock symbol with identical input bytes,
    packed scale layout, stream, PDL/SM budget, scheduler metadata, and output
    ownership.
 2. Warm JIT and provider initialization outside timing.
@@ -289,7 +343,9 @@ remains the default until the complete gate passes.
    BM/BN, stages, 1-SM versus 2-SM, TMA/barrier waits, and epilogue surface.
    The measured two-SM candidate changed NCU duration from 136.58 to 128.32 us
    and output writes from 31.45 to 10.08 MB, but a required graph-region BA
-   estimator was only 1.028125x.
+   estimator was only 1.028125x. Those measurements used v0.1.4; the registered
+   implementation reapplies the same per-call delta to post1 and therefore
+   must establish fresh leaf, graph, and containing-region evidence.
 2. **W2 fixed expected-M tiling**: reduce padded output/TMEM stores without
    process-global selectors; bind configuration per call. Historical BM16
    reduced the production leaf from 75.5–76.3 to 68.6–70.1 us and cut output

@@ -25,7 +25,12 @@ KernelKind = Literal[
     "bf16_gemm",
     "indexer",
 ]
-KernelImplementation = Literal["auto", "fixed_nk", "hotspot_plugin"]
+KernelImplementation = Literal[
+    "auto",
+    "fixed_nk",
+    "hotspot_plugin",
+    "builtin_deepgemm",
+]
 
 RunFn = Callable[[dict], object]
 
@@ -160,9 +165,10 @@ _E2E_PREFILL: dict[str, KernelSpec] = {
 }
 
 # Three default-off production-interface hooks selected from the GLM-5.2
-# decode Nsight profile.  The provider is supplied out of tree so a PTX/SASS,
-# CUDA/CuTe, CUTLASS, or Triton implementation can be A/B tested without
-# changing SGLang call sites.  Every unsupported bucket falls back to stock.
+# decode Nsight profile. FlashMLA remains an out-of-tree provider hook. The
+# source-scoped W13 and W2 DeepGEMM candidates are registered in tree so their
+# setup, CUDA Graph scope, exact ABI, and stock fallback can be audited
+# end-to-end. Every unsupported bucket falls back before a candidate launch.
 _HOTSPOT_DECODE: dict[str, KernelSpec] = {
     "dsa_decode_attn": KernelSpec(
         op="dsa_decode_attn",
@@ -185,7 +191,7 @@ _HOTSPOT_DECODE: dict[str, KernelSpec] = {
         phase="decode",
         archive_ref="",
         kind="moe_masked",
-        implementation="hotspot_plugin",
+        implementation="builtin_deepgemm",
         profiler_name="infini_kernel_glm52_moe_w13_decode",
         m_values=(16, 32),
         n=4096,
@@ -199,7 +205,7 @@ _HOTSPOT_DECODE: dict[str, KernelSpec] = {
         phase="decode",
         archive_ref="",
         kind="moe_masked",
-        implementation="hotspot_plugin",
+        implementation="builtin_deepgemm",
         profiler_name="infini_kernel_glm52_moe_w2_decode",
         m_values=(16, 32),
         n=6144,

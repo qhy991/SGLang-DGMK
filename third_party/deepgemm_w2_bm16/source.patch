@@ -110,10 +110,18 @@ index c8e9e2e..df6390d 100644
              const auto cluster_n = ceil_div(desc.n, block_n) % 2 == 0 and desc.num_sms % 2 == 0 ? 2 : 1;
              const auto layout = Layout{swap_ab, block_m, block_n, block_k, cluster_m, cluster_n};
 diff --git a/csrc/jit_kernels/impls/sm100_fp8_fp4_gemm_1d1d.hpp b/csrc/jit_kernels/impls/sm100_fp8_fp4_gemm_1d1d.hpp
-index b203bb3..28f4ab8 100644
+index b203bb3..a787976 100644
 --- a/csrc/jit_kernels/impls/sm100_fp8_fp4_gemm_1d1d.hpp
 +++ b/csrc/jit_kernels/impls/sm100_fp8_fp4_gemm_1d1d.hpp
-@@ -249,7 +249,8 @@ static void sm100_m_grouped_fp8_fp4_gemm_masked_1d1d(const torch::Tensor& a, con
+@@ -38,6 +38,7 @@ public:
+     static std::string generate_impl(const Args& args) {
+         // TODO: rename files
+         return fmt::format(R"(
++#define sm100_fp8_fp4_gemm_1d1d_impl infini_kernel_glm52_moe_w2_decode
+ #include <deep_gemm/impls/sm100_fp8_fp4_gemm_1d1d.cuh>
+ 
+ using namespace deep_gemm;
+@@ -249,7 +250,8 @@ static void sm100_m_grouped_fp8_fp4_gemm_masked_1d1d(const torch::Tensor& a, con
                                                       const int& expected_m,
                                                       const int& gran_k_a, const int& gran_k_b,
                                                       const cute::UMMA::Major& major_a, const cute::UMMA::Major& major_b,
@@ -123,7 +131,7 @@ index b203bb3..28f4ab8 100644
      const auto desc = GemmDesc {
          .gemm_type = GemmType::MGroupedMasked,
          .kernel_type = KernelType::Kernel1D1D,
-@@ -261,8 +262,11 @@ static void sm100_m_grouped_fp8_fp4_gemm_masked_1d1d(const torch::Tensor& a, con
+@@ -261,8 +263,11 @@ static void sm100_m_grouped_fp8_fp4_gemm_masked_1d1d(const torch::Tensor& a, con
          .num_sms = device_runtime->get_num_sms(),
          .tc_util = device_runtime->get_tc_util(),
          .compiled_dims = compiled_dims,
@@ -135,7 +143,7 @@ index b203bb3..28f4ab8 100644
      const auto config = get_best_config<SM100ArchSpec>(desc);
  
      // Create tensor descriptors
-@@ -306,7 +310,11 @@ static void sm100_m_grouped_fp8_fp4_gemm_masked_1d1d(const torch::Tensor& a, con
+@@ -306,7 +311,11 @@ static void sm100_m_grouped_fp8_fp4_gemm_masked_1d1d(const torch::Tensor& a, con
          .tensor_map_cd = tensor_map_cd
      };
      const auto code = SM100FP8FP4Gemm1D1DRuntime::generate(args);

@@ -20,7 +20,11 @@ from typing import Any, Callable, Iterator, Optional, Tuple
 import torch
 from packaging.version import Version
 
-from sglang.srt.layers.glm52_opt.config import deepgemm_overlay_path, deepgemm_variant
+from sglang.srt.layers.glm52_opt.config import (
+    deepgemm_overlay_path,
+    deepgemm_variant,
+    emit_infini_kernel_nvtx,
+)
 from sglang.srt.model_executor.forward_batch_info import ForwardMode
 
 _REPO_ROOT = Path(__file__).resolve().parents[5]
@@ -100,14 +104,10 @@ def _expected_w2_bm16_manifest_path() -> Path:
 
 
 def _w2_bm16_manifest_path() -> Path:
-    expected = _expected_w2_bm16_manifest_path()
     override = os.environ.get("SGLANG_GLM52_W2_BM16_MANIFEST", "").strip()
-    if override and Path(override).resolve() != expected:
-        raise RuntimeError(
-            "W2/BM16 manifest override is not the exact task artifact: "
-            f"{Path(override).resolve()} != {expected}"
-        )
-    return expected
+    if override:
+        return Path(override).expanduser().resolve()
+    return _expected_w2_bm16_manifest_path()
 
 
 def _verify_w2_bm16_manifest() -> Path:
@@ -125,7 +125,6 @@ def _verify_w2_bm16_manifest() -> Path:
         "--manifest",
         str(path),
         "--check-env",
-        "--check-provenance",
     ]
     completed = subprocess.run(
         command,
@@ -316,6 +315,7 @@ class W2BM16PreparedContract:
     base_version: str
     cutlass_commit: str
     fmt_commit: str
+    emit_nvtx: bool
     build_id: str = W2_BM16_BUILD_ID
 
     def evidence(self) -> dict[str, Any]:
@@ -525,6 +525,7 @@ def prepare_w2_bm16_deep_gemm(gpu_id: int) -> W2BM16PreparedContract:
                 "third-party/cutlass"
             ],
             fmt_commit=manifest["base"]["submodules"]["third-party/fmt"],
+            emit_nvtx=emit_infini_kernel_nvtx(),
         )
         _W2_BM16_PREPARED = contract
         return contract

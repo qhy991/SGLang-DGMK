@@ -27,8 +27,6 @@ INFINI_KERNEL_API_VERSION = 1
 
 _CALLBACK_BY_OP = {
     "dsa_decode_attn": "flashmla_sparse_decode",
-    "moe_gate_proj": "moe_w13",
-    "moe_down_proj": "moe_w2",
 }
 
 
@@ -91,16 +89,21 @@ def initialize_hotspot_provider(gpu_id: int | None = None) -> bool:
     if not selected_ops:
         _STATE = _ProviderState(False, "no_selected_ops")
         return False
+    external_ops = config.hotspot_external_ops()
+    builtin_ops = config.hotspot_builtin_ops()
 
-    module_ref = config.hotspot_module_ref()
-    if not module_ref:
+    module_ref = config.hotspot_module_ref() if external_ops else ""
+    if external_ops and not module_ref:
         _STATE = _ProviderState(
             False,
             "missing_module",
             gpu_id=gpu_id,
             selected_ops=selected_ops,
         )
-        raise RuntimeError("hotspot_candidates requires SGLANG_GLM52_HOTSPOT_MODULE")
+        raise RuntimeError(
+            "selected external hotspot ops require "
+            "SGLANG_GLM52_HOTSPOT_MODULE"
+        )
 
     with _LOCK:
         if _STATE.ready:
@@ -115,38 +118,77 @@ def initialize_hotspot_provider(gpu_id: int | None = None) -> bool:
             return True
 
         try:
-            module = _load_module(module_ref)
-            api_version = getattr(module, "INFINI_KERNEL_API_VERSION", None)
-            if api_version != INFINI_KERNEL_API_VERSION:
-                raise RuntimeError(
-                    "hotspot provider API mismatch: "
-                    f"got {api_version!r}, expected {INFINI_KERNEL_API_VERSION}"
+            callbacks: dict[str, Callable[..., Any]] = {}
+            module_names: list[str] = []
+            provider_info: dict[str, Any] = {}
+
+            if external_ops:
+                module = _load_module(module_ref)
+                module_names.append(module.__name__)
+                api_version = getattr(module, "INFINI_KERNEL_API_VERSION", None)
+                if api_version != INFINI_KERNEL_API_VERSION:
+                    raise RuntimeError(
+                        "hotspot provider API mismatch: "
+                        f"got {api_version!r}, expected {INFINI_KERNEL_API_VERSION}"
+                    )
+
+                for op_name in external_ops:
+                    callback_name = _CALLBACK_BY_OP[op_name]
+                    callback = getattr(module, callback_name, None)
+                    if not callable(callback):
+                        raise RuntimeError(
+                            f"hotspot provider has no callable {callback_name!r} "
+                            f"for {op_name!r}"
+                        )
+                    callbacks[op_name] = callback
+
+                initializer = getattr(module, "initialize", None)
+                if initializer is not None:
+                    if not callable(initializer):
+                        raise RuntimeError(
+                            "hotspot provider initialize is not callable"
+                        )
+                    initializer(gpu_id=gpu_id)
+
+                raw_info = getattr(module, "PROVIDER_INFO", {})
+                if isinstance(raw_info, dict):
+                    provider_info.update(raw_info)
+
+            builtin_info: dict[str, Any] = {}
+            if "moe_gate_proj" in builtin_ops:
+                from sglang.srt.layers.glm52_opt.w13_decode import dispatch_state
+
+                state = dispatch_state()
+                if not state["enabled"]:
+                    raise RuntimeError(
+                        "registered W13 candidate is not ready: "
+                        f"{state['reason']}"
+                    )
+                builtin_info["moe_w13"] = state
+
+            if "moe_down_proj" in builtin_ops:
+                from sglang.srt.layers.glm52_opt.experimental_deepgemm import (
+                    get_w2_bm16_prepare_error,
+                    get_w2_bm16_prepared_contract,
                 )
 
-            callbacks: dict[str, Callable[..., Any]] = {}
-            for op_name in selected_ops:
-                callback_name = _CALLBACK_BY_OP[op_name]
-                callback = getattr(module, callback_name, None)
-                if not callable(callback):
+                contract = get_w2_bm16_prepared_contract()
+                if contract is None:
                     raise RuntimeError(
-                        f"hotspot provider has no callable {callback_name!r} "
-                        f"for {op_name!r}"
+                        "registered W2 candidate is not ready: "
+                        f"{get_w2_bm16_prepare_error() or 'not_prepared'}"
                     )
-                callbacks[op_name] = callback
+                builtin_info["moe_w2"] = contract.evidence()
 
-            initializer = getattr(module, "initialize", None)
-            if initializer is not None:
-                if not callable(initializer):
-                    raise RuntimeError("hotspot provider initialize is not callable")
-                initializer(gpu_id=gpu_id)
+            if builtin_info:
+                module_names.append("sglang.builtin_deepgemm_moe")
+                provider_info["builtin_deepgemm"] = builtin_info
 
-            raw_info = getattr(module, "PROVIDER_INFO", {})
-            provider_info = dict(raw_info) if isinstance(raw_info, dict) else {}
             _STATE = _ProviderState(
                 True,
                 "ready",
                 module_ref=module_ref,
-                module_name=module.__name__,
+                module_name=",".join(module_names),
                 gpu_id=gpu_id,
                 selected_ops=selected_ops,
                 callbacks=callbacks,
@@ -154,7 +196,7 @@ def initialize_hotspot_provider(gpu_id: int | None = None) -> bool:
             )
             logger.warning(
                 "GLM-5.2 hotspot provider ready: module=%s gpu=%s ops=%s",
-                module.__name__,
+                _STATE.module_name,
                 gpu_id,
                 sorted(selected_ops),
             )
