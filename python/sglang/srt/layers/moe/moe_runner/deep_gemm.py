@@ -13,6 +13,9 @@ from sglang.srt.layers.glm52_opt.w13_prefill import (
     try_dispatch_w13_prefill,
     try_dispatch_w2_prefill_stock,
 )
+from sglang.srt.layers.glm52_opt.swiglu_quant_prefill import (
+    maybe_silu_mul_quant_packed,
+)
 from sglang.srt.layers.moe.moe_runner.base import (
     MoeQuantInfo,
     MoeRunnerConfig,
@@ -242,7 +245,24 @@ class DeepGemmRunnerCore(MoeRunnerCore):
         dispose_tensor(hidden_states)
         dispose_tensor(hidden_states_scale)
 
-        if envs.SGLANG_OPT_FIX_MEGA_MOE_MEMORY.get():
+        task29_activation = maybe_silu_mul_quant_packed(
+            gateup_output,
+            m_indices,
+            runner_input.expert_start_loc,
+            group_size=scale_block_size,
+            swiglu_limit=self.swiglu_limit,
+            swizzle=self.use_swizzle,
+            gemm1_alpha=self.config.gemm1_alpha,
+            gemm1_clamp_limit=self.config.gemm1_clamp_limit,
+            column_major_scales=True,
+            scale_tma_aligned=deep_gemm_wrapper.DEEPGEMM_SCALE_UE8M0,
+            scale_ue8m0=deep_gemm_wrapper.DEEPGEMM_SCALE_UE8M0,
+            pdl=envs.SGLANG_DEEPGEMM_PDL.get(),
+        )
+        if task29_activation is not None:
+            down_input_fp8, down_input_scale = task29_activation
+            del gateup_output
+        elif envs.SGLANG_OPT_FIX_MEGA_MOE_MEMORY.get():
             swiglu_limit_arg: Optional[float] = self.swiglu_limit
 
             down_input_fp8 = torch.empty(

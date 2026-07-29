@@ -27,6 +27,10 @@ from sglang.srt.layers.glm52_opt.w13_prefill import (
     initialization_requested as w13_prefill_initialization_requested,
     initialize_w13_prefill_after_assignment,
 )
+from sglang.srt.layers.glm52_opt.swiglu_quant_prefill import (
+    initialization_requested as swiglu_quant_prefill_initialization_requested,
+    initialize_after_assignment as initialize_swiglu_quant_prefill_after_assignment,
+)
 from sglang.srt.server_args import ServerArgs
 
 logger = logging.getLogger(__name__)
@@ -322,9 +326,11 @@ def update_deep_gemm_config(gpu_id: int, server_args: ServerArgs):
 
     decode_requested = initialization_requested()
     prefill_requested = w13_prefill_initialization_requested()
-    if decode_requested and prefill_requested:
+    swiglu_quant_requested = swiglu_quant_prefill_initialization_requested()
+    if sum((decode_requested, prefill_requested, swiglu_quant_requested)) > 1:
         raise RuntimeError(
-            "decode and prefill W13 experiments cannot be selected together"
+            "W13 decode, W13 prefill and Task-29 activation experiments "
+            "cannot be selected together"
         )
 
     compile_utils_configured = False
@@ -382,6 +388,9 @@ def update_deep_gemm_config(gpu_id: int, server_args: ServerArgs):
     if not compile_utils_configured:
         compile_utils.update_deep_gemm_config(gpu_id, server_args)
 
+    if swiglu_quant_requested:
+        initialize_swiglu_quant_prefill_after_assignment(gpu_id, server_args)
+
     # Opt-in GLM-5.2 experimental DeepGEMM overlay (does not replace stock import).
     try:
         from sglang.srt.layers.glm52_opt.config import deepgemm_variant, is_enabled
@@ -389,6 +398,7 @@ def update_deep_gemm_config(gpu_id: int, server_args: ServerArgs):
         if (
             not decode_requested
             and not prefill_requested
+            and not swiglu_quant_requested
             and is_enabled()
             and deepgemm_variant()
         ):

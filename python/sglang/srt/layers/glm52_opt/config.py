@@ -31,6 +31,7 @@ _GLM52_ENV_KEYS = frozenset(
         "SGLANG_GLM52_NSYS_SECONDS",
         "SGLANG_GLM52_W13_DECODE_VARIANT",
         "SGLANG_GLM52_W13_DECODE_MANIFEST",
+        "SGLANG_GLM52_SWIGLU_QUANT_PREFILL_VARIANT",
     }
 )
 
@@ -151,6 +152,39 @@ def opt_ops_allowlist() -> frozenset[str] | None:
     if not raw:
         return None
     return frozenset(x.strip() for x in raw.split(",") if x.strip())
+
+
+@lru_cache(maxsize=1)
+def swiglu_quant_prefill_variant() -> str | None:
+    """Return the explicitly armed Task-29 variant, otherwise fail closed."""
+
+    ensure_glm52_env()
+    if not is_enabled() or profile_name() != "task29_swiglu_quant_prefill":
+        return None
+    allow = opt_ops_allowlist()
+    if allow is not None and "moe_swiglu_quant_prefill" not in allow:
+        return None
+    value = os.environ.get(
+        "SGLANG_GLM52_SWIGLU_QUANT_PREFILL_VARIANT", ""
+    ).strip().lower()
+    if value in ("", "0", "off", "false"):
+        return None
+    supported = frozenset(
+        {
+            "endpoint512_w4",
+            "endpoint1024_w8",
+            "endpoint2048_w8",
+            "cuda_s8_v16_b128",
+            "cuda_s16_v8_b256",
+            "cuda_s8_v16_b128_cgld",
+        }
+    )
+    if value not in supported:
+        raise ValueError(
+            "unsupported Task-29 SwiGLU/quant variant "
+            f"{value!r}; expected one of {sorted(supported)}"
+        )
+    return value
 
 
 def e2e_candidate_ops() -> frozenset[str]:
