@@ -69,6 +69,16 @@ for _name in (
         raise RuntimeError(
             f"{_LAUNCH_BACKEND} launch requires {_name}={_EXPECTED_TVM_FFI}"
         )
+if _USE_TVM_FFI:
+    # CUTLASS DSL 4.5.2 attaches the TVM-FFI argument converter to the
+    # stable CuTe DSL singleton but not yet to CuteExperimentalDSL.  The
+    # TGV kernel is experimental while its ABI uses the same cute.Tensor
+    # and EnvStream argument types, so bind that shipped converter here.
+    from cutlass.cute import _tvm_ffi_args_spec_converter
+
+    _tvm_ffi_args_spec_converter.attach_args_spec_converter(
+        cute_ext._dsl.CuteExperimentalDSL._get_dsl()
+    )
 
 
 def resolve_router_prefill_tactic(
