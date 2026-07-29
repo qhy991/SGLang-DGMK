@@ -1,0 +1,26 @@
+diff --git a/deep_gemm/include/deep_gemm/impls/sm100_fp8_fp4_gemm_1d1d.cuh b/deep_gemm/include/deep_gemm/impls/sm100_fp8_fp4_gemm_1d1d.cuh
+index 1578608..a6546e1 100644
+--- a/deep_gemm/include/deep_gemm/impls/sm100_fp8_fp4_gemm_1d1d.cuh
++++ b/deep_gemm/include/deep_gemm/impls/sm100_fp8_fp4_gemm_1d1d.cuh
+@@ -438,7 +438,20 @@ __global__ void __launch_bounds__(kNumThreads, 1) sm100_fp8_fp4_gemm_1d1d_impl(
+             for (uint32_t i = 0; i < 4; ++ i)
+                 values[i] = ptx::ld_shared(smem_ptr + i * 32 + lane_idx);
+             __syncwarp();
+-            ptx::st_shared(smem_ptr + lane_idx * 4, values[0], values[1], values[2], values[3]);
++            if constexpr (kGemmType == GemmType::MGroupedContiguousWithPsumLayout) {
++                // Lanes with the same low three bits alias the same starting
++                // bank. XOR the four scalar-store phases by lane octet so
++                // those four lanes select distinct columns in every phase.
++                // Every lane still writes each of its four transposed words
++                // exactly once, preserving the packed scale-factor bytes.
++                #pragma unroll
++                for (uint32_t phase = 0; phase < 4; ++ phase) {
++                    const uint32_t column = phase ^ (lane_idx >> 3);
++                    ptx::st_shared(smem_ptr + lane_idx * 4 + column, values[column]);
++                }
++            } else {
++                ptx::st_shared(smem_ptr + lane_idx * 4, values[0], values[1], values[2], values[3]);
++            }
+         };
+ 
+         while (scheduler.get_next_block(m_block_idx, n_block_idx)) {

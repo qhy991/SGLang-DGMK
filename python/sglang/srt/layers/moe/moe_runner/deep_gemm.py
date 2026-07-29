@@ -9,6 +9,10 @@ import torch
 from sglang.jit_kernel.dsv4 import silu_and_mul_masked_post_quant
 from sglang.srt.environ import envs
 from sglang.srt.layers import deep_gemm_wrapper
+from sglang.srt.layers.glm52_opt.w13_prefill import (
+    try_dispatch_w13_prefill,
+    try_dispatch_w2_prefill_stock,
+)
 from sglang.srt.layers.moe.moe_runner.base import (
     MoeQuantInfo,
     MoeRunnerConfig,
@@ -94,8 +98,8 @@ class DeepGemmRunnerInput(RunnerInput):
     masked_m: Optional[torch.Tensor] = None
     expected_m: Optional[int] = None
     m_indices: Optional[torch.Tensor] = None
-    # Cumulative expert endpoints from ep_scatter; required for DeepGEMM PSUM
-    # layout trials under glm52_opt profile e2e_candidates (goals 08/09).
+    # Cumulative expert endpoints retained from the production ep_scatter call;
+    # consumed directly by the default-off Task 28 W13 prefill PSUM selector.
     expert_start_loc: Optional[torch.Tensor] = None
 
     @property
@@ -217,26 +221,23 @@ class DeepGemmRunnerCore(MoeRunnerCore):
         if deep_gemm_wrapper.DEEPGEMM_NEED_TMA_ALIGNED_SCALES:
             hidden_states_scale = tma_align_input_scale(hidden_states_scale)
 
-        from sglang.srt.layers.glm52_opt.config import contig_psum_kwargs
-        from sglang.srt.layers.glm52_opt.dispatch import record_psum_hit
-
-        w13_psum = contig_psum_kwargs("moe_gate_proj")
-        w13_layout = m_indices
-        if w13_psum and runner_input.expert_start_loc is not None:
-            w13_layout = runner_input.expert_start_loc
-            record_psum_hit("moe_gate_proj", m=int(all_tokens))
-        else:
-            w13_psum = {}
-
-        deep_gemm_wrapper.grouped_gemm_nt_f8f8bf16_contig(
+        if not try_dispatch_w13_prefill(
             (hidden_states, hidden_states_scale),
             w13_weight_fp8,
             gateup_output,
-            w13_layout,
+            m_indices,
+            runner_input.expert_start_loc,
             recipe_a=recipe_a,
             recipe_b=recipe_b,
-            **w13_psum,
-        )
+        ):
+            deep_gemm_wrapper.grouped_gemm_nt_f8f8bf16_contig(
+                (hidden_states, hidden_states_scale),
+                w13_weight_fp8,
+                gateup_output,
+                m_indices,
+                recipe_a=recipe_a,
+                recipe_b=recipe_b,
+            )
 
         dispose_tensor(hidden_states)
         dispose_tensor(hidden_states_scale)
@@ -309,23 +310,22 @@ class DeepGemmRunnerCore(MoeRunnerCore):
         if deep_gemm_wrapper.DEEPGEMM_NEED_TMA_ALIGNED_SCALES:
             down_input_scale = tma_align_input_scale(down_input_scale)
 
-        w2_psum = contig_psum_kwargs("moe_down_proj")
-        w2_layout = m_indices
-        if w2_psum and runner_input.expert_start_loc is not None:
-            w2_layout = runner_input.expert_start_loc
-            record_psum_hit("moe_down_proj", m=int(all_tokens))
-        else:
-            w2_psum = {}
-
-        deep_gemm_wrapper.grouped_gemm_nt_f8f8bf16_contig(
+        if not try_dispatch_w2_prefill_stock(
             (down_input_fp8, down_input_scale),
             w2_weight_fp8,
             down_output,
-            w2_layout,
+            m_indices,
             recipe_a=recipe_a,
             recipe_b=recipe_b,
-            **w2_psum,
-        )
+        ):
+            deep_gemm_wrapper.grouped_gemm_nt_f8f8bf16_contig(
+                (down_input_fp8, down_input_scale),
+                w2_weight_fp8,
+                down_output,
+                m_indices,
+                recipe_a=recipe_a,
+                recipe_b=recipe_b,
+            )
 
         return down_output
 

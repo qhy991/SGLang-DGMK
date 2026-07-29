@@ -22,6 +22,11 @@ from sglang.srt.layers.glm52_opt.w13_decode import (
     is_exact_w13_tensor_call,
     try_dispatch_w13_decode,
 )
+from sglang.srt.layers.glm52_opt.w13_prefill import (
+    dispatch_state as w13_prefill_dispatch_state,
+    initialization_requested as w13_prefill_initialization_requested,
+    initialize_w13_prefill_after_assignment,
+)
 from sglang.srt.server_args import ServerArgs
 
 logger = logging.getLogger(__name__)
@@ -315,8 +320,15 @@ def update_deep_gemm_config(gpu_id: int, server_args: ServerArgs):
     if envs.SGLANG_DEEPGEMM_PDL.get() and hasattr(deep_gemm, "set_pdl"):
         deep_gemm.set_pdl(True)
 
+    decode_requested = initialization_requested()
+    prefill_requested = w13_prefill_initialization_requested()
+    if decode_requested and prefill_requested:
+        raise RuntimeError(
+            "decode and prefill W13 experiments cannot be selected together"
+        )
+
     compile_utils_configured = False
-    if initialization_requested():
+    if decode_requested or prefill_requested:
         # This bounded experiment fixes the denominator explicitly rather than
         # inheriting DeviceRuntime defaults or a pre-worker state.
         original_installed_state = {
@@ -344,12 +356,20 @@ def update_deep_gemm_config(gpu_id: int, server_args: ServerArgs):
                     "installed DeepGEMM W13 startup state mismatch: "
                     f"actual={installed_state}, required={required_state}"
                 )
-            compile_utils_configured = initialize_w13_decode_after_assignment(
-                gpu_id,
-                server_args,
-                compile_utils_loader=compile_utils.load,
-            )
-            initialized = bool(dispatch_state()["enabled"])
+            if decode_requested:
+                compile_utils_configured = initialize_w13_decode_after_assignment(
+                    gpu_id,
+                    server_args,
+                    compile_utils_loader=compile_utils.load,
+                )
+                initialized = bool(dispatch_state()["enabled"])
+            else:
+                compile_utils_configured = initialize_w13_prefill_after_assignment(
+                    gpu_id,
+                    server_args,
+                    compile_utils_loader=compile_utils.load,
+                )
+                initialized = bool(w13_prefill_dispatch_state()["enabled"])
         finally:
             # An invalid variant/manifest or failed DSO/JIT setup must return
             # to the exact stock runtime state; opt-in must not perturb its
@@ -366,7 +386,12 @@ def update_deep_gemm_config(gpu_id: int, server_args: ServerArgs):
     try:
         from sglang.srt.layers.glm52_opt.config import deepgemm_variant, is_enabled
 
-        if not initialization_requested() and is_enabled() and deepgemm_variant():
+        if (
+            not decode_requested
+            and not prefill_requested
+            and is_enabled()
+            and deepgemm_variant()
+        ):
             from sglang.srt.layers.glm52_opt.experimental_deepgemm import (
                 get_experimental_deep_gemm,
             )
