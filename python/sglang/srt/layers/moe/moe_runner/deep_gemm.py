@@ -5,16 +5,16 @@ from typing import TYPE_CHECKING, Any, List, Optional, Tuple
 
 import einops
 import torch
-
 from sglang.jit_kernel.dsv4 import silu_and_mul_masked_post_quant
 from sglang.srt.environ import envs
 from sglang.srt.layers import deep_gemm_wrapper
-from sglang.srt.layers.glm52_opt.w13_prefill import (
-    try_dispatch_w13_prefill,
-    try_dispatch_w2_prefill_stock,
-)
 from sglang.srt.layers.glm52_opt.swiglu_quant_prefill import (
     maybe_silu_mul_quant_packed,
+)
+from sglang.srt.layers.glm52_opt.w2_prefill import try_dispatch_w2_prefill
+from sglang.srt.layers.glm52_opt.w13_prefill import (
+    try_dispatch_w2_prefill_stock,
+    try_dispatch_w13_prefill,
 )
 from sglang.srt.layers.moe.moe_runner.base import (
     MoeQuantInfo,
@@ -330,7 +330,15 @@ class DeepGemmRunnerCore(MoeRunnerCore):
         if deep_gemm_wrapper.DEEPGEMM_NEED_TMA_ALIGNED_SCALES:
             down_input_scale = tma_align_input_scale(down_input_scale)
 
-        if not try_dispatch_w2_prefill_stock(
+        if not try_dispatch_w2_prefill(
+            (down_input_fp8, down_input_scale),
+            w2_weight_fp8,
+            down_output,
+            m_indices,
+            runner_input.expert_start_loc,
+            recipe_a=recipe_a,
+            recipe_b=recipe_b,
+        ) and not try_dispatch_w2_prefill_stock(
             (down_input_fp8, down_input_scale),
             w2_weight_fp8,
             down_output,

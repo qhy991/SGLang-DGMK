@@ -1,0 +1,41 @@
+diff --git a/csrc/jit_kernels/heuristics/sm100.hpp b/csrc/jit_kernels/heuristics/sm100.hpp
+index 112b230..26add33 100644
+--- a/csrc/jit_kernels/heuristics/sm100.hpp
++++ b/csrc/jit_kernels/heuristics/sm100.hpp
+@@ -210,6 +210,36 @@ struct SM100ArchSpec {
+         int num_stages = std::min(
+             (smem_capacity - smem_extra) / smem_per_stage,
+             kNumMaxStages);
++
++        // Task 30: one bounded residual experiment for the exact GLM-5.2
++        // contiguous W2 prefill PSUM specialization.  Keep every other
++        // descriptor on the stock heuristic.  This changes only the
++        // generated pipeline depth; the 2-CTA/TMA/TMEM/mbarrier kernel
++        // implementation and all process-global runtime policy remain stock.
++        const bool exact_glm52_w2_prefill_psum =
++            desc.gemm_type == GemmType::MGroupedContiguousWithPsumLayout and
++            desc.kernel_type == KernelType::Kernel1D1D and
++            desc.m == 35200 and desc.n == 6144 and desc.k == 2048 and
++            desc.num_groups == 32 and
++            desc.expected_m == 1024 and
++            desc.expected_n == 6144 and desc.expected_k == 2048 and
++            desc.expected_num_groups == 32 and
++            desc.compiled_dims == "nk" and
++            not desc.ensure_zero_padding and
++            desc.a_dtype == torch::kFloat8_e4m3fn and
++            desc.b_dtype == torch::kFloat8_e4m3fn and
++            desc.cd_dtype == torch::kBFloat16 and
++            not desc.with_accumulation and
++            desc.num_sms == 148 and desc.tc_util == 100 and
++            layout.swap_ab and
++            layout.block_m == 128 and layout.block_n == 128 and
++            layout.block_k == 128 and
++            layout.cluster_m == 1 and layout.cluster_n == 2;
++        if (exact_glm52_w2_prefill_psum) {
++            DG_HOST_ASSERT(smem_extra == 9004 and smem_per_stage == 25600);
++            DG_HOST_ASSERT(num_stages == 8);
++            num_stages = 7;
++        }
+         return {
+             smem_extra + num_stages * smem_per_stage,
+             num_stages

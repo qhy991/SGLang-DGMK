@@ -4,13 +4,27 @@ from contextlib import contextmanager
 from typing import Any, Optional, Tuple
 
 import torch
-
 from sglang.srt.environ import envs
 from sglang.srt.layers.deep_gemm_wrapper.configurer import (  # noqa: F401
     DEEPGEMM_BLACKWELL,
     DEEPGEMM_NEED_TMA_ALIGNED_SCALES,
     DEEPGEMM_SCALE_UE8M0,
     ENABLE_JIT_DEEPGEMM,
+)
+from sglang.srt.layers.glm52_opt.swiglu_quant_prefill import (
+    initialization_requested as swiglu_quant_prefill_initialization_requested,
+)
+from sglang.srt.layers.glm52_opt.swiglu_quant_prefill import (
+    initialize_after_assignment as initialize_swiglu_quant_prefill_after_assignment,
+)
+from sglang.srt.layers.glm52_opt.w2_prefill import (
+    dispatch_state as w2_prefill_dispatch_state,
+)
+from sglang.srt.layers.glm52_opt.w2_prefill import (
+    initialization_requested as w2_prefill_initialization_requested,
+)
+from sglang.srt.layers.glm52_opt.w2_prefill import (
+    initialize_w2_prefill_after_assignment,
 )
 from sglang.srt.layers.glm52_opt.w13_decode import (
     REQUIRED_NUM_SMS,
@@ -24,12 +38,12 @@ from sglang.srt.layers.glm52_opt.w13_decode import (
 )
 from sglang.srt.layers.glm52_opt.w13_prefill import (
     dispatch_state as w13_prefill_dispatch_state,
-    initialization_requested as w13_prefill_initialization_requested,
-    initialize_w13_prefill_after_assignment,
 )
-from sglang.srt.layers.glm52_opt.swiglu_quant_prefill import (
-    initialization_requested as swiglu_quant_prefill_initialization_requested,
-    initialize_after_assignment as initialize_swiglu_quant_prefill_after_assignment,
+from sglang.srt.layers.glm52_opt.w13_prefill import (
+    initialization_requested as w13_prefill_initialization_requested,
+)
+from sglang.srt.layers.glm52_opt.w13_prefill import (
+    initialize_w13_prefill_after_assignment,
 )
 from sglang.srt.server_args import ServerArgs
 
@@ -326,10 +340,21 @@ def update_deep_gemm_config(gpu_id: int, server_args: ServerArgs):
 
     decode_requested = initialization_requested()
     prefill_requested = w13_prefill_initialization_requested()
+    w2_prefill_requested = w2_prefill_initialization_requested()
     swiglu_quant_requested = swiglu_quant_prefill_initialization_requested()
-    if sum((decode_requested, prefill_requested, swiglu_quant_requested)) > 1:
+    if (
+        sum(
+            (
+                decode_requested,
+                prefill_requested,
+                w2_prefill_requested,
+                swiglu_quant_requested,
+            )
+        )
+        > 1
+    ):
         raise RuntimeError(
-            "W13 decode, W13 prefill and Task-29 activation experiments "
+            "W13 decode, W13 prefill, W2 prefill and Task-29 activation experiments "
             "cannot be selected together"
         )
 
@@ -385,6 +410,15 @@ def update_deep_gemm_config(gpu_id: int, server_args: ServerArgs):
                 deep_gemm.set_num_sms(original_installed_state["num_sms"])
                 deep_gemm.set_tc_util(original_installed_state["tc_util"])
 
+    if w2_prefill_requested:
+        compile_utils_configured = initialize_w2_prefill_after_assignment(
+            gpu_id,
+            server_args,
+            compile_utils_loader=compile_utils.load,
+        )
+        if not w2_prefill_dispatch_state()["enabled"]:
+            raise RuntimeError("requested W2 prefill selector did not initialize")
+
     if not compile_utils_configured:
         compile_utils.update_deep_gemm_config(gpu_id, server_args)
 
@@ -398,6 +432,7 @@ def update_deep_gemm_config(gpu_id: int, server_args: ServerArgs):
         if (
             not decode_requested
             and not prefill_requested
+            and not w2_prefill_requested
             and not swiglu_quant_requested
             and is_enabled()
             and deepgemm_variant()
