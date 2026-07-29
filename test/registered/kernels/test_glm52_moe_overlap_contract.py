@@ -148,10 +148,10 @@ class TestGlm52MoeOverlapContract(unittest.TestCase):
             {"recipe_a": (1, 128), "recipe_b": (128, 128)},
         )
 
-    def test_eligible_replacement_returns_output_without_stock_call(self):
+    def test_eligible_replacement_preserves_none_return_without_stock_call(self):
         run = self._run_wrapper(replacement_result=True, stock_return=object())
 
-        self.assertIs(run.result, run.out)
+        self.assertIsNone(run.result)
         self.assertEqual(len(run.replacement_calls), 1)
         self.assertEqual(run.stock_calls, [])
         self.assertEqual(run.configured_sms, [None])

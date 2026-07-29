@@ -72,7 +72,7 @@ def grouped_gemm_nt_f8f8bf16_masked(
             if glm52_compatible and try_dispatch_moe_masked(
                 lhs, rhs, out, masked_m, expected_m
             ):
-                return out
+                return None
 
             fp4_kwargs = {}
             if recipe_a is not None:

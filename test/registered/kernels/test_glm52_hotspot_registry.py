@@ -11,6 +11,7 @@ import torch
 from sglang.srt.layers.glm52_opt import config, hotspot_provider
 from sglang.srt.layers.glm52_opt.context import op_context, set_forward_mode
 from sglang.srt.layers.glm52_opt.dispatch import (
+    _moe_hotspot_abi_matches,
     try_dispatch_flashmla_sparse_decode,
     try_dispatch_moe_masked,
 )
@@ -212,6 +213,55 @@ def test_abi_miss_falls_back_before_any_candidate_launch():
         ):
             assert not try_dispatch_moe_masked(pair, pair, fake, fake, 5)
         candidate.assert_not_called()
+    finally:
+        set_forward_mode(None)
+        _restore_env(saved)
+
+
+def test_w2_expected_m_matrix_is_bound_to_forward_bucket():
+    names = ("SGLANG_GLM52_OPT_PROFILE", "SGLANG_GLM52_OPT_OPS")
+    saved = {name: os.environ.get(name) for name in names}
+    fake = SimpleNamespace(device=torch.device("cpu"))
+    pair = (fake, fake)
+    try:
+        os.environ["SGLANG_GLM52_OPT_PROFILE"] = "hotspot_candidates"
+        os.environ["SGLANG_GLM52_OPT_OPS"] = "moe_w2"
+        spec = lookup("moe_down_proj", "decode", m=16)
+        assert spec is not None
+        with patch(
+            "sglang.srt.layers.glm52_opt.dispatch._tensor_contract",
+            return_value=True,
+        ):
+            set_forward_mode(ForwardMode.DECODE, 16)
+            assert all(
+                _moe_hotspot_abi_matches(
+                    spec, pair, pair, fake, fake, expected_m, 16
+                )
+                for expected_m in (4, 5)
+            )
+            assert not any(
+                _moe_hotspot_abi_matches(
+                    spec, pair, pair, fake, fake, expected_m, 16
+                )
+                for expected_m in (8, 9)
+            )
+            set_forward_mode(ForwardMode.DECODE, 32)
+            assert all(
+                _moe_hotspot_abi_matches(
+                    spec, pair, pair, fake, fake, expected_m, 32
+                )
+                for expected_m in (8, 9)
+            )
+            assert not any(
+                _moe_hotspot_abi_matches(
+                    spec, pair, pair, fake, fake, expected_m, 32
+                )
+                for expected_m in (4, 5)
+            )
+            set_forward_mode(ForwardMode.EXTEND, 16)
+            assert not _moe_hotspot_abi_matches(
+                spec, pair, pair, fake, fake, 4, 16
+            )
     finally:
         set_forward_mode(None)
         _restore_env(saved)

@@ -31,12 +31,16 @@ logger = logging.getLogger(__name__)
 _HIT_LOCK = threading.Lock()
 _HIT_COUNTS: dict[str, int] = {}
 _MISS_COUNTS: dict[str, int] = {}
-_HIT_FILE = Path(
-    os.environ.get("SGLANG_GLM52_OPT_HIT_FILE", "/home/ubuntu/wwxq/cache/sglang/glm52_opt_hits.json")
-)
+_HIT_FILE_RAW = os.environ.get(
+    "SGLANG_GLM52_OPT_HIT_FILE",
+    "/home/ubuntu/wwxq/cache/sglang/glm52_opt_hits.json",
+).strip()
+_HIT_FILE = Path(_HIT_FILE_RAW) if _HIT_FILE_RAW else None
 
 
 def _flush_stats() -> None:
+    if _HIT_FILE is None:
+        return
     try:
         _HIT_FILE.parent.mkdir(parents=True, exist_ok=True)
         payload = {"hits": dict(_HIT_COUNTS), "misses": dict(_MISS_COUNTS)}
