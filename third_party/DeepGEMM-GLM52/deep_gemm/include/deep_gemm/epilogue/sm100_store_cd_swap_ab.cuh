@@ -141,13 +141,12 @@ sm100_store_cd_swap_ab(const utils::PatternVisitor<pattern_cd_t>& smem_cd, uint3
     }
 }
 
-// Goal 06 route B2: direct gated-dual epilogue for the standalone GLM-5.2
-// shared expert.  The two input addresses name disjoint FP32 TMEM accumulator
-// regions produced from the gate and up halves of the merged production
-// weight. The epilogue evaluates silu(gate) * up from the corresponding FP32
-// accumulators and converts only the final value to the caller-owned BF16
-// [M,2048] output. There is no BF16 [M,4096] global, shared, or register
-// intermediate.
+// Task 06/08 direct gated-dual epilogue for the standalone GLM-5.2 shared
+// expert. The two input addresses name disjoint FP32 TMEM accumulator regions
+// produced from the gate and up halves of the merged production weight. The
+// epilogue evaluates silu(gate) * up from the corresponding FP32 accumulators
+// and converts only the final value to caller-owned BF16 [M,2048]. There is no
+// BF16 [M,4096] global, shared, or register intermediate.
 template <uint32_t BLOCK_M, uint32_t BLOCK_N,
           uint32_t STORE_BLOCK_M, uint32_t STORE_BLOCK_N,
           uint32_t kSwizzleCDMode,
@@ -169,7 +168,7 @@ sm100_store_swiglu_swap_ab(
         const cutlass::arch::ClusterTransactionBarrier* tmem_empty_barrier,
         const cute::TmaDescriptor& tensor_map_cd) {
     DG_STATIC_ASSERT(cute::is_same_v<cd_dtype_t, cutlass::bfloat16_t>,
-                     "Task 06 gated-dual output must be BF16");
+                     "gated-dual output must be BF16");
     DG_STATIC_ASSERT(STORE_BLOCK_N == 128,
                      "STORE_BLOCK_N must be 128 to match TMEM rows");
 
@@ -228,8 +227,14 @@ sm100_store_swiglu_swap_ab(
 
             #pragma unroll
             for (uint32_t j = 0; j < kNumSwizzleAtomRows; ++j) {
-                const float gate = __uint_as_float(gate_values[j]);
-                const float up = __uint_as_float(up_values[j]);
+                // The production activation consumes the BF16 gate/up GEMM
+                // result. Reproduce that semantic rounding in registers, then
+                // evaluate SiLU and the multiply in FP32. This does not create
+                // a BF16 [M,4096] tensor or any extra store/helper launch.
+                const float gate = __bfloat162float(
+                    __float2bfloat16_rn(__uint_as_float(gate_values[j])));
+                const float up = __bfloat162float(
+                    __float2bfloat16_rn(__uint_as_float(up_values[j])));
                 const float value = (gate / (1.0f + expf(-gate))) * up;
                 gate_values[j] = __float_as_uint(value);
             }

@@ -45,6 +45,8 @@ public:
         unsigned long long* prof = nullptr;
         // Goal 06 route B2. Dedicated entry only; false for every stock API.
         bool task06_gated_dual = false;
+        // Goal 08 route B2. Dedicated entry only; false for every stock API.
+        bool task08_gated_dual = false;
     };
 
     static std::string generate_impl(const Args& args) {
@@ -68,7 +70,7 @@ static void __instantiate_kernel() {{
         {},
         {},
         {},
-        {}, {}, {}, {}, {},
+        {}, {}, {}, {}, {}, {},
         {}, {}, {},
         {}
     >);
@@ -90,6 +92,7 @@ static void __instantiate_kernel() {{
         to_string(args.gemm_desc.gemm_type), args.gemm_desc.with_accumulation,
         (args.fuse_scale_pack ? "true" : "false"), (args.prof != nullptr ? "true" : "false"),
         (args.task06_gated_dual ? "true" : "false"),
+        (args.task08_gated_dual ? "true" : "false"),
         to_string(args.gemm_desc.a_dtype), to_string(args.gemm_desc.b_dtype), to_string(args.gemm_desc.cd_dtype),
         get_default_epilogue_type(args.epilogue_type));
     }
@@ -118,7 +121,8 @@ static void sm100_fp8_fp4_gemm_1d1d(const torch::Tensor& a, const torch::Tensor&
                                     const bool& fuse_scale_pack = false,
                                     unsigned long long* prof = nullptr,
                                     const bool& task06_one_sm = false,
-                                    const bool& task06_gated_dual = false) {
+                                    const bool& task06_gated_dual = false,
+                                    const bool& task08_gated_dual = false) {
     const auto desc = GemmDesc {
         .gemm_type = GemmType::Normal,
         .kernel_type = KernelType::Kernel1D1D,
@@ -132,26 +136,29 @@ static void sm100_fp8_fp4_gemm_1d1d(const torch::Tensor& a, const torch::Tensor&
         .compiled_dims = compiled_dims
     };
     auto config = get_best_config<SM100ArchSpec>(desc);
-    if (task06_one_sm or task06_gated_dual) {
+    if (task06_one_sm or task06_gated_dual or task08_gated_dual) {
         // Goal 06 feasibility portfolio, routes B1/B2. Keep these out of the
         // production heuristic: dedicated fail-closed APIs are the only callers.
-        // With SwapAB, (BLOCK_N, BLOCK_M, BLOCK_K) is the physical
-        // transpose-equivalent CUTLASS/CuTe tile: 128x{16,32}x128.
-        DG_HOST_ASSERT((m == 16 or m == 32) and
-                       n == (task06_gated_dual ? 2048 : 4096) and k == 6144);
+        // Goal 08 B2 uses the corresponding genuine two-SM 256x128x128
+        // transpose-equivalent collective, with 128 token rows per logical
+        // block split across the two clustered CTAs.
+        DG_HOST_ASSERT(
+            (task08_gated_dual and m == 4096 and n == 2048 and k == 6144) or
+            (not task08_gated_dual and (m == 16 or m == 32) and
+             n == (task06_gated_dual ? 2048 : 4096) and k == 6144));
         DG_HOST_ASSERT(gran_k_a == 128 and gran_k_b == 128);
         DG_HOST_ASSERT(major_a == cute::UMMA::Major::K and major_b == cute::UMMA::Major::K);
         const auto layout = Layout{
             /*swap_ab=*/true,
-            /*block_m=*/m,
+            /*block_m=*/task08_gated_dual ? 128 : m,
             /*block_n=*/128,
             /*block_k=*/128,
             /*cluster_m=*/1,
-            /*cluster_n=*/1
+            /*cluster_n=*/task08_gated_dual ? 2 : 1
         };
         const auto storage_config = SM100ArchSpec::get_storage_config(desc, layout);
         auto pipeline_config = SM100ArchSpec::get_pipeline_config(desc, layout, storage_config);
-        if (task06_gated_dual) {
+        if (task06_gated_dual or task08_gated_dual) {
             // B2 carries one activation stream but two weight/SFB streams per
             // stage. Derive the largest legal stage count from the pinned
             // SM100 capacity rather than borrowing the single-GEMM allocation.
@@ -188,7 +195,8 @@ static void sm100_fp8_fp4_gemm_1d1d(const torch::Tensor& a, const torch::Tensor&
     }
 
     const auto cd = c.value_or(d);
-    const int weight_n = task06_gated_dual ? 4096 : n;
+    const int weight_n =
+        (task06_gated_dual or task08_gated_dual) ? 4096 : n;
     const auto tensor_map_a = make_tma_a_desc(major_a, a, m, k,
                                               config.storage_config.load_block_m,
                                               config.layout.block_k,
@@ -239,7 +247,8 @@ static void sm100_fp8_fp4_gemm_1d1d(const torch::Tensor& a, const torch::Tensor&
         .sfb_s0 = fuse_scale_pack ? static_cast<int>(sfb.stride(0)) : 0,
         .sfb_s1 = fuse_scale_pack ? static_cast<int>(sfb.stride(1)) : 0,
         .prof = prof,
-        .task06_gated_dual = task06_gated_dual
+        .task06_gated_dual = task06_gated_dual,
+        .task08_gated_dual = task08_gated_dual
     };
     const auto code = SM100FP8FP4Gemm1D1DRuntime::generate(args);
     const auto runtime = compiler->build("sm100_fp8_fp4_gemm_1d1d", code);

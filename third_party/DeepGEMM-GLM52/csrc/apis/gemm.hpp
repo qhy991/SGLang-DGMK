@@ -225,6 +225,65 @@ static void fp8_fp4_gemm_nt_task06_gated_dual(
         /*task06_gated_dual=*/true);
 }
 
+// Goal 08 route B2: exact M4096 two-SM gated dual GEMM. The dedicated
+// SM100 kernel reads the production packed scales and original
+// [gate(2048), up(2048)] weight directly, reuses each activation tile for
+// both MMA streams, retains the two FP32 accumulators in disjoint two-SM
+// TMEM regions, and writes only the final BF16 [4096,2048] SwiGLU result.
+// This entry is deliberately unreachable from the stock API.
+static void fp8_fp4_gemm_nt_task08_gated_dual(
+        const std::pair<torch::Tensor, torch::Tensor>& a,
+        const std::pair<torch::Tensor, torch::Tensor>& b,
+        const torch::Tensor& d) {
+    const auto major_a = get_major_type_ab(a.first);
+    const auto major_b = get_major_type_ab(b.first);
+    DG_HOST_ASSERT(major_a == cute::UMMA::Major::K and
+                   major_b == cute::UMMA::Major::K);
+    check_major_type_cd(d);
+
+    const auto arch_major = device_runtime->get_arch_major();
+    const auto [m, k] = check_ab_fp8_fp4(a.first, major_a, arch_major);
+    const auto [merged_n, k_] =
+        check_ab_fp8_fp4(b.first, major_b, arch_major);
+    const auto [m_out, n_out] = get_shape<2>(d);
+    DG_HOST_ASSERT(arch_major == 10);
+    DG_HOST_ASSERT(m == 4096 and k == 6144);
+    DG_HOST_ASSERT(merged_n == 4096 and k_ == k);
+    DG_HOST_ASSERT(m_out == m and n_out == 2048);
+    DG_HOST_ASSERT(a.first.scalar_type() == torch::kFloat8_e4m3fn and
+                   b.first.scalar_type() == torch::kFloat8_e4m3fn);
+    DG_HOST_ASSERT(a.second.scalar_type() == torch::kInt and
+                   b.second.scalar_type() == torch::kInt);
+    DG_HOST_ASSERT(d.scalar_type() == torch::kBFloat16);
+    DG_HOST_ASSERT(a.first.is_contiguous() and b.first.is_contiguous() and
+                   d.is_contiguous() and d.storage_offset() == 0);
+    DG_HOST_ASSERT(
+        a.second.size(0) == m and
+        a.second.size(1) == k / 128 / 4 and
+        b.second.size(0) == merged_n and
+        b.second.size(1) == k / 128 / 4);
+    DG_HOST_ASSERT(
+        a.second.stride(0) == 1 and a.second.stride(1) == m and
+        b.second.stride(0) == 1 and
+        b.second.stride(1) == merged_n);
+
+    // The exact packed int32 UE8M0 operands are already in the required
+    // column-major scale layout. Pass them through without a transform,
+    // expansion, repack, transpose, workspace, or helper launch.
+    sm100_fp8_fp4_gemm_1d1d(
+        a.first, a.second, b.first, b.second, std::nullopt, d,
+        m, n_out, k,
+        /*gran_k_a=*/128, /*gran_k_b=*/128,
+        major_a, major_b,
+        /*compiled_dims=*/"mnk",
+        std::nullopt,
+        /*fuse_scale_pack=*/false,
+        /*prof=*/nullptr,
+        /*task06_one_sm=*/false,
+        /*task06_gated_dual=*/false,
+        /*task08_gated_dual=*/true);
+}
+
 // GLM-5.2 fused UE8M0 scale pack: same math as `fp8_fp4_gemm_nt`, but the raw
 // per-128-block f32 scale operands are packed to UE8M0 *inside* the GEMM kernel
 // (device-side, per-CTA local) instead of by a separate pre-pass kernel. This

@@ -179,6 +179,13 @@ try:
         _C.fp8_fp4_gemm_nt_task06_gated_dual(a_data, a_sf, b_data, b_sf, d)
 
     fp8_gemm_nt_task06_gated_dual = fp8_fp4_gemm_nt_task06_gated_dual
+
+    def fp8_fp4_gemm_nt_task08_gated_dual(a, b, d):
+        """Goal 08 exact packed-UE8M0 two-SM gated-dual SwiGLU entry."""
+        (a_data, a_sf), (b_data, b_sf) = _parse_tensor_or_tuple(a), _parse_tensor_or_tuple(b)
+        _C.fp8_fp4_gemm_nt_task08_gated_dual(a_data, a_sf, b_data, b_sf, d)
+
+    fp8_gemm_nt_task08_gated_dual = fp8_fp4_gemm_nt_task08_gated_dual
     fp8_gemm_nn = fp8_fp4_gemm_nn
     fp8_gemm_tn = fp8_fp4_gemm_tn
     fp8_gemm_tt = fp8_fp4_gemm_tt
