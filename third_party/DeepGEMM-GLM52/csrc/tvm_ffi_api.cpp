@@ -247,6 +247,17 @@ void dg_fp8_fp4_gemm_nt_task06_one_sm(
         convert_to_torch_tensor(d));
 }
 
+void dg_fp8_fp4_gemm_nt_task07_one_sm(
+        TensorView a, TensorView a_sf,
+        TensorView b, TensorView b_sf,
+        TensorView d, int64_t tile_n) {
+    gemm::fp8_fp4_gemm_nt_task07_one_sm(
+        std::make_pair(convert_to_torch_tensor(a), convert_to_torch_tensor(a_sf)),
+        std::make_pair(convert_to_torch_tensor(b), convert_to_torch_tensor(b_sf)),
+        convert_to_torch_tensor(d),
+        static_cast<int>(tile_n));
+}
+
 void dg_fp8_fp4_gemm_nt_task06_gated_dual(
         TensorView a, TensorView a_sf,
         TensorView b, TensorView b_sf,
@@ -543,6 +554,7 @@ void dg_k_grouped_fp8_gemm_nt_contiguous(TensorView a, TensorView a_sf,
 
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(fp8_fp4_gemm_nt, dg_fp8_fp4_gemm_nt);
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(fp8_fp4_gemm_nt_task06_one_sm, dg_fp8_fp4_gemm_nt_task06_one_sm);
+TVM_FFI_DLL_EXPORT_TYPED_FUNC(fp8_fp4_gemm_nt_task07_one_sm, dg_fp8_fp4_gemm_nt_task07_one_sm);
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(fp8_fp4_gemm_nt_task06_gated_dual, dg_fp8_fp4_gemm_nt_task06_gated_dual);
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(fp8_fp4_gemm_nt_fused, dg_fp8_fp4_gemm_nt_fused);
 TVM_FFI_DLL_EXPORT_TYPED_FUNC(fp8_fp4_gemm_nt_prof, dg_fp8_fp4_gemm_nt_prof);

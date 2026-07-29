@@ -26,7 +26,8 @@ sm100_store_cd_swap_ab(const utils::PatternVisitor<pattern_cd_t>& smem_cd, uint3
                        const uint32_t& effective_m,
                        const uint32_t& epilogue_warp_idx, const uint32_t& lane_idx,
                        const cutlass::arch::ClusterTransactionBarrier* tmem_empty_barrier,
-                       const cute::TmaDescriptor& tensor_map_cd) {
+                       const cute::TmaDescriptor& tensor_map_cd,
+                       const bool release_tmem = true) {
     // NOTES: The epilogue requires a full warpgroup to read all 128 TMEM rows,
     //          implying STORE_BLOCK_N must be 128.
     DG_STATIC_ASSERT(STORE_BLOCK_N == 128, "STORE_BLOCK_N must be 128 to match TMEM rows");
@@ -109,7 +110,7 @@ sm100_store_cd_swap_ab(const utils::PatternVisitor<pattern_cd_t>& smem_cd, uint3
 
         // Notify tensor memory empty (only at the leader CTA) arrival ASAP
         // NOTES: only the last stage needs to do this
-        if (s == num_stores - 1) {
+        if (release_tmem and s == num_stores - 1) {
             ptx::tcgen05_before_thread_sync();
             tmem_empty_barrier->arrive(0u);
         }

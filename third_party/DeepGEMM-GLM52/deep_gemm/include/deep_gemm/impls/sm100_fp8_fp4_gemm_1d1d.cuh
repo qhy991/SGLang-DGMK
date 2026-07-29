@@ -28,7 +28,7 @@ template <cute::UMMA::Major kMajorA, cute::UMMA::Major kMajorB,
           uint32_t kNumSMs,
           bool kSwapAB, bool kEnsureZeroPadding,
           GemmType kGemmType, bool kWithAccumulation, bool kFuseScalePack, bool kProfile,
-          bool kTask06GatedDual,
+          bool kTask06GatedDual, bool kTask07OneSm,
           typename a_dtype_t, typename b_dtype_t, typename cd_dtype_t,
           typename epilogue_type_t>
 CUTLASS_GLOBAL void __launch_bounds__(kNumNonEpilogueThreads + kNumEpilogueThreads, 1)
@@ -65,16 +65,26 @@ sm100_fp8_fp4_gemm_1d1d_impl(int* grouped_layout,
     constexpr uint32_t UMMA_K = 32;
     constexpr uint32_t LOAD_BLOCK_M = BLOCK_M / (kIsMulticastOnA ? kNumMulticast: 1);
     constexpr uint32_t LOAD_BLOCK_N = BLOCK_N / (kIsMulticastOnA ? 1 : kNumMulticast);
+    constexpr uint32_t kNumNSubtiles =
+        kTask07OneSm ? BLOCK_N / LAYOUT_AD_M : 1;
     DG_STATIC_ASSERT(BLOCK_K == 128, "Invalid block K");
     DG_STATIC_ASSERT(BLOCK_K % UMMA_K == 0, "Block K must be divisible by UMMA K");
     DG_STATIC_ASSERT(kNumMulticast == 1 or kNumMulticast == 2, "Only support 1/2 multicast");
-    DG_STATIC_ASSERT((kSwapAB and BLOCK_N == LAYOUT_AD_M) or
+    DG_STATIC_ASSERT((kSwapAB and
+                      (BLOCK_N == LAYOUT_AD_M or
+                       (kTask07OneSm and BLOCK_N == 2 * LAYOUT_AD_M))) or
                      (not kSwapAB and (BLOCK_M == 32 or BLOCK_M == 64 or BLOCK_M == LAYOUT_AD_M)), "Invalid block size");
     DG_STATIC_ASSERT(not kTask06GatedDual or
                      (kSwapAB and kNumMulticast == 1 and
                       (BLOCK_M == 16 or BLOCK_M == 32) and BLOCK_N == 128 and BLOCK_K == 128 and
                       SHAPE_N == 2048 and SHAPE_K == 6144),
                      "Task 06 gated-dual is restricted to the exact GLM-5.2 shared-expert decode tiles");
+    DG_STATIC_ASSERT(not kTask07OneSm or
+                     (kSwapAB and kNumMulticast == 1 and
+                      (BLOCK_M == 16 or BLOCK_M == 32) and
+                      (BLOCK_N == 128 or BLOCK_N == 256) and
+                      BLOCK_K == 128 and SHAPE_N == 6144 and SHAPE_K == 2048),
+                     "Task 07 one-SM route is restricted to the exact GLM-5.2 shared-down decode tiles");
 
     // SF configs
     constexpr uint32_t kNumUTCCPAlignedElems = 128;
@@ -94,7 +104,7 @@ sm100_fp8_fp4_gemm_1d1d_impl(int* grouped_layout,
     // NOTES: To maximize epilogue threads utilization, process an entire BLOCK_N
     //        per store stage for swap-AB cases, and an entire BLOCK_M for non-swap cases
     constexpr uint32_t STORE_BLOCK_M =        kSwapAB ? 16      : cute::min<uint32_t>(BLOCK_M, LAYOUT_AD_M);
-    constexpr uint32_t STORE_BLOCK_N =        kSwapAB ? BLOCK_N : kSwizzleCDMode / sizeof(cd_dtype_t);
+    constexpr uint32_t STORE_BLOCK_N =        kSwapAB ? (kTask07OneSm ? LAYOUT_AD_M : BLOCK_N) : kSwizzleCDMode / sizeof(cd_dtype_t);
     constexpr uint32_t kNumUMMAStoreThreads = kSwapAB ? kNumEpilogueThreads: STORE_BLOCK_M;
     DG_STATIC_ASSERT(kNumUMMAStoreThreads % 32 == 0, "Invalid store block M");
 
@@ -116,9 +126,11 @@ sm100_fp8_fp4_gemm_1d1d_impl(int* grouped_layout,
     // The gated-dual route owns two disjoint accumulator regions.  Gate stages
     // occupy [0, 2*UMMA_N), and up stages occupy
     // [2*UMMA_N, 4*UMMA_N).  No BF16 [M,4096] intermediate exists.
-    constexpr uint32_t kNumAccumTmemCols = UMMA_N * kNumEpilogueStages * kNumWeightStreams;
+    constexpr uint32_t kNumAccumTmemCols =
+        UMMA_N * kNumEpilogueStages * kNumWeightStreams * kNumNSubtiles;
     constexpr uint32_t kNumSFATmemCols = SF_BLOCK_M / 32;
     constexpr uint32_t kNumSFBTmemColsPerStream = SF_BLOCK_N / 32;
+    constexpr uint32_t kNumSFBTmemColsPerNSubtile = LAYOUT_AD_M / 32;
     constexpr uint32_t kNumSFBTmemCols = kNumSFBTmemColsPerStream * kNumWeightStreams;
     constexpr uint32_t kNumTmemCols = utils::get_num_aligned_tmem_cols<kNumAccumTmemCols + kNumSFATmemCols + kNumSFBTmemCols>();
     constexpr uint32_t kTmemStartColOfSFA = kNumAccumTmemCols;
@@ -305,9 +317,36 @@ sm100_fp8_fp4_gemm_1d1d_impl(int* grouped_layout,
                 if constexpr (kMajorA == cute::UMMA::Major::MN)
                     tma::copy<LOAD_BLOCK_M, BLOCK_K, kSwizzleAMode, a_dtype_t, kIsBatchedMM>(
                         &tensor_map_a, full_barriers[stage_idx], smem_a[stage_idx], m_idx, k_a_idx, 1, batch_idx);
-                if constexpr (kMajorB == cute::UMMA::Major::K)
-                    tma::copy<BLOCK_K, LOAD_BLOCK_N, kSwizzleBMode, b_dtype_t, kIsBatchedMM>(
-                        &tensor_map_b, full_barriers[stage_idx], smem_b[stage_idx], k_b_idx, n_idx, 1, batch_idx);
+                if constexpr (kMajorB == cute::UMMA::Major::K) {
+                    if constexpr (kTask07OneSm and BLOCK_N == 256) {
+                        // Reset the 128B-swizzle origin for each physical-M128
+                        // UMMA subtile. Treating a single 256-row TMA tile as
+                        // two independent UMMA descriptors rotates the second
+                        // half by one row because its descriptor needs a fresh
+                        // swizzle base.
+                        #pragma unroll
+                        for (uint32_t n_subtile = 0;
+                             n_subtile < kNumNSubtiles;
+                             ++n_subtile) {
+                            tma::copy<
+                                BLOCK_K, LAYOUT_AD_M,
+                                kSwizzleBMode, b_dtype_t, kIsBatchedMM>(
+                                &tensor_map_b, full_barriers[stage_idx],
+                                smem_b[stage_idx] +
+                                    n_subtile * LAYOUT_AD_M * BLOCK_K,
+                                k_b_idx,
+                                n_idx + n_subtile * LAYOUT_AD_M,
+                                1, batch_idx);
+                        }
+                    } else {
+                        tma::copy<
+                            BLOCK_K, LOAD_BLOCK_N,
+                            kSwizzleBMode, b_dtype_t, kIsBatchedMM>(
+                            &tensor_map_b, full_barriers[stage_idx],
+                            smem_b[stage_idx], k_b_idx, n_idx,
+                            1, batch_idx);
+                    }
+                }
                 if constexpr (kMajorB == cute::UMMA::Major::MN)
                     tma::copy<LOAD_BLOCK_N, BLOCK_K, kSwizzleBMode, b_dtype_t, kIsBatchedMM>(
                         &tensor_map_b, full_barriers[stage_idx], smem_b[stage_idx], n_idx, k_b_idx, 1, batch_idx);
@@ -475,20 +514,48 @@ sm100_fp8_fp4_gemm_1d1d_impl(int* grouped_layout,
                             mma::sm100::make_runtime_instr_desc_with_sf_id(instr_desc, sfa_id, sfb_id);
 
                         a_desc.lo = mma::sm100::advance_umma_desc_lo<kMajorA, LOAD_BLOCK_M, kSwizzleAMode, a_dtype_t>(a_desc_base_lo, 0, kOffset);
-                        b_desc.lo = mma::sm100::advance_umma_desc_lo<kMajorB, LOAD_BLOCK_N, kSwizzleBMode, b_dtype_t>(b_desc_base_lo, 0, kOffset);
                         b_up_desc.lo = mma::sm100::advance_umma_desc_lo<kMajorB, LOAD_BLOCK_N, kSwizzleBMode, b_dtype_t>(b_up_desc_base_lo, 0, kOffset);
                         if constexpr (kSwapAB) {
-                            mma_t::fma(b_desc, a_desc, accum_stage_idx * UMMA_N,
-                                       kUMMAKIdx > 0 or k_block_idx > 0, runtime_instr_desc,
-                                       kTmemStartColOfSFB, kTmemStartColOfSFA);
+                            #pragma unroll
+                            for (uint32_t n_subtile = 0;
+                                 n_subtile < kNumNSubtiles;
+                                 ++n_subtile) {
+                                auto b_subtile_desc =
+                                    mma::sm100::make_umma_desc<
+                                        kMajorB, LAYOUT_AD_M, BLOCK_K,
+                                        kSwizzleBMode>(
+                                        smem_b[stage_idx] +
+                                            n_subtile *
+                                                LAYOUT_AD_M * BLOCK_K,
+                                        0,
+                                        kOffset);
+                                const uint32_t accum_offset =
+                                    accum_stage_idx * UMMA_N +
+                                    n_subtile *
+                                        kNumEpilogueStages * UMMA_N;
+                                const uint32_t sfb_offset =
+                                    kTmemStartColOfSFB +
+                                    n_subtile *
+                                        kNumSFBTmemColsPerNSubtile;
+                                mma_t::fma(
+                                    b_subtile_desc, a_desc, accum_offset,
+                                    kUMMAKIdx > 0 or k_block_idx > 0,
+                                    runtime_instr_desc,
+                                    sfb_offset, kTmemStartColOfSFA);
+                            }
                             if constexpr (kTask06GatedDual) {
-                                constexpr uint32_t kUpAccumOffset = kNumEpilogueStages * UMMA_N;
-                                mma_t::fma(b_up_desc, a_desc,
-                                           kUpAccumOffset + accum_stage_idx * UMMA_N,
+                                constexpr uint32_t kUpAccumOffset =
+                                    kNumEpilogueStages * UMMA_N *
+                                    kNumNSubtiles;
+                                mma_t::fma(
+                                           b_up_desc, a_desc,
+                                           kUpAccumOffset +
+                                               accum_stage_idx * UMMA_N,
                                            kUMMAKIdx > 0 or k_block_idx > 0, runtime_instr_desc,
                                            kTmemStartColOfSFBUp, kTmemStartColOfSFA);
                             }
                         } else {
+                            b_desc.lo = mma::sm100::advance_umma_desc_lo<kMajorB, LOAD_BLOCK_N, kSwizzleBMode, b_dtype_t>(b_desc_base_lo, 0, kOffset);
                             mma_t::fma(a_desc, b_desc, accum_stage_idx * UMMA_N,
                                        kUMMAKIdx > 0 or k_block_idx > 0, runtime_instr_desc,
                                        kTmemStartColOfSFA, kTmemStartColOfSFB);
@@ -670,7 +737,8 @@ sm100_fp8_fp4_gemm_1d1d_impl(int* grouped_layout,
             if constexpr (kSwapAB) {
                 const auto effective_m = scheduler.get_aligned_effective_m_in_block(m_block_idx);
                 if constexpr (kTask06GatedDual) {
-                    constexpr uint32_t kUpAccumOffset = kNumEpilogueStages * UMMA_N;
+                    constexpr uint32_t kUpAccumOffset =
+                        kNumEpilogueStages * UMMA_N * kNumNSubtiles;
                     epilogue::sm100_store_swiglu_swap_ab<
                         BLOCK_M, BLOCK_N, STORE_BLOCK_M, STORE_BLOCK_N,
                         kSwizzleCDMode, kNumTMAStoreStages, kNumUMMAStoreThreads,
@@ -681,6 +749,33 @@ sm100_fp8_fp4_gemm_1d1d_impl(int* grouped_layout,
                      epilogue_warp_idx, lane_idx,
                      tmem_empty_barriers[accum_stage_idx],
                      tensor_map_cd);
+                } else if constexpr (kTask07OneSm) {
+                    #pragma unroll
+                    for (uint32_t n_subtile = 0;
+                         n_subtile < kNumNSubtiles;
+                         ++n_subtile) {
+                        const uint32_t subtile_tmem_base =
+                            tmem_base_addr +
+                            n_subtile *
+                                kNumEpilogueStages * UMMA_N;
+                        epilogue::sm100_store_cd_swap_ab<
+                            BLOCK_M, BLOCK_N,
+                            STORE_BLOCK_M, STORE_BLOCK_N,
+                            kSwizzleCDMode, kNumTMAStoreStages,
+                            kNumUMMAStoreThreads,
+                            kGemmType, kWithAccumulation,
+                            cd_dtype_t, epilogue_type_t>
+                        (smem_cd, tma_stage_idx, subtile_tmem_base,
+                         base_m_idx,
+                         base_n_idx + n_subtile * LAYOUT_AD_M,
+                         scheduler.current_group_idx,
+                         effective_m,
+                         epilogue_warp_idx, lane_idx,
+                         tmem_empty_barriers[accum_stage_idx],
+                         tensor_map_cd,
+                         /*release_tmem=*/
+                         n_subtile + 1 == kNumNSubtiles);
+                    }
                 } else {
                     epilogue::sm100_store_cd_swap_ab<
                         BLOCK_M, BLOCK_N, STORE_BLOCK_M, STORE_BLOCK_N,

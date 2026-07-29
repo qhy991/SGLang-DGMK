@@ -173,6 +173,15 @@ try:
 
     fp8_gemm_nt_task06_one_sm = fp8_fp4_gemm_nt_task06_one_sm
 
+    def fp8_fp4_gemm_nt_task07_one_sm(a, b, d, tile_n):
+        """Goal 07 exact packed-UE8M0 one-SM swap-AB feasibility entry."""
+        if tile_n not in (128, 256):
+            raise ValueError(f"Task 07 tile_n must be 128 or 256, got {tile_n}")
+        (a_data, a_sf), (b_data, b_sf) = _parse_tensor_or_tuple(a), _parse_tensor_or_tuple(b)
+        _C.fp8_fp4_gemm_nt_task07_one_sm(a_data, a_sf, b_data, b_sf, d, tile_n)
+
+    fp8_gemm_nt_task07_one_sm = fp8_fp4_gemm_nt_task07_one_sm
+
     def fp8_fp4_gemm_nt_task06_gated_dual(a, b, d):
         """Goal 06 exact packed-UE8M0 gated-dual SwiGLU feasibility entry."""
         (a_data, a_sf), (b_data, b_sf) = _parse_tensor_or_tuple(a), _parse_tensor_or_tuple(b)
