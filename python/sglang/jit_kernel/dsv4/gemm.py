@@ -14,6 +14,7 @@ if _use_aiter:
 
 _linear_bf16_fp32_algo = envs.SGLANG_OPT_BF16_FP32_GEMM_ALGO.get()
 _ROUTER_PROFILE_ID = "task31-b200-cublas-noaux-v1"
+_ROUTER_PREFILL_PROFILE_ID = "task33-b200-cublas-prefill-v1"
 
 
 def _parse_router_tactics(raw: str) -> dict[int, str]:
@@ -24,7 +25,7 @@ def _parse_router_tactics(raw: str) -> dict[int, str]:
         key, separator, tactic = item.partition("=")
         if (
             not separator
-            or key not in ("m16", "m32")
+            or key not in ("m16", "m32", "m4096")
             or tactic not in ("A", "B", "C", "D")
         ):
             raise ValueError(
@@ -46,7 +47,10 @@ if bool(_router_profile) != bool(_router_tactics):
     raise ValueError(
         "router profile and tactic map must either both be set or both be absent"
     )
-if _router_profile and _router_profile != _ROUTER_PROFILE_ID:
+if _router_profile and _router_profile not in (
+    _ROUTER_PROFILE_ID,
+    _ROUTER_PREFILL_PROFILE_ID,
+):
     raise ValueError(f"unsupported router experiment profile {_router_profile!r}")
 
 
@@ -96,6 +100,19 @@ def router_linear_bf16_fp32(
         raise RuntimeError("configured Task 31 bucket violated its exact router ABI")
     if torch.cuda.get_device_capability(hidden_states.device) != (10, 0):
         raise RuntimeError("configured Task 31 bucket requires an SM100 device")
+
+    if m == 4096:
+        if _router_profile != _ROUTER_PREFILL_PROFILE_ID:
+            raise RuntimeError("configured M4096 router bucket requires Task 33")
+        from sglang.jit_kernel.cutedsl_glm52_router_logit_gemm_prefill import (
+            cutedsl_glm52_router_logit_gemm_prefill,
+        )
+
+        return cutedsl_glm52_router_logit_gemm_prefill(
+            hidden_states,
+            router_weight,
+            tactic=tactic,
+        )
 
     from sglang.jit_kernel.cutedsl_glm52_router_logit_gemm import (
         cutedsl_glm52_router_logit_gemm,
