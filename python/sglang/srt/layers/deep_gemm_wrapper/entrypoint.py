@@ -1,3 +1,4 @@
+import importlib
 import logging
 from contextlib import contextmanager
 from typing import Any, Optional, Tuple
@@ -5,16 +6,47 @@ from typing import Any, Optional, Tuple
 import torch
 
 from sglang.srt.environ import envs
-from sglang.srt.layers.deep_gemm_wrapper import compile_utils
 from sglang.srt.layers.deep_gemm_wrapper.configurer import (  # noqa: F401
     DEEPGEMM_BLACKWELL,
     DEEPGEMM_NEED_TMA_ALIGNED_SCALES,
     DEEPGEMM_SCALE_UE8M0,
     ENABLE_JIT_DEEPGEMM,
 )
+from sglang.srt.layers.glm52_opt.w13_decode import (
+    REQUIRED_NUM_SMS,
+    REQUIRED_PDL,
+    REQUIRED_TC_UTIL,
+    dispatch_state,
+    initialization_requested,
+    initialize_w13_decode_after_assignment,
+    is_exact_w13_tensor_call,
+    try_dispatch_w13_decode,
+)
 from sglang.srt.server_args import ServerArgs
 
 logger = logging.getLogger(__name__)
+
+
+class _LazyCompileUtils:
+    """Delay compile_utils' cache-environment rewrite until worker setup."""
+
+    def __init__(self):
+        self._module = None
+
+    def load(self):
+        if self._module is None:
+            self._module = importlib.import_module(
+                "sglang.srt.layers.deep_gemm_wrapper.compile_utils"
+            )
+        return self._module
+
+    def __getattr__(self, name):
+        return getattr(self.load(), name)
+
+
+# Keep the established attribute for tests/callers while making it lazy.
+compile_utils = _LazyCompileUtils()
+
 
 if ENABLE_JIT_DEEPGEMM:
     import deep_gemm
@@ -45,13 +77,30 @@ def grouped_gemm_nt_f8f8bf16_masked(
 ):
     num_groups, _, k = lhs[0].shape
     _, n, _ = rhs[0].shape
-    kernel_type = compile_utils.DeepGemmKernelType.GROUPED_GEMM_NT_F8F8BF16_MASKED
+
+    # The selected exact W13 route must contain no generic hook, precompile,
+    # statistics, lock, file write, NVTX range, scale adapter, or stock retry.
+    # Its launcher checks every shape/stride/dtype/metadata guard again.
+    exact_w13_tensors = is_exact_w13_tensor_call(lhs, rhs, out, masked_m)
+    if exact_w13_tensors and try_dispatch_w13_decode(
+        lhs,
+        rhs,
+        out,
+        masked_m,
+        expected_m,
+        overlap_args=overlap_args,
+        max_block_n=max_block_n,
+        recipe_a=recipe_a,
+        recipe_b=recipe_b,
+    ):
+        return None
 
     _sanity_check_input(lhs)
     _sanity_check_input(rhs)
 
     lhs = _ensure_cuda(lhs)
     rhs = _ensure_cuda(rhs)
+    kernel_type = compile_utils.DeepGemmKernelType.GROUPED_GEMM_NT_F8F8BF16_MASKED
 
     with compile_utils.deep_gemm_execution_hook(
         expected_m, n, k, num_groups, kernel_type
@@ -69,8 +118,10 @@ def grouped_gemm_nt_f8f8bf16_masked(
             glm52_compatible = _glm52_moe_dispatch_compatible(
                 overlap_args, recipe_a, recipe_b
             )
-            if glm52_compatible and try_dispatch_moe_masked(
-                lhs, rhs, out, masked_m, expected_m
+            if (
+                not exact_w13_tensors
+                and glm52_compatible
+                and try_dispatch_moe_masked(lhs, rhs, out, masked_m, expected_m)
             ):
                 return out
 
@@ -264,13 +315,58 @@ def update_deep_gemm_config(gpu_id: int, server_args: ServerArgs):
     if envs.SGLANG_DEEPGEMM_PDL.get() and hasattr(deep_gemm, "set_pdl"):
         deep_gemm.set_pdl(True)
 
-    compile_utils.update_deep_gemm_config(gpu_id, server_args)
+    compile_utils_configured = False
+    if initialization_requested():
+        # This bounded experiment fixes the denominator explicitly rather than
+        # inheriting DeviceRuntime defaults or a pre-worker state.
+        original_installed_state = {
+            "pdl": bool(deep_gemm.get_pdl()),
+            "num_sms": int(deep_gemm.get_num_sms()),
+            "tc_util": int(deep_gemm.get_tc_util()),
+        }
+        initialized = False
+        try:
+            deep_gemm.set_pdl(REQUIRED_PDL)
+            deep_gemm.set_num_sms(REQUIRED_NUM_SMS)
+            deep_gemm.set_tc_util(REQUIRED_TC_UTIL)
+            installed_state = {
+                "pdl": bool(deep_gemm.get_pdl()),
+                "num_sms": int(deep_gemm.get_num_sms()),
+                "tc_util": int(deep_gemm.get_tc_util()),
+            }
+            required_state = {
+                "pdl": REQUIRED_PDL,
+                "num_sms": REQUIRED_NUM_SMS,
+                "tc_util": REQUIRED_TC_UTIL,
+            }
+            if installed_state != required_state:
+                raise RuntimeError(
+                    "installed DeepGEMM W13 startup state mismatch: "
+                    f"actual={installed_state}, required={required_state}"
+                )
+            compile_utils_configured = initialize_w13_decode_after_assignment(
+                gpu_id,
+                server_args,
+                compile_utils_loader=compile_utils.load,
+            )
+            initialized = bool(dispatch_state()["enabled"])
+        finally:
+            # An invalid variant/manifest or failed DSO/JIT setup must return
+            # to the exact stock runtime state; opt-in must not perturb its
+            # fallback denominator.
+            if not initialized:
+                deep_gemm.set_pdl(original_installed_state["pdl"])
+                deep_gemm.set_num_sms(original_installed_state["num_sms"])
+                deep_gemm.set_tc_util(original_installed_state["tc_util"])
+
+    if not compile_utils_configured:
+        compile_utils.update_deep_gemm_config(gpu_id, server_args)
 
     # Opt-in GLM-5.2 experimental DeepGEMM overlay (does not replace stock import).
     try:
         from sglang.srt.layers.glm52_opt.config import deepgemm_variant, is_enabled
 
-        if is_enabled() and deepgemm_variant():
+        if not initialization_requested() and is_enabled() and deepgemm_variant():
             from sglang.srt.layers.glm52_opt.experimental_deepgemm import (
                 get_experimental_deep_gemm,
             )

@@ -49,6 +49,7 @@ from sglang.srt.layers.dp_attention import (
     set_dp_buffer_len,
     set_is_extend_in_batch,
 )
+from sglang.srt.layers.glm52_opt.w13_context import w13_decode_forward_scope
 from sglang.srt.layers.logits_processor import LogitsProcessorOutput
 from sglang.srt.layers.utils.cp_utils import is_mla_prefill_cp_enabled
 from sglang.srt.model_executor.cuda_graph_buffer_registry import (
@@ -962,12 +963,20 @@ class DecodeCudaGraphRunner(BaseCudaGraphRunner):
                 ):
                     kwargs["input_embeds"] = self.buffers.input_embeds[:num_tokens]
 
-                out = forward(
-                    forward_batch.input_ids,
-                    forward_batch.positions,
+                # ModelRunner._forward_raw is not on the capture path.  Publish
+                # the private W13 decode marker at this actual model call and
+                # reset it immediately after the warmup/capture invocation.
+                with w13_decode_forward_scope(
                     forward_batch,
-                    **kwargs,
-                )
+                    num_tokens,
+                    graph_capture=True,
+                ):
+                    out = forward(
+                        forward_batch.input_ids,
+                        forward_batch.positions,
+                        forward_batch,
+                        **kwargs,
+                    )
                 for capture_hook in self.model_runner.capture_tail_hooks:
                     capture_hook(self, out, forward_batch, num_tokens)
                 return out
