@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import Mock, patch
@@ -261,6 +262,309 @@ def test_selected_flashmla_candidate_preserves_public_return_contract():
             )
         assert result is candidate_out
         candidate.assert_called_once()
+    finally:
+        set_forward_mode(None)
+        _restore_env(saved)
+
+
+def test_flashmla_hotspot_abi_requires_exact_bucket_page_count():
+    from sglang.srt.layers.glm52_opt.dispatch import _flashmla_hotspot_abi_matches
+
+    names = ("SGLANG_GLM52_OPT_PROFILE", "SGLANG_GLM52_OPT_OPS")
+    saved = {name: os.environ.get(name) for name in names}
+    device = object()
+
+    class FakeTensor:
+        def __init__(self, shape, dtype):
+            self.shape = shape
+            self.ndim = len(shape)
+            self.dtype = dtype
+            self.device = device
+            self.is_cuda = True
+
+        def is_contiguous(self):
+            return True
+
+        def storage_offset(self):
+            return 0
+
+    try:
+        os.environ["SGLANG_GLM52_OPT_PROFILE"] = "hotspot_candidates"
+        os.environ["SGLANG_GLM52_OPT_OPS"] = "flashmla_sparse_decode"
+        with patch(
+            "sglang.srt.layers.glm52_opt.dispatch._tensor_contract",
+            return_value=True,
+        ):
+            for m, expected_pages in ((16, 2049), (32, 4097)):
+                spec = lookup("dsa_decode_attn", "decode", m=m)
+                assert spec is not None
+                set_forward_mode(ForwardMode.DECODE, m)
+                common = {
+                    "q": FakeTensor((m, 1, 64, 576), torch.bfloat16),
+                    "cache_seqlens": FakeTensor((m,), torch.int32),
+                    "head_dim_v": 512,
+                    "tile_scheduler_metadata": FakeTensor((148, 8), torch.int32),
+                    "num_splits": FakeTensor((m + 1,), torch.int32),
+                    "softmax_scale": 0.0625,
+                    "indices": FakeTensor((m, 1, 2048), torch.int32),
+                    "block_table": FakeTensor((m, 0), torch.int32),
+                    "is_fp8_kvcache": True,
+                }
+                assert _flashmla_hotspot_abi_matches(
+                    spec,
+                    k_cache=FakeTensor(
+                        (expected_pages, 64, 1, 656), torch.float8_e4m3fn
+                    ),
+                    **common,
+                )
+                for wrong_pages in (expected_pages - 1, expected_pages + 1):
+                    assert not _flashmla_hotspot_abi_matches(
+                        spec,
+                        k_cache=FakeTensor(
+                            (wrong_pages, 64, 1, 656), torch.float8_e4m3fn
+                        ),
+                        **common,
+                    )
+    finally:
+        set_forward_mode(None)
+        _restore_env(saved)
+
+
+def test_flashmla_hotspot_abi_fails_closed_for_nonpromotional_fields():
+    from sglang.srt.layers.glm52_opt.dispatch import _flashmla_hotspot_abi_matches
+
+    names = ("SGLANG_GLM52_OPT_PROFILE", "SGLANG_GLM52_OPT_OPS")
+    saved = {name: os.environ.get(name) for name in names}
+    device = object()
+    other_device = object()
+
+    class FakeTensor:
+        def __init__(
+            self,
+            shape,
+            dtype,
+            *,
+            stride=None,
+            tensor_device=device,
+            is_cuda=True,
+            contiguous=True,
+            storage_offset=0,
+        ):
+            self.shape = tuple(shape)
+            self.ndim = len(shape)
+            self.dtype = dtype
+            self.device = tensor_device
+            self.is_cuda = is_cuda
+            self._stride = (
+                tuple(stride)
+                if stride is not None
+                else tuple(
+                    1
+                    if index == len(shape) - 1
+                    else int(torch.tensor(shape[index + 1 :]).prod().item())
+                    for index in range(len(shape))
+                )
+            )
+            self._contiguous = contiguous
+            self._storage_offset = storage_offset
+
+        def stride(self):
+            return self._stride
+
+        def is_contiguous(self):
+            return self._contiguous
+
+        def storage_offset(self):
+            return self._storage_offset
+
+    try:
+        os.environ["SGLANG_GLM52_OPT_PROFILE"] = "hotspot_candidates"
+        os.environ["SGLANG_GLM52_OPT_OPS"] = "flashmla_sparse_decode"
+        set_forward_mode(ForwardMode.DECODE, 16)
+        spec = lookup("dsa_decode_attn", "decode", m=16)
+        assert spec is not None
+        kwargs = {
+            "q": FakeTensor(
+                (16, 1, 64, 576),
+                torch.bfloat16,
+                stride=(36864, 36864, 576, 1),
+            ),
+            "k_cache": FakeTensor(
+                (2049, 64, 1, 656),
+                torch.float8_e4m3fn,
+                stride=(41984, 656, 656, 1),
+            ),
+            "cache_seqlens": FakeTensor((16,), torch.int32, stride=(1,)),
+            "head_dim_v": 512,
+            "tile_scheduler_metadata": FakeTensor(
+                (148, 8), torch.int32, stride=(8, 1)
+            ),
+            "num_splits": FakeTensor((17,), torch.int32, stride=(1,)),
+            "softmax_scale": 0.0625,
+            "indices": FakeTensor(
+                (16, 1, 2048), torch.int32, stride=(2048, 2048, 1)
+            ),
+            "block_table": FakeTensor((16, 0), torch.int32),
+            "is_fp8_kvcache": True,
+        }
+        assert _flashmla_hotspot_abi_matches(spec, **kwargs)
+
+        rejected = [
+            {"head_dim_v": 511},
+            {"softmax_scale": 0.125},
+            {"is_fp8_kvcache": False},
+            {
+                "q": FakeTensor(
+                    (16, 1, 64, 576),
+                    torch.float16,
+                    stride=(36864, 36864, 576, 1),
+                )
+            },
+            {
+                "q": FakeTensor(
+                    (16, 1, 64, 576),
+                    torch.bfloat16,
+                    stride=(36864, 36864, 1, 64),
+                )
+            },
+            {
+                "q": FakeTensor(
+                    (16, 1, 64, 576),
+                    torch.bfloat16,
+                    stride=(36864, 36864, 576, 1),
+                    is_cuda=False,
+                )
+            },
+            {
+                "k_cache": FakeTensor(
+                    (2048, 64, 1, 656),
+                    torch.float8_e4m3fn,
+                    stride=(41984, 656, 656, 1),
+                )
+            },
+            {
+                "k_cache": FakeTensor(
+                    (2049, 64, 1, 656),
+                    torch.bfloat16,
+                    stride=(41984, 656, 656, 1),
+                )
+            },
+            {
+                "k_cache": FakeTensor(
+                    (2049, 64, 1, 656),
+                    torch.float8_e4m3fn,
+                    stride=(41984, 656, 656, 1),
+                    contiguous=False,
+                )
+            },
+            {
+                "k_cache": FakeTensor(
+                    (2049, 64, 1, 656),
+                    torch.float8_e4m3fn,
+                    stride=(41984, 656, 656, 1),
+                    tensor_device=other_device,
+                )
+            },
+            {
+                "cache_seqlens": FakeTensor(
+                    (16,), torch.int64, stride=(1,)
+                )
+            },
+            {
+                "tile_scheduler_metadata": FakeTensor(
+                    (147, 8), torch.int32, stride=(8, 1)
+                )
+            },
+            {"num_splits": FakeTensor((16,), torch.int32, stride=(1,))},
+            {
+                "indices": FakeTensor(
+                    (16, 1, 2048),
+                    torch.int64,
+                    stride=(2048, 2048, 1),
+                )
+            },
+            {
+                "indices": FakeTensor(
+                    (16, 1, 2048),
+                    torch.int32,
+                    stride=(2048, 1, 1),
+                )
+            },
+            {
+                "block_table": FakeTensor(
+                    (16, 1), torch.int32, tensor_device=device
+                )
+            },
+            {
+                "block_table": FakeTensor(
+                    (16, 0), torch.int32, tensor_device=other_device
+                )
+            },
+        ]
+        for overrides in rejected:
+            current = dict(kwargs)
+            current.update(overrides)
+            assert not _flashmla_hotspot_abi_matches(spec, **current)
+
+        assert not _flashmla_hotspot_abi_matches(
+            replace(spec, implementation="auto"), **kwargs
+        )
+        assert not _flashmla_hotspot_abi_matches(
+            replace(spec, kind="bmm"), **kwargs
+        )
+        set_forward_mode(ForwardMode.TARGET_VERIFY, 16)
+        assert not _flashmla_hotspot_abi_matches(spec, **kwargs)
+    finally:
+        set_forward_mode(None)
+        _restore_env(saved)
+
+
+def test_selected_flashmla_candidate_rejects_invalid_lse():
+    names = (
+        "SGLANG_GLM52_OPT",
+        "SGLANG_GLM52_OPT_PROFILE",
+        "SGLANG_GLM52_OPT_OPS",
+    )
+    saved = {name: os.environ.get(name) for name in names}
+    q = torch.empty((16, 1, 64, 576), dtype=torch.bfloat16)
+    candidate_out = torch.empty((16, 1, 64, 512), dtype=torch.bfloat16)
+    invalid_lse = torch.empty((16, 1, 64), dtype=torch.float32)
+    fake = torch.empty(1)
+    try:
+        os.environ["SGLANG_GLM52_OPT"] = "1"
+        os.environ["SGLANG_GLM52_OPT_PROFILE"] = "hotspot_candidates"
+        os.environ["SGLANG_GLM52_OPT_OPS"] = "flashmla_sparse_decode"
+        set_forward_mode(ForwardMode.DECODE, 16)
+        with (
+            patch(
+                "sglang.srt.layers.glm52_opt.dispatch._flashmla_hotspot_abi_matches",
+                return_value=True,
+            ),
+            patch(
+                "sglang.srt.layers.glm52_opt.dispatch._tensor_contract",
+                side_effect=(True, False),
+            ),
+            patch(
+                "sglang.srt.layers.glm52_opt.dispatch.run_flashmla_sparse_decode",
+                return_value=(candidate_out, invalid_lse),
+            ) as candidate,
+            patch("sglang.srt.layers.glm52_opt.dispatch._record_hit") as record_hit,
+            TestCase().assertRaisesRegex(RuntimeError, "invalid LSE"),
+        ):
+            try_dispatch_flashmla_sparse_decode(
+                q=q,
+                k_cache=fake,
+                cache_seqlens=fake,
+                head_dim_v=512,
+                tile_scheduler_metadata=fake,
+                num_splits=fake,
+                softmax_scale=0.0625,
+                indices=fake,
+                block_table=fake,
+                is_fp8_kvcache=True,
+            )
+        candidate.assert_called_once()
+        record_hit.assert_not_called()
     finally:
         set_forward_mode(None)
         _restore_env(saved)

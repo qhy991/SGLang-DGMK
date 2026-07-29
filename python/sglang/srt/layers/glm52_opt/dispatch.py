@@ -315,9 +315,10 @@ def _flashmla_hotspot_abi_matches(
     if get_forward_mode() is not ForwardMode.DECODE:
         return False
     m = int(q.shape[0]) if q.ndim == 4 else -1
+    expected_num_pages = {16: 2049, 32: 4097}.get(m)
     device = q.device
     return bool(
-        m in (16, 32)
+        expected_num_pages is not None
         and head_dim_v == spec.v_dim
         and is_fp8_kvcache is True
         and float(softmax_scale) == 0.0625
@@ -334,7 +335,13 @@ def _flashmla_hotspot_abi_matches(
         )
         and k_cache.is_cuda
         and k_cache.dtype == torch.float8_e4m3fn
-        and tuple(k_cache.shape[1:]) == (int(spec.page_size), 1, int(spec.kv_dim))
+        and tuple(k_cache.shape)
+        == (
+            expected_num_pages,
+            int(spec.page_size),
+            1,
+            int(spec.kv_dim),
+        )
         and k_cache.is_contiguous()
         and k_cache.storage_offset() == 0
         and k_cache.device == device
@@ -428,7 +435,7 @@ def try_dispatch_flashmla_sparse_decode(
         raise RuntimeError(
             "FlashMLA hotspot provider must return the stock (output, lse) pair"
         )
-    candidate_out = result[0]
+    candidate_out, candidate_lse = result
     if not isinstance(candidate_out, torch.Tensor) or not _tensor_contract(
         candidate_out,
         shape=(m, 1, int(spec.q_heads), int(spec.v_dim)),
@@ -442,6 +449,14 @@ def try_dispatch_flashmla_sparse_decode(
         device=q.device,
     ):
         raise RuntimeError("FlashMLA hotspot provider returned an invalid output")
+    if not isinstance(candidate_lse, torch.Tensor) or not _tensor_contract(
+        candidate_lse,
+        shape=(m, int(spec.q_heads), 1),
+        stride=(int(spec.q_heads), 1, int(spec.q_heads)),
+        dtype=torch.float32,
+        device=q.device,
+    ):
+        raise RuntimeError("FlashMLA hotspot provider returned an invalid LSE")
     _record_hit("hotspot_plugin/flashmla_sparse_decode", spec.op, phase, m=m)
     return candidate_out
 
