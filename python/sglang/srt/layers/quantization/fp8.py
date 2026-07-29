@@ -55,6 +55,7 @@ from sglang.srt.layers.quantization.base_config import (
 from sglang.srt.layers.quantization.fp8_utils import (
     _use_aiter_bpreshuffle_gfx95,
     apply_fp8_linear,
+    bind_glm52_fused_qkv_a_decode_direct_nk_runner,
     can_auto_enable_marlin_fp8,
     cutlass_fp8_supported,
     deepgemm_w8a8_block_fp8_linear_with_fallback,
@@ -62,6 +63,7 @@ from sglang.srt.layers.quantization.fp8_utils import (
     dispatch_w8a8_mxfp8_linear,
     get_fp8_gemm_runner_backend,
     input_to_float8,
+    is_glm52_fused_qkv_a_decode_direct_nk_runner,
     mxfp8_group_quantize,
     normalize_e4m3fn_to_e4m3fnuz,
     requant_block_scale_ue8m0_for_deepgemm,
@@ -997,6 +999,65 @@ class Fp8LinearMethod(LinearMethodBase):
             cutlass_fp8_supported=self.cutlass_fp8_supported,
             use_per_token_if_dynamic=self.use_per_token_if_dynamic,
         )
+
+
+def _configure_glm52_fused_qkv_a_direct_nk(
+    layer: torch.nn.Module,
+    *,
+    marker: str,
+) -> bool:
+    """Install the fixed-N/K dispatcher on one exact fused-QKV-A projection."""
+    method = getattr(layer, "quant_method", None)
+    weight = getattr(layer, "weight", None)
+    if not (
+        isinstance(method, Fp8LinearMethod)
+        and method.block_quant
+        and not method.use_marlin
+        and not method.use_mxfp8
+        and (
+            method.w8a8_block_fp8_linear
+            is deepgemm_w8a8_block_fp8_linear_with_fallback
+            or is_glm52_fused_qkv_a_decode_direct_nk_runner(
+                method.w8a8_block_fp8_linear
+            )
+        )
+        and getattr(layer, "input_size_per_partition", None) == 6144
+        and getattr(layer, "output_size_per_partition", None) == 2624
+        and getattr(weight, "ndim", None) == 2
+        and tuple(weight.shape) == (2624, 6144)
+    ):
+        return False
+
+    if method.w8a8_block_fp8_linear is deepgemm_w8a8_block_fp8_linear_with_fallback:
+        method.w8a8_block_fp8_linear = (
+            bind_glm52_fused_qkv_a_decode_direct_nk_runner(
+                weight,
+                getattr(layer, "weight_scale_inv", None),
+                method.weight_block_size,
+            )
+        )
+    setattr(layer, marker, True)
+    return True
+
+
+def configure_glm52_fused_qkv_a_decode_direct_nk(
+    layer: torch.nn.Module,
+) -> bool:
+    """Install Task01's exact decode dispatcher."""
+    return _configure_glm52_fused_qkv_a_direct_nk(
+        layer,
+        marker="_glm52_fused_qkv_a_decode_direct_nk",
+    )
+
+
+def configure_glm52_fused_qkv_a_prefill_direct_nk(
+    layer: torch.nn.Module,
+) -> bool:
+    """Install Task02's exact EXTEND-M4096 dispatcher."""
+    return _configure_glm52_fused_qkv_a_direct_nk(
+        layer,
+        marker="_glm52_fused_qkv_a_prefill_direct_nk",
+    )
 
 
 class Fp8MoEMethod(FusedMoEMethodBase):

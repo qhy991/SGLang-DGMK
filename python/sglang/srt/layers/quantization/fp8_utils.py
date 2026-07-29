@@ -12,6 +12,9 @@ from sglang.kernels.ops.quantization.fp8_kernel import (
     sglang_per_token_group_quant_fp8_row_padded,
 )
 from sglang.srt.layers import deep_gemm_wrapper
+from sglang.srt.layers.glm52_opt.context import (
+    get_fused_qkv_a_direct_nk_context,
+)
 from sglang.srt.layers.quantization.mxfp4_tensor import MXFP4QuantizeUtil
 from sglang.srt.runtime_context import get_parallel
 from sglang.srt.utils.common import torch_release
@@ -32,6 +35,7 @@ from sglang.kernels.ops.quantization.fp8_kernel import (
     static_quant_fp8,
     triton_scaled_mm,
     w8a8_block_fp8_matmul_deepgemm,
+    w8a8_block_fp8_matmul_deepgemm_fused_qkv_a_compiled_nk,
     w8a8_block_fp8_matmul_triton,
 )
 from sglang.srt.runtime_context import get_server_args
@@ -847,6 +851,296 @@ def deepgemm_w8a8_block_fp8_linear_with_fallback(
     if bias is not None:
         output += bias
     return output.to(dtype=output_dtype).view(*output_shape)
+
+
+def _is_glm52_fused_qkv_a_decode_direct_nk_build_supported() -> bool:
+    return (
+        _is_sm100_supported
+        and deep_gemm_wrapper.ENABLE_JIT_DEEPGEMM
+        and deep_gemm_wrapper.DEEPGEMM_SCALE_UE8M0
+        and deep_gemm_wrapper.DEEPGEMM_SUPPORTS_COMPILED_DIMS
+    )
+
+
+def _is_glm52_fused_qkv_a_decode_direct_nk_packed_weight_abi(
+    weight: torch.Tensor,
+    weight_scale: torch.Tensor,
+    block_size: List[int],
+) -> bool:
+    """Validate the immutable Task01/Task02 build and packed-weight contract."""
+    if not _is_glm52_fused_qkv_a_decode_direct_nk_build_supported():
+        return False
+    if getattr(weight, "ndim", None) != 2 or getattr(weight_scale, "ndim", None) != 2:
+        return False
+    if tuple(weight.shape) != (2624, 6144):
+        return False
+    if not isinstance(block_size, (list, tuple)) or tuple(block_size) != (128, 128):
+        return False
+
+    return (
+        getattr(weight, "dtype", None) == fp8_dtype
+        and getattr(weight, "is_cuda", False)
+        and getattr(weight_scale, "is_cuda", False)
+        and weight.device == weight_scale.device
+        and weight.is_contiguous()
+        and getattr(weight_scale, "dtype", None) == torch.int32
+        and tuple(weight_scale.shape) == (2624, 12)
+        and tuple(weight_scale.stride()) == (1, 2624)
+    )
+
+
+def _is_glm52_fused_qkv_a_decode_direct_nk_activation_abi(
+    input_2d: torch.Tensor,
+    x_scale: torch.Tensor,
+    *,
+    m: int,
+    device: torch.device,
+) -> bool:
+    """Validate the exact dynamic post-quant ABI before candidate launch."""
+    return (
+        input_2d.ndim == 2
+        and tuple(input_2d.shape) == (m, 6144)
+        and input_2d.dtype == fp8_dtype
+        and input_2d.is_cuda
+        and input_2d.device == device
+        and input_2d.is_contiguous()
+        and x_scale.ndim == 2
+        and tuple(x_scale.shape) == (m, 12)
+        and x_scale.dtype == torch.int32
+        and x_scale.is_cuda
+        and x_scale.device == device
+        and tuple(x_scale.stride()) == (1, m)
+    )
+
+
+def _glm52_fused_qkv_a_prefill_direct_nk_packed_gemm(
+    q_input: torch.Tensor,
+    weight: torch.Tensor,
+    x_scale: torch.Tensor,
+    weight_scale: torch.Tensor,
+    block_size: List[int],
+    output_dtype: torch.dtype,
+    *,
+    abi_prevalidated: bool = False,
+) -> torch.Tensor:
+    """Launch only Task02's measured direct compiled-N/K DeepGEMM call."""
+    if output_dtype != torch.bfloat16:
+        raise RuntimeError("Task02 direct-N/K output dtype mismatch")
+    if not abi_prevalidated:
+        if (
+            not _is_glm52_fused_qkv_a_decode_direct_nk_packed_weight_abi(
+                weight,
+                weight_scale,
+                block_size,
+            )
+            or not _is_glm52_fused_qkv_a_decode_direct_nk_activation_abi(
+                q_input,
+                x_scale,
+                m=4096,
+                device=weight.device,
+            )
+        ):
+            raise RuntimeError("Task02 direct-N/K packed GEMM ABI mismatch")
+
+    import deep_gemm
+
+    output = q_input.new_empty((4096, 2624), dtype=output_dtype)
+    deep_gemm.fp8_gemm_nt(
+        (q_input, x_scale),
+        (weight, weight_scale),
+        output,
+        compiled_dims="nk",
+    )
+    return output
+
+
+def _glm52_fused_qkv_a_decode_direct_nk_from_bf16(
+    input_2d: torch.Tensor,
+    weight: torch.Tensor,
+    block_size: List[int],
+    weight_scale: torch.Tensor,
+) -> torch.Tensor:
+    """Quantize exactly once and invoke only the fixed-N/K candidate."""
+    m = int(input_2d.shape[0])
+    q_input, x_scale = sglang_per_token_group_quant_fp8(
+        input_2d,
+        block_size[1],
+        column_major_scales=True,
+        scale_tma_aligned=True,
+        scale_ue8m0=deep_gemm_wrapper.DEEPGEMM_SCALE_UE8M0,
+    )
+    if not _is_glm52_fused_qkv_a_decode_direct_nk_activation_abi(
+        q_input,
+        x_scale,
+        m=m,
+        device=weight.device,
+    ):
+        raise RuntimeError(
+            "GLM-5.2 fused-QKV-A activation quantizer violated the selected "
+            "packed UE8M0 ABI"
+        )
+
+    if m == 4096:
+        return _glm52_fused_qkv_a_prefill_direct_nk_packed_gemm(
+            q_input,
+            weight,
+            x_scale,
+            weight_scale,
+            block_size,
+            torch.bfloat16,
+            abi_prevalidated=True,
+        )
+    return w8a8_block_fp8_matmul_deepgemm_fused_qkv_a_compiled_nk(
+        q_input,
+        weight,
+        x_scale,
+        weight_scale,
+        block_size,
+        output_dtype=torch.bfloat16,
+    )
+
+
+class Glm52FusedQkvADecodeDirectNkRunner:
+    """Layer-private runner bound to one validated packed fused-QKV-A weight."""
+
+    __slots__ = (
+        "_weight",
+        "_weight_scale",
+        "_weight_version",
+        "_weight_scale_version",
+    )
+
+    def __init__(self, weight: torch.Tensor, weight_scale: torch.Tensor):
+        self._weight = weight
+        self._weight_scale = weight_scale
+        self._weight_version = (
+            None
+            if isinstance(weight, torch.Tensor) and torch.is_inference(weight)
+            else getattr(weight, "_version", None)
+        )
+        self._weight_scale_version = (
+            None
+            if isinstance(weight_scale, torch.Tensor)
+            and torch.is_inference(weight_scale)
+            else getattr(weight_scale, "_version", None)
+        )
+
+    def __call__(
+        self,
+        input: torch.Tensor,
+        weight: torch.Tensor,
+        block_size: List[int],
+        weight_scale: torch.Tensor,
+        input_scale: Optional[torch.Tensor] = None,
+        bias: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        context = get_fused_qkv_a_direct_nk_context()
+        if (
+            context is None
+            or input_scale is not None
+            or bias is not None
+            or input.ndim != 2
+            or int(input.shape[0]) != context[1]
+            or int(input.shape[1]) != 6144
+            or input.dtype != torch.bfloat16
+            or not input.is_cuda
+            or input.device != self._weight.device
+            or not input.is_contiguous()
+            or weight is not self._weight
+            or weight_scale is not self._weight_scale
+            or (
+                self._weight_version is not None
+                and getattr(weight, "_version", None) != self._weight_version
+            )
+            or (
+                self._weight_scale_version is not None
+                and getattr(weight_scale, "_version", None)
+                != self._weight_scale_version
+            )
+            or not isinstance(block_size, (list, tuple))
+            or tuple(block_size) != (128, 128)
+        ):
+            return deepgemm_w8a8_block_fp8_linear_with_fallback(
+                input,
+                weight,
+                block_size,
+                weight_scale,
+                input_scale=input_scale,
+                bias=bias,
+            )
+
+        return _glm52_fused_qkv_a_decode_direct_nk_from_bf16(
+            input,
+            weight,
+            block_size,
+            weight_scale,
+        )
+
+
+def deepgemm_w8a8_block_fp8_linear_fused_qkv_a_decode_direct_nk_dispatch(
+    input: torch.Tensor,
+    weight: torch.Tensor,
+    block_size: List[int],
+    weight_scale: torch.Tensor,
+    input_scale: Optional[torch.Tensor] = None,
+    bias: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    """Guarded pre-load dispatcher retained until exact weights are bound."""
+    context = get_fused_qkv_a_direct_nk_context()
+    if (
+        context is not None
+        and input_scale is None
+        and bias is None
+        and input.ndim == 2
+        and int(input.shape[0]) == context[1]
+        and int(input.shape[1]) == 6144
+        and input.dtype == torch.bfloat16
+        and input.is_cuda
+        and input.is_contiguous()
+        and _is_glm52_fused_qkv_a_decode_direct_nk_packed_weight_abi(
+            weight,
+            weight_scale,
+            block_size,
+        )
+        and input.device == weight.device
+    ):
+        return _glm52_fused_qkv_a_decode_direct_nk_from_bf16(
+            input,
+            weight,
+            block_size,
+            weight_scale,
+        )
+    return deepgemm_w8a8_block_fp8_linear_with_fallback(
+        input,
+        weight,
+        block_size,
+        weight_scale,
+        input_scale=input_scale,
+        bias=bias,
+    )
+
+
+def is_glm52_fused_qkv_a_decode_direct_nk_runner(runner: Callable) -> bool:
+    """Return whether ``runner`` participates in the fixed-N/K weight lifecycle."""
+    return (
+        runner is deepgemm_w8a8_block_fp8_linear_fused_qkv_a_decode_direct_nk_dispatch
+        or isinstance(runner, Glm52FusedQkvADecodeDirectNkRunner)
+    )
+
+
+def bind_glm52_fused_qkv_a_decode_direct_nk_runner(
+    weight: torch.Tensor,
+    weight_scale: torch.Tensor,
+    block_size: List[int],
+) -> Callable:
+    """Bind immutable packed-weight state, or retain the guarded dispatcher."""
+    if _is_glm52_fused_qkv_a_decode_direct_nk_packed_weight_abi(
+        weight,
+        weight_scale,
+        block_size,
+    ):
+        return Glm52FusedQkvADecodeDirectNkRunner(weight, weight_scale)
+    return deepgemm_w8a8_block_fp8_linear_fused_qkv_a_decode_direct_nk_dispatch
 
 
 def _unpack_ue8m0_scale_for_triton(
