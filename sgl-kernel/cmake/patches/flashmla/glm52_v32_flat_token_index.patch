@@ -1,0 +1,65 @@
+--- a/csrc/sm100/decode/head64/config.h
++++ b/csrc/sm100/decode/head64/config.h
+@@ -31 +31 @@
+-template<ModelType MODEL_TYPE>
++template<ModelType MODEL_TYPE, bool FLAT_PAGE64_V32 = false>
+--- a/csrc/sm100/decode/head64/kernel.cuh
++++ b/csrc/sm100/decode/head64/kernel.cuh
+@@ -19 +19 @@
+-template<ModelType MODEL_TYPE>
++template<ModelType MODEL_TYPE, bool FLAT_PAGE64_V32>
+@@ -22 +22 @@
+-KernelTemplate<MODEL_TYPE>
++KernelTemplate<MODEL_TYPE, FLAT_PAGE64_V32>
+@@ -698,3 +697,0 @@
+-                        int block_idx, idx_in_block;
+-                        block_idx = (unsigned int)my_indices[i] / cur_block_size;
+-                        idx_in_block = (unsigned int)my_indices[i] % cur_block_size;
+@@ -703 +699,0 @@
+-                        tma_coords[i] = is_token_valid ? block_idx*cur_tma_coords_step_per_block + idx_in_block*tma_coords_step_per_token : -1; // If the token is invalid because it topk position exceeds topk_length, we must manually fill tma_coords with -1 to avoid copying-in NaN.
+@@ -705 +701,11 @@
+-                            int64_t offset = is_token_valid ? block_idx*cur_k_block_stride + idx_in_block*cur_k_row_stride : 0;
++                            int64_t offset;
++                            if constexpr (FLAT_PAGE64_V32 && !IS_EXTRA_BLOCK) {
++                                static_assert(TMA_K_STRIDE == 656);
++                                tma_coords[i] = is_token_valid ? my_indices[i] : -1;
++                                offset = is_token_valid ? (int64_t)my_indices[i] * TMA_K_STRIDE : 0;
++                            } else {
++                                int block_idx = (unsigned int)my_indices[i] / cur_block_size;
++                                int idx_in_block = (unsigned int)my_indices[i] % cur_block_size;
++                                tma_coords[i] = is_token_valid ? block_idx*cur_tma_coords_step_per_block + idx_in_block*tma_coords_step_per_token : -1;
++                                offset = is_token_valid ? block_idx*cur_k_block_stride + idx_in_block*cur_k_row_stride : 0;
++                            }
+@@ -714,0 +721,3 @@
++                            int block_idx = (unsigned int)my_indices[i] / cur_block_size;
++                            int idx_in_block = (unsigned int)my_indices[i] % cur_block_size;
++                            tma_coords[i] = is_token_valid ? block_idx*cur_tma_coords_step_per_block + idx_in_block*tma_coords_step_per_token : -1; // If the token is invalid because it topk position exceeds topk_length, we must manually fill tma_coords with -1 to avoid copying-in NaN.
+@@ -856,2 +865,2 @@
+-template<ModelType MODEL_TYPE>
+-void KernelTemplate<MODEL_TYPE>::run(const SparseAttnDecodeParams &params) {
++template<ModelType MODEL_TYPE, bool FLAT_PAGE64_V32>
++void KernelTemplate<MODEL_TYPE, FLAT_PAGE64_V32>::run(const SparseAttnDecodeParams &params) {
+@@ -951 +960 @@
+-    auto mla_kernel = &flash_fwd_splitkv_mla_fp8_sparse_kernel<KernelTemplate<MODEL_TYPE>, decltype(tma_params)>;
++    auto mla_kernel = &flash_fwd_splitkv_mla_fp8_sparse_kernel<KernelTemplate<MODEL_TYPE, FLAT_PAGE64_V32>, decltype(tma_params)>;
+@@ -964 +973,19 @@
+-    KernelTemplate<MODEL_TYPE>::run(params);
++    if constexpr (MODEL_TYPE == ModelType::V32) {
++        constexpr int BYTES_PER_TOKEN = 656;
++        bool use_flat_page64_v32 =
++            params.s_q == 1 &&
++            params.h_q == 64 &&
++            params.topk == 2048 &&
++            params.page_block_size == 64 &&
++            params.stride_kv_row == BYTES_PER_TOKEN &&
++            params.stride_kv_block == 64 * BYTES_PER_TOKEN &&
++            params.extra_topk == 0 &&
++            params.topk_length == nullptr &&
++            params.extra_topk_length == nullptr &&
++            params.attn_sink == nullptr;
++        if (use_flat_page64_v32) {
++            KernelTemplate<MODEL_TYPE, true>::run(params);
++            return;
++        }
++    }
++    KernelTemplate<MODEL_TYPE, false>::run(params);

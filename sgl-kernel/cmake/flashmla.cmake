@@ -7,6 +7,86 @@ FetchContent_Declare(
 )
 FetchContent_Populate(repo-flashmla)
 
+option(
+    SGL_FLASHMLA_GLM52_FLAT_TOKEN_INDEX
+    "Specialize contiguous V3.2 sparse-decode token addressing"
+    OFF
+)
+if(SGL_FLASHMLA_GLM52_FLAT_TOKEN_INDEX)
+    set(
+        FLASHMLA_GLM52_PATCH
+        "${CMAKE_CURRENT_LIST_DIR}/patches/flashmla/glm52_v32_flat_token_index.patch"
+    )
+    set(
+        FLASHMLA_GLM52_KERNEL
+        "${repo-flashmla_SOURCE_DIR}/csrc/sm100/decode/head64/kernel.cuh"
+    )
+    set(
+        FLASHMLA_GLM52_CONFIG
+        "${repo-flashmla_SOURCE_DIR}/csrc/sm100/decode/head64/config.h"
+    )
+    file(READ "${FLASHMLA_GLM52_KERNEL}" FLASHMLA_GLM52_KERNEL_CONTENT)
+    file(READ "${FLASHMLA_GLM52_CONFIG}" FLASHMLA_GLM52_CONFIG_CONTENT)
+    string(
+        FIND
+        "${FLASHMLA_GLM52_KERNEL_CONTENT}"
+        "use_flat_page64_v32"
+        FLASHMLA_GLM52_KERNEL_PATCHED
+    )
+    string(
+        FIND
+        "${FLASHMLA_GLM52_KERNEL_CONTENT}"
+        "KernelTemplate<MODEL_TYPE, true>::run(params)"
+        FLASHMLA_GLM52_DISPATCH_PATCHED
+    )
+    string(
+        FIND
+        "${FLASHMLA_GLM52_CONFIG_CONTENT}"
+        "template<ModelType MODEL_TYPE, bool FLAT_PAGE64_V32 = false>"
+        FLASHMLA_GLM52_CONFIG_PATCHED
+    )
+    if(
+        FLASHMLA_GLM52_KERNEL_PATCHED EQUAL -1
+        AND FLASHMLA_GLM52_DISPATCH_PATCHED EQUAL -1
+        AND FLASHMLA_GLM52_CONFIG_PATCHED EQUAL -1
+    )
+        execute_process(
+            COMMAND patch -p1 --forward --input=${FLASHMLA_GLM52_PATCH}
+            WORKING_DIRECTORY "${repo-flashmla_SOURCE_DIR}"
+            RESULT_VARIABLE FLASHMLA_GLM52_PATCH_RESULT
+            OUTPUT_VARIABLE FLASHMLA_GLM52_PATCH_STDOUT
+            ERROR_VARIABLE FLASHMLA_GLM52_PATCH_STDERR
+        )
+        if(NOT FLASHMLA_GLM52_PATCH_RESULT EQUAL 0)
+            message(
+                FATAL_ERROR
+                "Failed to apply ${FLASHMLA_GLM52_PATCH}:\n"
+                "${FLASHMLA_GLM52_PATCH_STDOUT}\n${FLASHMLA_GLM52_PATCH_STDERR}"
+            )
+        endif()
+        file(READ "${FLASHMLA_GLM52_KERNEL}" FLASHMLA_GLM52_KERNEL_CONTENT)
+        file(READ "${FLASHMLA_GLM52_CONFIG}" FLASHMLA_GLM52_CONFIG_CONTENT)
+        if(
+            NOT FLASHMLA_GLM52_KERNEL_CONTENT MATCHES "use_flat_page64_v32"
+            OR NOT FLASHMLA_GLM52_KERNEL_CONTENT MATCHES
+                "KernelTemplate<MODEL_TYPE, true>::run\\(params\\)"
+            OR NOT FLASHMLA_GLM52_CONFIG_CONTENT MATCHES
+                "bool FLAT_PAGE64_V32 = false"
+        )
+            message(FATAL_ERROR "GLM-5.2 FlashMLA patch verification failed")
+        endif()
+        message(STATUS "Applied GLM-5.2 V3.2 flat-token-index specialization")
+    elseif(
+        NOT FLASHMLA_GLM52_KERNEL_PATCHED EQUAL -1
+        AND NOT FLASHMLA_GLM52_DISPATCH_PATCHED EQUAL -1
+        AND NOT FLASHMLA_GLM52_CONFIG_PATCHED EQUAL -1
+    )
+        message(STATUS "GLM-5.2 V3.2 flat-token-index specialization already applied")
+    else()
+        message(FATAL_ERROR "Partially patched GLM-5.2 FlashMLA dependency")
+    endif()
+endif()
+
 # flashmla submodule pin: NVIDIA/cutlass @ 147f5673d0c1c3dcf66f78d677fd647e4a020219
 FetchContent_Declare(
     repo-flashmla-cutlass
@@ -24,20 +104,49 @@ set(FLASHMLA_CUDA_FLAGS
     "-Xcudafe=--diag_suppress=177"   # variable was declared but never referenced
 )
 
+set(
+    SGL_FLASHMLA_KEEP_DIR
+    ""
+    CACHE PATH
+    "Optional directory for retained FlashMLA CUDA intermediate files"
+)
+if(SGL_FLASHMLA_KEEP_DIR)
+    file(MAKE_DIRECTORY "${SGL_FLASHMLA_KEEP_DIR}")
+endif()
+
 set(FLASHMLA_ENABLE_SM100 OFF)
+option(
+    SGL_FLASHMLA_SM103_ONLY
+    "Build FlashMLA device code only for SM103a (campaign diagnostics)"
+    OFF
+)
+if(
+    SGL_FLASHMLA_SM103_ONLY
+    AND (
+        CMAKE_CUDA_COMPILER_VERSION VERSION_LESS "13.0"
+        OR CUDA_VERSION VERSION_LESS "13.0"
+    )
+)
+    message(
+        FATAL_ERROR
+        "SGL_FLASHMLA_SM103_ONLY requires CUDA 13 or newer compiler and CUDA_VERSION"
+    )
+endif()
 
 # The FlashMLA kernels only work on hopper and require CUDA 12.4 or later.
 # Only build FlashMLA kernels if we are building for something compatible with
 # sm90a
-if(${CUDA_VERSION} VERSION_GREATER 12.4)
+if(NOT SGL_FLASHMLA_SM103_ONLY AND ${CUDA_VERSION} VERSION_GREATER 12.4)
     list(APPEND FLASHMLA_CUDA_FLAGS
         "-gencode=arch=compute_90a,code=sm_90a"
     )
 endif()
 if(${CUDA_VERSION} VERSION_GREATER 12.8)
-    list(APPEND FLASHMLA_CUDA_FLAGS
-        "-gencode=arch=compute_100a,code=sm_100a"
-    )
+    if(NOT SGL_FLASHMLA_SM103_ONLY)
+        list(APPEND FLASHMLA_CUDA_FLAGS
+            "-gencode=arch=compute_100a,code=sm_100a"
+        )
+    endif()
     set(FLASHMLA_ENABLE_SM100 ON)
 endif()
 if(${CUDA_VERSION} VERSION_GREATER_EQUAL "13.0")
@@ -128,6 +237,10 @@ set(FlashMLA_SOURCES
     ${repo-flashmla_SOURCE_DIR}/csrc/extension/sm90/dense_fp8/flash_fwd_mla_metadata.cu
 )
 
+set(
+    FLASHMLA_SM100_V32_SOURCE
+    "${repo-flashmla_SOURCE_DIR}/csrc/sm100/decode/head64/instantiations/v32.cu"
+)
 if(FLASHMLA_ENABLE_SM100)
     list(APPEND FlashMLA_SOURCES
         # sm100 dense prefill/bwd.
@@ -142,7 +255,7 @@ if(FLASHMLA_ENABLE_SM100)
         ${repo-flashmla_SOURCE_DIR}/csrc/sm100/prefill/sparse/fwd_for_small_topk/head128/instantiations/phase1_prefill_k512.cu
 
         # sm100 sparse decode.
-        ${repo-flashmla_SOURCE_DIR}/csrc/sm100/decode/head64/instantiations/v32.cu
+        ${FLASHMLA_SM100_V32_SOURCE}
         ${repo-flashmla_SOURCE_DIR}/csrc/sm100/decode/head64/instantiations/model1.cu
         ${repo-flashmla_SOURCE_DIR}/csrc/sm100/prefill/sparse/fwd_for_small_topk/head128/instantiations/phase1_decode_k512.cu
     )
@@ -154,6 +267,24 @@ target_compile_options(flashmla_ops PRIVATE
     $<$<COMPILE_LANGUAGE:CUDA>:-std=c++20>
     $<$<COMPILE_LANGUAGE:CUDA>:${FLASHMLA_CUDA_FLAGS}>
 )
+if(SGL_FLASHMLA_KEEP_DIR)
+    # Retain only the target V3.2 translation unit. nvcc derives retained
+    # filenames from source basenames, and the full source list contains
+    # duplicate basenames that would otherwise collide in a shared directory.
+    set_property(
+        SOURCE "${FLASHMLA_SM100_V32_SOURCE}"
+        APPEND
+        PROPERTY COMPILE_OPTIONS
+        "-lineinfo"
+        "-Xptxas=-v"
+        "--keep"
+        "--keep-dir=${SGL_FLASHMLA_KEEP_DIR}"
+    )
+endif()
+if(SGL_FLASHMLA_SM103_ONLY)
+    # Manual -gencode flags above are the complete architecture contract.
+    set_property(TARGET flashmla_ops PROPERTY CUDA_ARCHITECTURES OFF)
+endif()
 if(FLASHMLA_ENABLE_SM100)
     target_compile_definitions(flashmla_ops PRIVATE FLASHMLA_ENABLE_SM100)
 endif()
