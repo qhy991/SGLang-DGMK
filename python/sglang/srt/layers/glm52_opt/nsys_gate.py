@@ -88,7 +88,7 @@ def _run_capture_window() -> None:
         flush=True,
     )
     try:
-        torch.cuda.nvtx.range_push("glm52_nsys_window")
+        torch.cuda.nvtx.range_push("infini_kernel_glm52_nsys_window")
     except Exception:
         pass
     try:

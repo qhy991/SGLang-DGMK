@@ -43,8 +43,12 @@ python -m sglang.launch_server --model-path <glm-5.2-checkpoint> ...
 |---------|--------|---------|
 | `decode_max` (default) | All 8 winning decode ops | Stock |
 | `full` | Same | + fused_qkv_a, q_b, index_k/q/weights |
+| `e2e_candidates` | Default-off/allowlisted fixed-N/K diagnostics | Allowlisted fixed-N/K and MoE PSUM diagnostics |
 
 Prefill `moe_gate` and `dsa_prefill_attn` stay on stock (CUDA Graph regressions).
+For the three exact packed-UE8M0 fixed-N/K candidates, single-op commands,
+fair A/B rules, and `infini_kernel` Nsys labels, see
+[`glm52_opt/infini_kernel_fixed_nk_e2e.md`](../glm52_opt/infini_kernel_fixed_nk_e2e.md).
 
 ## Smoke test
 

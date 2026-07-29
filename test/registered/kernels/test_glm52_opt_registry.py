@@ -7,6 +7,8 @@ from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import torch
+
 os.environ.setdefault("SGLANG_GLM52_OPT", "1")
 os.environ.setdefault("SGLANG_GLM52_OPT_PROFILE", "full")
 
@@ -19,8 +21,15 @@ from sglang.srt.layers.glm52_opt.context import (
     prefix_to_op_name,
     set_forward_mode,
 )
+from sglang.srt.layers.glm52_opt.dispatch import (
+    _fixed_nk_forward_mode_matches,
+    _nvtx_range,
+    _profiler_range_name,
+)
+from sglang.srt.layers.glm52_opt.fp8_gemm import run_fp8_gemm
 from sglang.srt.layers.glm52_opt.phase import infer_glm52_phase
 from sglang.srt.layers.glm52_opt.registry import lookup
+from sglang.srt.model_executor.forward_batch_info import ForwardMode
 
 
 def test_prefix_mapping():
@@ -83,21 +92,48 @@ def test_e2e_candidates_defaults_to_archived_leaf_winners():
     old_profile = os.environ.get("SGLANG_GLM52_OPT_PROFILE")
     old_ops = os.environ.get("SGLANG_GLM52_OPT_OPS")
     old_opt = os.environ.get("SGLANG_GLM52_OPT")
+    old_buckets = os.environ.get("SGLANG_GLM52_OPT_M_BUCKETS")
     try:
         os.environ["SGLANG_GLM52_OPT"] = "1"
         os.environ["SGLANG_GLM52_OPT_PROFILE"] = "e2e_candidates"
         os.environ.pop("SGLANG_GLM52_OPT_OPS", None)
+        os.environ.pop("SGLANG_GLM52_OPT_M_BUCKETS", None)
 
-        assert lookup("o_proj", "decode", m=16) is not None
+        o_proj = lookup("o_proj", "decode", m=16)
+        assert o_proj is not None
+        assert o_proj.implementation == "fixed_nk"
+        assert o_proj.profiler_name == "infini_kernel_glm52_attn_o_decode_nk"
         assert lookup("o_proj", "decode", m=32) is not None
+        assert lookup("o_proj", "decode", m=64) is None
         # Historical archive swaps stay off unless listed in the e2e set.
         assert lookup("q_b_proj", "decode") is None
         assert lookup("fused_qkv_a_proj", "decode") is None
+        # The default MoE names arm only their prefill PSUM hook; they must not
+        # accidentally select the archived decode MoE kernels.
+        assert lookup("moe_gate_proj", "decode", m=16) is None
+        assert lookup("moe_down_proj", "decode", m=16) is None
 
         os.environ["SGLANG_GLM52_OPT_OPS"] = "o_proj"
-        assert lookup("o_proj", "decode") is not None
+        assert lookup("o_proj", "decode", m=16) is not None
         assert contig_psum_kwargs("moe_gate_proj") == {}
         assert contig_psum_kwargs("moe_down_proj") == {}
+
+        os.environ["SGLANG_GLM52_OPT_OPS"] = "index_q_upproj"
+        indexer = lookup("index_q_upproj", "decode", m=16)
+        assert indexer is not None
+        assert indexer.implementation == "fixed_nk"
+        assert indexer.n == 4096 and indexer.k == 2048
+        assert lookup("index_q_upproj", "decode", m=32) is not None
+        assert lookup("index_q_upproj", "decode", m=8) is None
+        assert lookup("index_q_upproj", "prefill", m=16) is None
+
+        os.environ["SGLANG_GLM52_OPT_OPS"] = "fused_qkv_a_proj"
+        qkv = lookup("fused_qkv_a_proj", "prefill", m=4096)
+        assert qkv is not None
+        assert qkv.profiler_name == "infini_kernel_glm52_fused_qkv_a_prefill_nk"
+        assert qkv.n == 2624 and qkv.k == 6144
+        assert lookup("fused_qkv_a_proj", "prefill", m=2048) is None
+        assert lookup("fused_qkv_a_proj", "decode", m=16) is None
 
         os.environ.pop("SGLANG_GLM52_OPT_OPS", None)
         w13 = contig_psum_kwargs("moe_gate_proj")
@@ -110,6 +146,143 @@ def test_e2e_candidates_defaults_to_archived_leaf_winners():
             ("SGLANG_GLM52_OPT_PROFILE", old_profile),
             ("SGLANG_GLM52_OPT_OPS", old_ops),
             ("SGLANG_GLM52_OPT", old_opt),
+            ("SGLANG_GLM52_OPT_M_BUCKETS", old_buckets),
+        ):
+            if old_value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = old_value
+
+
+def test_fixed_nk_uses_packed_abi_without_fallback():
+    x = torch.empty((16, 2048), dtype=torch.float8_e4m3fn)
+    weight = torch.empty((4096, 2048), dtype=torch.float8_e4m3fn)
+    x_scale = torch.empty((16, 4), dtype=torch.int32)
+    weight_scale = torch.empty((4096, 4), dtype=torch.int32)
+    out = torch.empty((16, 4096), dtype=torch.bfloat16)
+
+    with patch(
+        "sglang.srt.layers.glm52_opt.fp8_gemm.deep_gemm.fp8_gemm_nt"
+    ) as gemm:
+        ok, path = run_fp8_gemm(
+            "index_q_upproj",
+            x,
+            weight,
+            x_scale,
+            weight_scale,
+            out,
+            [128, 128],
+            archive_ref="must_not_load",
+            phase="decode",
+            implementation="fixed_nk",
+        )
+    assert ok and path == "fixed_nk"
+    gemm.assert_called_once_with(
+        (x, x_scale),
+        (weight, weight_scale),
+        out,
+        compiled_dims="nk",
+    )
+
+    with patch(
+        "sglang.srt.layers.glm52_opt.fp8_gemm.deep_gemm.fp8_gemm_nt"
+    ) as gemm:
+        ok, path = run_fp8_gemm(
+            "index_q_upproj",
+            x,
+            weight,
+            x_scale.float(),
+            weight_scale,
+            out,
+            [128, 128],
+            archive_ref="must_not_load",
+            phase="decode",
+            implementation="fixed_nk",
+        )
+    assert not ok and path == "fixed_nk_requires_packed_ue8m0"
+    gemm.assert_not_called()
+
+
+def test_fixed_nk_requires_exact_forward_mode():
+    old_profile = os.environ.get("SGLANG_GLM52_OPT_PROFILE")
+    old_ops = os.environ.get("SGLANG_GLM52_OPT_OPS")
+    try:
+        os.environ["SGLANG_GLM52_OPT_PROFILE"] = "e2e_candidates"
+
+        os.environ["SGLANG_GLM52_OPT_OPS"] = "index_q_upproj"
+        decode = lookup("index_q_upproj", "decode", m=16)
+        set_forward_mode(ForwardMode.DECODE, 16)
+        assert _fixed_nk_forward_mode_matches(decode)
+        for mode in (
+            ForwardMode.EXTEND,
+            ForwardMode.MIXED,
+            ForwardMode.TARGET_VERIFY,
+        ):
+            set_forward_mode(mode, 16)
+            assert not _fixed_nk_forward_mode_matches(decode)
+
+        os.environ["SGLANG_GLM52_OPT_OPS"] = "fused_qkv_a_proj"
+        prefill = lookup("fused_qkv_a_proj", "prefill", m=4096)
+        set_forward_mode(ForwardMode.EXTEND, 4096)
+        assert _fixed_nk_forward_mode_matches(prefill)
+        set_forward_mode(ForwardMode.SPLIT_PREFILL, 4096)
+        assert not _fixed_nk_forward_mode_matches(prefill)
+    finally:
+        set_forward_mode(None)
+        for key, old_value in (
+            ("SGLANG_GLM52_OPT_PROFILE", old_profile),
+            ("SGLANG_GLM52_OPT_OPS", old_ops),
+        ):
+            if old_value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = old_value
+
+
+def test_infini_kernel_profiler_range_is_exact_and_default_off():
+    old_profile = os.environ.get("SGLANG_GLM52_OPT_PROFILE")
+    old_ops = os.environ.get("SGLANG_GLM52_OPT_OPS")
+    try:
+        os.environ["SGLANG_GLM52_OPT_PROFILE"] = "e2e_candidates"
+        os.environ["SGLANG_GLM52_OPT_OPS"] = "index_q_upproj"
+        spec = lookup("index_q_upproj", "decode", m=16)
+        assert (
+            _profiler_range_name(spec, 16)
+            == "infini_kernel_glm52_index_q_upproj_decode_nk"
+            "[M=16,N=4096,K=2048]"
+        )
+
+        with (
+            patch(
+                "sglang.srt.layers.glm52_opt.dispatch."
+                "config.emit_infini_kernel_nvtx",
+                return_value=False,
+            ),
+            patch.object(torch.cuda.nvtx, "range_push") as push,
+            patch.object(torch.cuda.nvtx, "range_pop") as pop,
+            _nvtx_range(_profiler_range_name(spec, 16)),
+        ):
+            pass
+        push.assert_not_called()
+        pop.assert_not_called()
+
+        with (
+            patch(
+                "sglang.srt.layers.glm52_opt.dispatch."
+                "config.emit_infini_kernel_nvtx",
+                return_value=True,
+            ),
+            patch.object(torch.cuda.nvtx, "range_push") as push,
+            patch.object(torch.cuda.nvtx, "range_pop") as pop,
+            _nvtx_range(_profiler_range_name(spec, 16)),
+        ):
+            pass
+        push.assert_called_once_with(_profiler_range_name(spec, 16))
+        pop.assert_called_once_with()
+    finally:
+        for key, old_value in (
+            ("SGLANG_GLM52_OPT_PROFILE", old_profile),
+            ("SGLANG_GLM52_OPT_OPS", old_ops),
         ):
             if old_value is None:
                 os.environ.pop(key, None)

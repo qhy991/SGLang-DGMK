@@ -29,6 +29,7 @@ _GLM52_ENV_KEYS = frozenset(
         "SGLANG_GLM52_NSYS_GATE",
         "SGLANG_GLM52_NSYS_TRIGGER",
         "SGLANG_GLM52_NSYS_SECONDS",
+        "SGLANG_GLM52_INFINI_KERNEL_NVTX",
     }
 )
 
@@ -136,6 +137,8 @@ def profile_name() -> str:
 # serving_safe.  See glm52_opt/history/e2e_candidates_20260723/INDEX.md.
 _E2E_DEFAULT_OPS = frozenset({"o_proj", "moe_gate_proj", "moe_down_proj"})
 _E2E_CONTIG_PSUM_OPS = frozenset({"moe_gate_proj", "moe_down_proj"})
+_E2E_EXPLICIT_OPS = frozenset({"fused_qkv_a_proj", "index_q_upproj"})
+_E2E_ALLOWED_OPS = _E2E_DEFAULT_OPS | _E2E_EXPLICIT_OPS
 
 
 def opt_ops_allowlist() -> frozenset[str] | None:
@@ -155,13 +158,21 @@ def e2e_candidate_ops() -> frozenset[str]:
     """Ops active under ``SGLANG_GLM52_OPT_PROFILE=e2e_candidates``.
 
     Empty ``OPT_OPS`` selects the archived default set.  A non-empty allowlist
-    intersects that set so ablation cannot accidentally enable unrelated
-    historical archive swaps.
+    intersects the audited E2E set so ablation cannot accidentally enable
+    unrelated historical archive swaps. Fixed-N/K QKV-A and indexer candidates
+    are explicit-only and therefore never join the legacy default set.
     """
     allow = opt_ops_allowlist()
     if allow is None:
         return _E2E_DEFAULT_OPS
-    return frozenset(op for op in allow if op in _E2E_DEFAULT_OPS)
+    return frozenset(op for op in allow if op in _E2E_ALLOWED_OPS)
+
+
+@lru_cache(maxsize=1)
+def emit_infini_kernel_nvtx() -> bool:
+    """Whether selected kernels get profiler-only ``infini_kernel`` ranges."""
+    ensure_glm52_env()
+    return _truthy("SGLANG_GLM52_INFINI_KERNEL_NVTX")
 
 
 def contig_psum_kwargs(op_name: str) -> dict[str, object]:

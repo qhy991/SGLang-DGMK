@@ -24,6 +24,7 @@ KernelKind = Literal[
     "bf16_gemm",
     "indexer",
 ]
+KernelImplementation = Literal["auto", "fixed_nk"]
 
 RunFn = Callable[[dict], object]
 
@@ -35,6 +36,11 @@ class KernelSpec:
     archive_ref: str
     kind: KernelKind
     enabled: bool = True
+    implementation: KernelImplementation = "auto"
+    profiler_name: Optional[str] = None
+    m_values: tuple[int, ...] | None = None
+    n: int | None = None
+    k: int | None = None
 
 
 _DECODE: dict[str, KernelSpec] = {
@@ -104,6 +110,45 @@ _PREFILL_FULL: dict[str, KernelSpec] = {
     ),
 }
 
+_E2E_DECODE: dict[str, KernelSpec] = {
+    "o_proj": KernelSpec(
+        op="o_proj",
+        phase="decode",
+        archive_ref="",
+        kind="fp8_gemm",
+        implementation="fixed_nk",
+        profiler_name="infini_kernel_glm52_attn_o_decode_nk",
+        m_values=(16, 32),
+        n=6144,
+        k=16384,
+    ),
+    "index_q_upproj": KernelSpec(
+        op="index_q_upproj",
+        phase="decode",
+        archive_ref="",
+        kind="fp8_gemm",
+        implementation="fixed_nk",
+        profiler_name="infini_kernel_glm52_index_q_upproj_decode_nk",
+        m_values=(16, 32),
+        n=4096,
+        k=2048,
+    ),
+}
+
+_E2E_PREFILL: dict[str, KernelSpec] = {
+    "fused_qkv_a_proj": KernelSpec(
+        op="fused_qkv_a_proj",
+        phase="prefill",
+        archive_ref="",
+        kind="fp8_gemm",
+        implementation="fixed_nk",
+        profiler_name="infini_kernel_glm52_fused_qkv_a_prefill_nk",
+        m_values=(4096,),
+        n=2624,
+        k=6144,
+    ),
+}
+
 
 def _decode_table() -> dict[str, KernelSpec]:
     """Profile / allowlist gated decode registry.
@@ -129,10 +174,12 @@ def _decode_table() -> dict[str, KernelSpec]:
         )
     elif name == "e2e_candidates":
         # Prefill MoE PSUM is wired in the contig runner, not via this table.
+        # Using a separate table also prevents those names from accidentally
+        # enabling the archived decode MoE kernels.
         table = {
-            op: _DECODE[op]
+            op: _E2E_DECODE[op]
             for op in sorted(e2e_candidate_ops())
-            if op in _DECODE
+            if op in _E2E_DECODE
         }
     elif name in ("decode_max", "full"):
         table = dict(_DECODE)
@@ -146,6 +193,14 @@ def _decode_table() -> dict[str, KernelSpec]:
 
 def _active_prefill() -> dict[str, KernelSpec]:
     return dict(_PREFILL_FULL)
+
+
+def _e2e_prefill_table() -> dict[str, KernelSpec]:
+    return {
+        op: _E2E_PREFILL[op]
+        for op in sorted(e2e_candidate_ops())
+        if op in _E2E_PREFILL
+    }
 
 
 def lookup(
@@ -163,10 +218,14 @@ def lookup(
         spec = _decode_table().get(op_name)
     elif name == "full":
         spec = _active_prefill().get(op_name)
+    elif name == "e2e_candidates":
+        spec = _e2e_prefill_table().get(op_name)
     else:
         # e2e_candidates MoE PSUM does not use KernelSpec lookup.
         return None
     if spec is None or not spec.enabled:
+        return None
+    if spec.m_values is not None and (m is None or int(m) not in spec.m_values):
         return None
     allowed_m = opt_m_buckets().get(op_name)
     if allowed_m is not None and (m is None or int(m) not in allowed_m):
@@ -179,4 +238,6 @@ def list_enabled(phase: str) -> list[KernelSpec]:
         return [s for s in _decode_table().values() if s.enabled]
     if profile_name() == "full":
         return [s for s in _active_prefill().values() if s.enabled]
+    if profile_name() == "e2e_candidates":
+        return [s for s in _e2e_prefill_table().values() if s.enabled]
     return []

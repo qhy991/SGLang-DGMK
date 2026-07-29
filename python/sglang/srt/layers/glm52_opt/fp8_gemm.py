@@ -15,14 +15,13 @@ from __future__ import annotations
 import logging
 from typing import List, Optional, Tuple
 
-import torch
 import deep_gemm
-
+import torch
+from sglang.srt.layers.glm52_opt.config import allow_abi_adapter
 from sglang.srt.layers.glm52_opt.experimental_deepgemm import (
     get_experimental_deep_gemm,
     has_fused_fp8_gemm_nt,
 )
-from sglang.srt.layers.glm52_opt.config import allow_abi_adapter
 from sglang.srt.layers.glm52_opt.kernels.scale_pack import pack_scales
 
 logger = logging.getLogger(__name__)
@@ -181,11 +180,27 @@ def run_fp8_gemm(
     block_size: List[int],
     archive_ref: str,
     phase: str = "decode",
+    implementation: str = "auto",
 ) -> Tuple[bool, str]:
     """Run optimized FP8 GEMM. Returns (ok, path) where path is
     native_fork | native_packed | archive | packed_fallback | packed_default.
     """
     packed_scales = x_scale.dtype == torch.int32 or w_scale.dtype == torch.int32
+
+    # Exact E2E candidate: production packed UE8M0 ABI with no scale adapter,
+    # archive wrapper, or post-selection fallback.
+    if implementation == "fixed_nk":
+        if x_scale.dtype != torch.int32 or w_scale.dtype != torch.int32:
+            return False, "fixed_nk_requires_packed_ue8m0"
+        _run_packed_fp8_gemm(
+            x_fp8,
+            w_fp8,
+            x_scale,
+            w_scale,
+            out,
+            compiled_dims="nk",
+        )
+        return True, "fixed_nk"
 
     # 1) q_b decode only: the historical fork consumes raw f32 scales.  Do not
     # silently unpack production UE8M0 scales unless this legacy adapter is

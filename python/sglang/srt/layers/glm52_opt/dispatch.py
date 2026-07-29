@@ -6,11 +6,11 @@ import json
 import logging
 import os
 import threading
+from contextlib import contextmanager
 from pathlib import Path
 from typing import List, Optional, Tuple
 
 import torch
-
 from sglang.srt.layers.glm52_opt import config
 from sglang.srt.layers.glm52_opt.context import (
     get_forward_m,
@@ -20,7 +20,7 @@ from sglang.srt.layers.glm52_opt.context import (
 from sglang.srt.layers.glm52_opt.fp8_gemm import run_fp8_gemm
 from sglang.srt.layers.glm52_opt.moe_masked import run_moe_masked
 from sglang.srt.layers.glm52_opt.phase import infer_glm52_phase
-from sglang.srt.layers.glm52_opt.registry import lookup
+from sglang.srt.layers.glm52_opt.registry import KernelSpec, lookup
 
 logger = logging.getLogger(__name__)
 
@@ -84,11 +84,13 @@ def _current_phase(token_num: int) -> str:
 
 
 def _nvtx_range(name: str):
-    """Context manager for Nsight NVTX ranges (no-op if unavailable)."""
-    from contextlib import contextmanager
+    """Default-off profiler range; authoritative A/B emits no NVTX events."""
 
     @contextmanager
     def _cm():
+        if not config.emit_infini_kernel_nvtx():
+            yield
+            return
         pushed = False
         try:
             torch.cuda.nvtx.range_push(name)
@@ -105,6 +107,71 @@ def _nvtx_range(name: str):
                     pass
 
     return _cm()
+
+
+def _profiler_range_name(spec: KernelSpec, m: int) -> str:
+    name = spec.profiler_name or (
+        f"infini_kernel_glm52_{spec.op}_{spec.phase}_{spec.implementation}"
+    )
+    if spec.n is not None and spec.k is not None:
+        return f"{name}[M={m},N={spec.n},K={spec.k}]"
+    return f"{name}[M={m}]"
+
+
+def _fixed_nk_forward_mode_matches(spec: KernelSpec) -> bool:
+    if spec.implementation != "fixed_nk":
+        return True
+    from sglang.srt.model_executor.forward_batch_info import ForwardMode
+
+    mode = get_forward_mode()
+    if spec.phase == "decode":
+        return mode is ForwardMode.DECODE
+    if spec.phase == "prefill":
+        return mode is ForwardMode.EXTEND
+    return False
+
+
+def _fixed_nk_abi_matches(
+    spec: KernelSpec,
+    input_2d: torch.Tensor,
+    weight: torch.Tensor,
+    x_scale: torch.Tensor,
+    weight_scale: torch.Tensor,
+    block_size: List[int],
+    output_dtype: torch.dtype,
+    bias: Optional[torch.Tensor],
+) -> bool:
+    if spec.implementation != "fixed_nk":
+        return True
+    if spec.n is None or spec.k is None:
+        return False
+    m = int(input_2d.shape[0]) if input_2d.ndim == 2 else -1
+    return (
+        _fixed_nk_forward_mode_matches(spec)
+        and input_2d.ndim == 2
+        and tuple(input_2d.shape) == (m, spec.k)
+        and tuple(weight.shape) == (spec.n, spec.k)
+        and tuple(block_size) == (128, 128)
+        and input_2d.dtype == torch.float8_e4m3fn
+        and weight.dtype == torch.float8_e4m3fn
+        and input_2d.is_cuda
+        and weight.is_cuda
+        and input_2d.is_contiguous()
+        and weight.is_contiguous()
+        and input_2d.device == weight.device
+        and x_scale.dtype == torch.int32
+        and weight_scale.dtype == torch.int32
+        and x_scale.is_cuda
+        and weight_scale.is_cuda
+        and x_scale.device == input_2d.device
+        and weight_scale.device == input_2d.device
+        and tuple(x_scale.shape) == (m, spec.k // 128 // 4)
+        and tuple(weight_scale.shape) == (spec.n, spec.k // 128 // 4)
+        and tuple(x_scale.stride()) == (1, m)
+        and tuple(weight_scale.stride()) == (1, spec.n)
+        and output_dtype == torch.bfloat16
+        and bias is None
+    )
 
 
 def record_psum_hit(op: Optional[str], m: Optional[int] = None) -> None:
@@ -135,8 +202,20 @@ def try_dispatch_fp8_gemm(
     if spec is None or spec.kind != "fp8_gemm":
         _record_miss("no_spec", op, phase, m=m)
         return None
+    if not _fixed_nk_abi_matches(
+        spec,
+        input_2d,
+        weight,
+        x_scale,
+        weight_scale,
+        block_size,
+        output_dtype,
+        bias,
+    ):
+        _record_miss("fixed_nk_abi", op, phase, m=m)
+        return None
     out = input_2d.new_empty(input_2d.shape[0], weight.shape[0], dtype=output_dtype)
-    with _nvtx_range(f"glm52_opt/fp8_gemm/{op}/{phase}/m{m}"):
+    with _nvtx_range(_profiler_range_name(spec, m)):
         ok, path = run_fp8_gemm(
             op,
             input_2d,
@@ -147,6 +226,7 @@ def try_dispatch_fp8_gemm(
             block_size,
             spec.archive_ref,
             phase=phase,
+            implementation=spec.implementation,
         )
     if not ok:
         _record_miss(f"run_skipped:{path}", op, phase, m=m)
@@ -189,8 +269,11 @@ def try_dispatch_moe_masked(
     x_fp8, x_scale = lhs
     w_fp8, w_scale = rhs
     try:
-        suffix = f"/m{forward_m}" if forward_m is not None else "/m_unknown"
-        with _nvtx_range(f"glm52_opt/moe_masked/{op or spec.op}/{phase}{suffix}"):
+        range_name = (
+            f"infini_kernel_glm52_{op or spec.op}_{phase}_moe_masked"
+            f"[M={forward_m if forward_m is not None else 'unknown'}]"
+        )
+        with _nvtx_range(range_name):
             run_moe_masked(x_fp8, w_fp8, x_scale, w_scale, out, masked_m, expected_m)
     except Exception as exc:
         _record_miss(
