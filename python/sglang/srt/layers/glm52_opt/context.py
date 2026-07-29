@@ -83,16 +83,31 @@ def get_fused_qkv_a_direct_nk_context() -> Optional[tuple["ForwardMode", int]]:
 
 
 def fused_qkv_a_direct_nk_context(
-    mode: Optional["ForwardMode"], m: Optional[int] = None
+    mode: Optional["ForwardMode"],
+    m: Optional[int] = None,
+    *,
+    allow_decode: bool = True,
+    allow_prefill: bool = False,
 ) -> _FusedQkvADirectNkNoopContext | _FusedQkvADirectNkActiveContext:
-    """Publish only exact non-speculative decode buckets."""
+    """Publish only explicitly enabled exact decode or prefill buckets."""
+    valid_decode = (
+        allow_decode
+        and m in (16, 32)
+        and callable(getattr(mode, "is_decode", None))
+        and mode.is_decode()
+    )
+    valid_prefill = (
+        allow_prefill
+        and m == 4096
+        and getattr(mode, "name", None) == "EXTEND"
+        and callable(getattr(mode, "is_extend", None))
+        and mode.is_extend()
+    )
     if (
         mode is None
         or not isinstance(m, int)
         or isinstance(m, bool)
-        or m not in (16, 32)
-        or not callable(getattr(mode, "is_decode", None))
-        or not mode.is_decode()
+        or not (valid_decode or valid_prefill)
     ):
         return _FUSED_QKV_A_DIRECT_NK_NOOP_CONTEXT
     return _FusedQkvADirectNkActiveContext(mode, m)

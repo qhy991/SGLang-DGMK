@@ -116,6 +116,7 @@ from sglang.srt.layers.quantization.base_config import QuantizationConfig
 from sglang.srt.layers.quantization.fp8 import (
     Fp8Config,
     configure_glm52_fused_qkv_a_decode_direct_nk,
+    configure_glm52_fused_qkv_a_prefill_direct_nk,
 )
 from sglang.srt.layers.quantization.fp8_utils import (
     materialize_bpreshuffle_fp8_scale,
@@ -1654,8 +1655,17 @@ class DeepseekV2AttentionMLA(
                 prefix=add_prefix("fused_qkv_a_proj_with_mqa", prefix),
             )
             self.q_a_layernorm = RMSNorm(self.q_lora_rank, eps=config.rms_norm_eps)
-            if (
+            enable_glm52_fused_qkv_a_decode_direct_nk = (
                 envs.SGLANG_OPT_GLM52_FUSED_QKV_A_DECODE_DIRECT_NK.get()
+            )
+            enable_glm52_fused_qkv_a_prefill_direct_nk = (
+                envs.SGLANG_OPT_GLM52_FUSED_QKV_A_PREFILL_DIRECT_NK.get()
+            )
+            if (
+                (
+                    enable_glm52_fused_qkv_a_decode_direct_nk
+                    or enable_glm52_fused_qkv_a_prefill_direct_nk
+                )
                 and _is_glm52_dsa_target_fused_qkv_a(
                     config,
                     hidden_size=self.hidden_size,
@@ -1673,9 +1683,14 @@ class DeepseekV2AttentionMLA(
                     ),
                 )
             ):
-                configure_glm52_fused_qkv_a_decode_direct_nk(
-                    self.fused_qkv_a_proj_with_mqa
-                )
+                if enable_glm52_fused_qkv_a_decode_direct_nk:
+                    configure_glm52_fused_qkv_a_decode_direct_nk(
+                        self.fused_qkv_a_proj_with_mqa
+                    )
+                if enable_glm52_fused_qkv_a_prefill_direct_nk:
+                    configure_glm52_fused_qkv_a_prefill_direct_nk(
+                        self.fused_qkv_a_proj_with_mqa
+                    )
             self.q_b_proj = ColumnParallelLinear(
                 q_lora_rank,
                 self.num_heads * self.qk_head_dim,
@@ -2076,13 +2091,18 @@ class DeepseekV2AttentionMLA(
                 backend=self.fused_a_gemm_backend,
             )
         else:
-            marked_direct_nk = getattr(
+            marked_decode_direct_nk = getattr(
                 self.fused_qkv_a_proj_with_mqa,
                 "_glm52_fused_qkv_a_decode_direct_nk",
                 False,
             )
+            marked_prefill_direct_nk = getattr(
+                self.fused_qkv_a_proj_with_mqa,
+                "_glm52_fused_qkv_a_prefill_direct_nk",
+                False,
+            )
             if (
-                marked_direct_nk
+                (marked_decode_direct_nk or marked_prefill_direct_nk)
                 and not lora_active
                 and isinstance(hidden_states, torch.Tensor)
             ):
@@ -2093,6 +2113,8 @@ class DeepseekV2AttentionMLA(
                 with fused_qkv_a_direct_nk_context(
                     forward_batch.forward_mode,
                     int(hidden_states.shape[0]),
+                    allow_decode=marked_decode_direct_nk,
+                    allow_prefill=marked_prefill_direct_nk,
                 ):
                     qkv_latent = self.fused_qkv_a_proj_with_mqa(hidden_states)[0]
             else:

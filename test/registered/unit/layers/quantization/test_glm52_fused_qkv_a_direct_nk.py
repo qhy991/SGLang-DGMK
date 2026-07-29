@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import os
+import sys
 import unittest
 from contextlib import ExitStack, nullcontext
 from types import SimpleNamespace
@@ -161,6 +162,7 @@ def _construct_attention(
     config,
     *,
     feature_enabled=True,
+    prefill_feature_enabled=False,
     is_nextn=False,
     attn_tp_size=1,
 ):
@@ -232,6 +234,13 @@ def _construct_attention(
                 return_value=feature_enabled,
             )
         )
+        stack.enter_context(
+            patch.object(
+                envs.SGLANG_OPT_GLM52_FUSED_QKV_A_PREFILL_DIRECT_NK,
+                "get",
+                return_value=prefill_feature_enabled,
+            )
+        )
         return deepseek_v2_module.DeepseekV2AttentionMLA(
             config,
             hidden_size=6144,
@@ -293,16 +302,57 @@ class TestDecodeContext(unittest.TestCase):
             self.assertEqual(get_fused_qkv_a_direct_nk_context(), outer)
         self.assertIsNone(get_fused_qkv_a_direct_nk_context())
 
+    def test_only_exact_explicit_prefill_bucket_publishes_context(self):
+        with fused_qkv_a_direct_nk_context(
+            ForwardMode.EXTEND,
+            4096,
+            allow_decode=False,
+            allow_prefill=True,
+        ):
+            self.assertEqual(
+                get_fused_qkv_a_direct_nk_context(),
+                (ForwardMode.EXTEND, 4096),
+            )
+        self.assertIsNone(get_fused_qkv_a_direct_nk_context())
+
+        unsupported = (
+            (ForwardMode.EXTEND, 16),
+            (ForwardMode.EXTEND, 4095),
+            (ForwardMode.MIXED, 4096),
+            (ForwardMode.TARGET_VERIFY, 4096),
+            (ForwardMode.SPLIT_PREFILL, 4096),
+            (ForwardMode.DLLM_EXTEND, 4096),
+            (ForwardMode.DECODE, 4096),
+        )
+        for mode, m in unsupported:
+            with (
+                self.subTest(mode=mode, m=m),
+                fused_qkv_a_direct_nk_context(
+                    mode,
+                    m,
+                    allow_decode=False,
+                    allow_prefill=True,
+                ),
+            ):
+                self.assertIsNone(get_fused_qkv_a_direct_nk_context())
+
 
 class TestModelIsolation(unittest.TestCase):
     def test_feature_is_default_off(self):
-        name = "SGLANG_OPT_GLM52_FUSED_QKV_A_DECODE_DIRECT_NK"
-        old = os.environ.pop(name, None)
+        names = (
+            "SGLANG_OPT_GLM52_FUSED_QKV_A_DECODE_DIRECT_NK",
+            "SGLANG_OPT_GLM52_FUSED_QKV_A_PREFILL_DIRECT_NK",
+        )
+        old = {name: os.environ.pop(name, None) for name in names}
         try:
             self.assertFalse(envs.SGLANG_OPT_GLM52_FUSED_QKV_A_DECODE_DIRECT_NK.get())
+            self.assertFalse(
+                envs.SGLANG_OPT_GLM52_FUSED_QKV_A_PREFILL_DIRECT_NK.get()
+            )
         finally:
-            if old is not None:
-                os.environ[name] = old
+            for name, value in old.items():
+                if value is not None:
+                    os.environ[name] = value
 
     def test_exact_fingerprint_and_negative_matrix(self):
         self.assertTrue(_fingerprint())
@@ -358,6 +408,23 @@ class TestModelIsolation(unittest.TestCase):
                         "_glm52_fused_qkv_a_decode_direct_nk",
                     )
                 )
+
+        prefill_projection = _construct_attention(
+            _target_config(),
+            feature_enabled=False,
+            prefill_feature_enabled=True,
+        ).fused_qkv_a_proj_with_mqa
+        self.assertTrue(prefill_projection._glm52_fused_qkv_a_prefill_direct_nk)
+        self.assertFalse(
+            hasattr(
+                prefill_projection,
+                "_glm52_fused_qkv_a_decode_direct_nk",
+            )
+        )
+        self.assertIs(
+            prefill_projection.quant_method.w8a8_block_fp8_linear,
+            fp8_utils.deepgemm_w8a8_block_fp8_linear_fused_qkv_a_decode_direct_nk_dispatch,
+        )
 
     def test_scope_is_private_to_non_lora_projection_call(self):
         source = inspect.getsource(
@@ -433,6 +500,57 @@ class TestModelIsolation(unittest.TestCase):
                 self.assertEqual(projection.calls, 1)
                 self.assertIsNone(get_fused_qkv_a_direct_nk_context())
 
+    def test_prepare_qkv_latent_scopes_only_exact_non_lora_prefill(self):
+        cases = (
+            (ForwardMode.EXTEND, 4096, False, (ForwardMode.EXTEND, 4096)),
+            (ForwardMode.EXTEND, 4095, False, None),
+            (ForwardMode.MIXED, 4096, False, None),
+            (ForwardMode.TARGET_VERIFY, 4096, False, None),
+            (ForwardMode.DECODE, 4096, False, None),
+            (ForwardMode.EXTEND, 4096, True, None),
+        )
+
+        class Projection:
+            _glm52_fused_qkv_a_prefill_direct_nk = True
+
+            def __init__(self, expected, lora_active):
+                self.expected = expected
+                self.set_lora = lora_active
+                self.calls = 0
+
+            def __call__(self, hidden_states):
+                self.calls += 1
+                if get_fused_qkv_a_direct_nk_context() != self.expected:
+                    raise AssertionError("projection observed wrong task context")
+                return (
+                    hidden_states.new_empty((hidden_states.shape[0], 2624)),
+                    None,
+                )
+
+        for mode, m, lora_active, expected in cases:
+            with self.subTest(mode=mode.name, m=m, lora_active=lora_active):
+                projection = Projection(expected, lora_active)
+                module = SimpleNamespace(
+                    q_lora_rank=2048,
+                    use_min_latency_fused_a_gemm=False,
+                    fused_qkv_a_proj_with_mqa=projection,
+                )
+                with patch.object(
+                    deepseek_v2_module,
+                    "get_bf16_gemm_backend",
+                    return_value=SimpleNamespace(is_cutedsl=lambda: False),
+                ):
+                    output = (
+                        deepseek_v2_module.DeepseekV2AttentionMLA.prepare_qkv_latent(
+                            module,
+                            torch.empty((m, 6144), dtype=torch.bfloat16),
+                            SimpleNamespace(forward_mode=mode),
+                        )
+                    )
+                self.assertEqual(tuple(output.shape), (m, 2624))
+                self.assertEqual(projection.calls, 1)
+                self.assertIsNone(get_fused_qkv_a_direct_nk_context())
+
 
 class TestPackedAbiAndRunner(unittest.TestCase):
     def test_exact_packed_abi(self):
@@ -474,8 +592,16 @@ class TestPackedAbiAndRunner(unittest.TestCase):
                 )
             )
 
-    def test_bound_runner_uses_direct_path_for_both_buckets(self):
-        for m in (16, 32):
+    def test_bound_runner_uses_direct_path_for_all_exact_buckets(self):
+        for m, mode, context_kwargs in (
+            (16, ForwardMode.DECODE, {}),
+            (32, ForwardMode.DECODE, {}),
+            (
+                4096,
+                ForwardMode.EXTEND,
+                {"allow_decode": False, "allow_prefill": True},
+            ),
+        ):
             q_input, weight, x_scale, weight_scale = _packed_tensors(m)
             output = object()
             patches = _support_patches()
@@ -497,6 +623,11 @@ class TestPackedAbiAndRunner(unittest.TestCase):
                 ) as direct,
                 patch.object(
                     fp8_utils,
+                    "_glm52_fused_qkv_a_prefill_direct_nk_packed_gemm",
+                    return_value=output,
+                ) as prefill_direct,
+                patch.object(
+                    fp8_utils,
                     "deepgemm_w8a8_block_fp8_linear_with_fallback",
                 ) as stock,
             ):
@@ -509,7 +640,7 @@ class TestPackedAbiAndRunner(unittest.TestCase):
                     runner,
                     fp8_utils.Glm52FusedQkvADecodeDirectNkRunner,
                 )
-                with fused_qkv_a_direct_nk_context(ForwardMode.DECODE, m):
+                with fused_qkv_a_direct_nk_context(mode, m, **context_kwargs):
                     result = runner(
                         _bf16_input(m),
                         weight,
@@ -519,7 +650,20 @@ class TestPackedAbiAndRunner(unittest.TestCase):
 
             self.assertIs(result, output)
             quantize.assert_called_once()
-            direct.assert_called_once()
+            if m == 4096:
+                prefill_direct.assert_called_once_with(
+                    q_input,
+                    weight,
+                    x_scale,
+                    weight_scale,
+                    [128, 128],
+                    torch.bfloat16,
+                    abi_prevalidated=True,
+                )
+                direct.assert_not_called()
+            else:
+                direct.assert_called_once()
+                prefill_direct.assert_not_called()
             stock.assert_not_called()
 
     def test_postquant_abi_failure_propagates_without_stock(self):
@@ -739,6 +883,10 @@ class TestPackedAbiAndRunner(unittest.TestCase):
             layer.quant_method.w8a8_block_fp8_linear,
             fp8_utils.Glm52FusedQkvADecodeDirectNkRunner,
         )
+        self.assertTrue(
+            fp8_module.configure_glm52_fused_qkv_a_prefill_direct_nk(layer)
+        )
+        self.assertTrue(layer._glm52_fused_qkv_a_prefill_direct_nk)
 
         layer.output_size_per_partition = 2625
         layer.quant_method = _method()
@@ -788,6 +936,39 @@ class TestCompiledNkLeaf(unittest.TestCase):
             weight,
             weight_scale,
             output,
+        )
+
+    def test_prefill_leaf_uses_direct_compiled_nk_call(self):
+        q_input, weight, x_scale, weight_scale = _packed_tensors(4096)
+        output = _FakeTensor((4096, 2624), torch.bfloat16)
+        q_input.new_empty = Mock(return_value=output)
+        deep_gemm = SimpleNamespace(fp8_gemm_nt=Mock())
+        patches = _support_patches()
+        with (
+            patches[0],
+            patches[1],
+            patches[2],
+            patches[3],
+            patch.dict(sys.modules, {"deep_gemm": deep_gemm}),
+        ):
+            result = fp8_utils._glm52_fused_qkv_a_prefill_direct_nk_packed_gemm(
+                q_input,
+                weight,
+                x_scale,
+                weight_scale,
+                [128, 128],
+                torch.bfloat16,
+            )
+        self.assertIs(result, output)
+        q_input.new_empty.assert_called_once_with(
+            (4096, 2624),
+            dtype=torch.bfloat16,
+        )
+        deep_gemm.fp8_gemm_nt.assert_called_once_with(
+            (q_input, x_scale),
+            (weight, weight_scale),
+            output,
+            compiled_dims="nk",
         )
 
     def test_entrypoint_calls_compiled_dims_nk(self):

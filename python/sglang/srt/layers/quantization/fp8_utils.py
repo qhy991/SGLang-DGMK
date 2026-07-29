@@ -867,7 +867,7 @@ def _is_glm52_fused_qkv_a_decode_direct_nk_packed_weight_abi(
     weight_scale: torch.Tensor,
     block_size: List[int],
 ) -> bool:
-    """Validate the immutable Task01 build and packed-weight contract."""
+    """Validate the immutable Task01/Task02 build and packed-weight contract."""
     if not _is_glm52_fused_qkv_a_decode_direct_nk_build_supported():
         return False
     if getattr(weight, "ndim", None) != 2 or getattr(weight_scale, "ndim", None) != 2:
@@ -913,6 +913,47 @@ def _is_glm52_fused_qkv_a_decode_direct_nk_activation_abi(
     )
 
 
+def _glm52_fused_qkv_a_prefill_direct_nk_packed_gemm(
+    q_input: torch.Tensor,
+    weight: torch.Tensor,
+    x_scale: torch.Tensor,
+    weight_scale: torch.Tensor,
+    block_size: List[int],
+    output_dtype: torch.dtype,
+    *,
+    abi_prevalidated: bool = False,
+) -> torch.Tensor:
+    """Launch only Task02's measured direct compiled-N/K DeepGEMM call."""
+    if output_dtype != torch.bfloat16:
+        raise RuntimeError("Task02 direct-N/K output dtype mismatch")
+    if not abi_prevalidated:
+        if (
+            not _is_glm52_fused_qkv_a_decode_direct_nk_packed_weight_abi(
+                weight,
+                weight_scale,
+                block_size,
+            )
+            or not _is_glm52_fused_qkv_a_decode_direct_nk_activation_abi(
+                q_input,
+                x_scale,
+                m=4096,
+                device=weight.device,
+            )
+        ):
+            raise RuntimeError("Task02 direct-N/K packed GEMM ABI mismatch")
+
+    import deep_gemm
+
+    output = q_input.new_empty((4096, 2624), dtype=output_dtype)
+    deep_gemm.fp8_gemm_nt(
+        (q_input, x_scale),
+        (weight, weight_scale),
+        output,
+        compiled_dims="nk",
+    )
+    return output
+
+
 def _glm52_fused_qkv_a_decode_direct_nk_from_bf16(
     input_2d: torch.Tensor,
     weight: torch.Tensor,
@@ -935,9 +976,20 @@ def _glm52_fused_qkv_a_decode_direct_nk_from_bf16(
         device=weight.device,
     ):
         raise RuntimeError(
-            "Task01 activation quantizer violated the selected packed UE8M0 ABI"
+            "GLM-5.2 fused-QKV-A activation quantizer violated the selected "
+            "packed UE8M0 ABI"
         )
 
+    if m == 4096:
+        return _glm52_fused_qkv_a_prefill_direct_nk_packed_gemm(
+            q_input,
+            weight,
+            x_scale,
+            weight_scale,
+            block_size,
+            torch.bfloat16,
+            abi_prevalidated=True,
+        )
     return w8a8_block_fp8_matmul_deepgemm_fused_qkv_a_compiled_nk(
         q_input,
         weight,
@@ -1069,7 +1121,7 @@ def deepgemm_w8a8_block_fp8_linear_fused_qkv_a_decode_direct_nk_dispatch(
 
 
 def is_glm52_fused_qkv_a_decode_direct_nk_runner(runner: Callable) -> bool:
-    """Return whether ``runner`` participates in Task01's weight lifecycle."""
+    """Return whether ``runner`` participates in the fixed-N/K weight lifecycle."""
     return (
         runner is deepgemm_w8a8_block_fp8_linear_fused_qkv_a_decode_direct_nk_dispatch
         or isinstance(runner, Glm52FusedQkvADecodeDirectNkRunner)
