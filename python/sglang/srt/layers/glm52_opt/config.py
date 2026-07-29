@@ -30,6 +30,7 @@ _GLM52_ENV_KEYS = frozenset(
         "SGLANG_GLM52_NSYS_TRIGGER",
         "SGLANG_GLM52_NSYS_SECONDS",
         "SGLANG_GLM52_INFINI_KERNEL_NVTX",
+        "SGLANG_GLM52_HOTSPOT_MODULE",
     }
 )
 
@@ -140,6 +141,18 @@ _E2E_CONTIG_PSUM_OPS = frozenset({"moe_gate_proj", "moe_down_proj"})
 _E2E_EXPLICIT_OPS = frozenset({"fused_qkv_a_proj", "index_q_upproj"})
 _E2E_ALLOWED_OPS = _E2E_DEFAULT_OPS | _E2E_EXPLICIT_OPS
 
+# Exact production-interface hooks for out-of-tree PTX/SASS, CUDA/CuTe, or
+# Triton experiments.  These are intentionally isolated from e2e_candidates:
+# selecting the hotspot profile must never also turn on an older archive swap.
+_HOTSPOT_DEFAULT_OPS = frozenset({"dsa_decode_attn", "moe_gate_proj", "moe_down_proj"})
+_HOTSPOT_OP_ALIASES = {
+    "flashmla_sparse_decode": "dsa_decode_attn",
+    "flashmla_kv": "dsa_decode_attn",
+    "moe_w13": "moe_gate_proj",
+    "moe_gate_up": "moe_gate_proj",
+    "moe_w2": "moe_down_proj",
+}
+
 
 def opt_ops_allowlist() -> frozenset[str] | None:
     """Optional comma-separated decode op allowlist (SGLANG_GLM52_OPT_OPS).
@@ -166,6 +179,32 @@ def e2e_candidate_ops() -> frozenset[str]:
     if allow is None:
         return _E2E_DEFAULT_OPS
     return frozenset(op for op in allow if op in _E2E_ALLOWED_OPS)
+
+
+def hotspot_candidate_ops() -> frozenset[str]:
+    """Ops selected by ``SGLANG_GLM52_OPT_PROFILE=hotspot_candidates``.
+
+    User-facing aliases describe the fused production operation (``moe_w13``)
+    while the returned names remain compatible with the existing SGLang op
+    contexts (``moe_gate_proj``).
+    """
+    allow = opt_ops_allowlist()
+    if allow is None:
+        return _HOTSPOT_DEFAULT_OPS
+    normalized = {_HOTSPOT_OP_ALIASES.get(op, op) for op in allow}
+    unknown = normalized - _HOTSPOT_DEFAULT_OPS
+    if unknown:
+        raise ValueError(
+            "Unsupported SGLANG_GLM52_OPT_OPS for hotspot_candidates: "
+            + ", ".join(sorted(unknown))
+        )
+    return frozenset(normalized)
+
+
+def hotspot_module_ref() -> str:
+    """Python module name or absolute provider ``.py`` path for hotspot ops."""
+    ensure_glm52_env()
+    return os.environ.get("SGLANG_GLM52_HOTSPOT_MODULE", "").strip()
 
 
 @lru_cache(maxsize=1)

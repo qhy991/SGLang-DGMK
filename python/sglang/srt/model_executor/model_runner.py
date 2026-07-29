@@ -593,6 +593,22 @@ class ModelRunner(ModelRunnerKVCacheMixin):
         if deep_gemm_wrapper.ENABLE_JIT_DEEPGEMM:
             deep_gemm_wrapper.update_deep_gemm_config(gpu_id, server_args)
 
+        # Load an explicitly requested GLM-5.2 hotspot provider only after the
+        # worker owns its CUDA device and before model warmup / graph capture.
+        # Provider errors are fatal: a candidate run must not silently replay
+        # stock while reporting an experimental profile.
+        from sglang.srt.layers.glm52_opt import config as glm52_opt_config
+
+        if (
+            glm52_opt_config.is_enabled()
+            and glm52_opt_config.profile_name() == "hotspot_candidates"
+        ):
+            from sglang.srt.layers.glm52_opt.hotspot_provider import (
+                initialize_hotspot_provider,
+            )
+
+            initialize_hotspot_provider(gpu_id)
+
         # For hisparse (must be set before initialize() so CUDA graph capture can see it)
         self.hisparse_coordinator = None
 

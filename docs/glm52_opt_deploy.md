@@ -41,14 +41,19 @@ python -m sglang.launch_server --model-path <glm-5.2-checkpoint> ...
 
 | Profile | Decode | Prefill |
 |---------|--------|---------|
-| `decode_max` (default) | All 8 winning decode ops | Stock |
+| `serving_safe` (default) | Stock unless explicitly allowlisted | Stock |
+| `decode_max` | All 8 legacy decode swaps | Stock |
 | `full` | Same | + fused_qkv_a, q_b, index_k/q/weights |
 | `e2e_candidates` | Default-off/allowlisted fixed-N/K diagnostics | Allowlisted fixed-N/K and MoE PSUM diagnostics |
+| `hotspot_candidates` | External exact-ABI FlashMLA/W13/W2 provider | Stock |
 
 Prefill `moe_gate` and `dsa_prefill_attn` stay on stock (CUDA Graph regressions).
 For the three exact packed-UE8M0 fixed-N/K candidates, single-op commands,
 fair A/B rules, and `infini_kernel` Nsys labels, see
 [`glm52_opt/infini_kernel_fixed_nk_e2e.md`](../glm52_opt/infini_kernel_fixed_nk_e2e.md).
+For default-off PTX/SASS, CUDA/CuTe, CUTLASS, or Triton experiments at the
+production FlashMLA sparse-decode and masked W13/W2 call sites, see
+[`glm52_opt/infini_kernel_hotspot_e2e.md`](../glm52_opt/infini_kernel_hotspot_e2e.md).
 
 ## Smoke test
 

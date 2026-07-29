@@ -10,6 +10,7 @@ from typing import Callable, Literal, Optional
 
 from sglang.srt.layers.glm52_opt.config import (
     e2e_candidate_ops,
+    hotspot_candidate_ops,
     opt_m_buckets,
     opt_ops_allowlist,
     profile_name,
@@ -24,7 +25,7 @@ KernelKind = Literal[
     "bf16_gemm",
     "indexer",
 ]
-KernelImplementation = Literal["auto", "fixed_nk"]
+KernelImplementation = Literal["auto", "fixed_nk", "hotspot_plugin"]
 
 RunFn = Callable[[dict], object]
 
@@ -41,6 +42,15 @@ class KernelSpec:
     m_values: tuple[int, ...] | None = None
     n: int | None = None
     k: int | None = None
+    num_groups: int | None = None
+    slab_m: int | None = None
+    expected_m_values: tuple[int, ...] | None = None
+    topk: int | None = None
+    q_heads: int | None = None
+    qk_dim: int | None = None
+    v_dim: int | None = None
+    page_size: int | None = None
+    kv_dim: int | None = None
 
 
 _DECODE: dict[str, KernelSpec] = {
@@ -149,6 +159,57 @@ _E2E_PREFILL: dict[str, KernelSpec] = {
     ),
 }
 
+# Three default-off production-interface hooks selected from the GLM-5.2
+# decode Nsight profile.  The provider is supplied out of tree so a PTX/SASS,
+# CUDA/CuTe, CUTLASS, or Triton implementation can be A/B tested without
+# changing SGLang call sites.  Every unsupported bucket falls back to stock.
+_HOTSPOT_DECODE: dict[str, KernelSpec] = {
+    "dsa_decode_attn": KernelSpec(
+        op="dsa_decode_attn",
+        phase="decode",
+        archive_ref="",
+        kind="dsa",
+        implementation="hotspot_plugin",
+        profiler_name="infini_kernel_glm52_flashmla_sparse_decode_fp8_topk2048",
+        m_values=(16, 32),
+        topk=2048,
+        q_heads=64,
+        qk_dim=576,
+        v_dim=512,
+        page_size=64,
+        kv_dim=656,
+    ),
+    # SGLang executes gate+up as one fused W13 grouped GEMM.
+    "moe_gate_proj": KernelSpec(
+        op="moe_gate_proj",
+        phase="decode",
+        archive_ref="",
+        kind="moe_masked",
+        implementation="hotspot_plugin",
+        profiler_name="infini_kernel_glm52_moe_w13_decode",
+        m_values=(16, 32),
+        n=4096,
+        k=6144,
+        num_groups=32,
+        slab_m=1024,
+        expected_m_values=(4, 5, 8, 9),
+    ),
+    "moe_down_proj": KernelSpec(
+        op="moe_down_proj",
+        phase="decode",
+        archive_ref="",
+        kind="moe_masked",
+        implementation="hotspot_plugin",
+        profiler_name="infini_kernel_glm52_moe_w2_decode",
+        m_values=(16, 32),
+        n=6144,
+        k=2048,
+        num_groups=32,
+        slab_m=1024,
+        expected_m_values=(4, 5, 8, 9),
+    ),
+}
+
 
 def _decode_table() -> dict[str, KernelSpec]:
     """Profile / allowlist gated decode registry.
@@ -203,6 +264,14 @@ def _e2e_prefill_table() -> dict[str, KernelSpec]:
     }
 
 
+def _hotspot_decode_table() -> dict[str, KernelSpec]:
+    return {
+        op: _HOTSPOT_DECODE[op]
+        for op in sorted(hotspot_candidate_ops())
+        if op in _HOTSPOT_DECODE
+    }
+
+
 def lookup(
     op_name: Optional[str], phase: str, m: Optional[int] = None
 ) -> Optional[KernelSpec]:
@@ -215,7 +284,11 @@ def lookup(
         return None
     name = profile_name()
     if phase == "decode":
-        spec = _decode_table().get(op_name)
+        spec = (
+            _hotspot_decode_table().get(op_name)
+            if name == "hotspot_candidates"
+            else _decode_table().get(op_name)
+        )
     elif name == "full":
         spec = _active_prefill().get(op_name)
     elif name == "e2e_candidates":
@@ -235,6 +308,8 @@ def lookup(
 
 def list_enabled(phase: str) -> list[KernelSpec]:
     if phase == "decode":
+        if profile_name() == "hotspot_candidates":
+            return [s for s in _hotspot_decode_table().values() if s.enabled]
         return [s for s in _decode_table().values() if s.enabled]
     if profile_name() == "full":
         return [s for s in _active_prefill().values() if s.enabled]

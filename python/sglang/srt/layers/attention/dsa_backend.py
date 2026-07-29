@@ -2149,13 +2149,26 @@ class DeepseekSparseAttnBackend(
         from sglang.srt.layers.glm52_opt.phase import infer_glm52_phase
         from sglang.srt.layers.glm52_opt.registry import lookup as glm52_lookup
 
+        _glm52_enabled = glm52_config.is_enabled()
         _use_glm52_dsa = False
-        if glm52_config.is_enabled() and self.dsa_decode_impl == "flashmla_sparse":
+        if _glm52_enabled and self.dsa_decode_impl == "flashmla_sparse":
             _phase = infer_glm52_phase(get_forward_mode(), q_nope.shape[0])
             _spec = glm52_lookup(
                 "dsa_decode_attn", _phase, m=int(q_nope.shape[0])
             )
-            _use_glm52_dsa = _spec is not None and _spec.kind == "dsa"
+            # hotspot_plugin targets flash_mla_with_kvcache's paged-KV ABI,
+            # not flash_mla_sparse_fwd's distinct sparse tensor layout.
+            _use_glm52_dsa = (
+                _spec is not None
+                and _spec.kind == "dsa"
+                and _spec.implementation != "hotspot_plugin"
+            )
+        _use_glm52_hotspot = (
+            _glm52_enabled
+            and glm52_config.profile_name() == "hotspot_candidates"
+            and "dsa_decode_attn" in glm52_config.hotspot_candidate_ops()
+            and self.dsa_decode_impl == "flashmla_kv"
+        )
 
         if self.dsa_decode_impl == "flashmla_sparse" or _use_glm52_dsa:
             if q_rope is not None:
@@ -2179,6 +2192,7 @@ class DeepseekSparseAttnBackend(
                 layer=layer,
                 metadata=metadata,
                 page_table_1=page_table_1,
+                use_glm52_hotspot=_use_glm52_hotspot,
             )
         elif self.dsa_decode_impl == "tilelang":
             # Cat-skip (HIP-only): when caller passes q_rope=None on HIP, q_all
@@ -2281,7 +2295,11 @@ class DeepseekSparseAttnBackend(
             if glm52_config.is_enabled()
             else None
         )
-        if spec is not None and spec.kind == "dsa":
+        if (
+            spec is not None
+            and spec.kind == "dsa"
+            and spec.implementation != "hotspot_plugin"
+        ):
             from sglang.srt.layers.glm52_opt.dsa_attn import run_dsa_decode
 
             indices_input = page_table_1.unsqueeze(1)
@@ -2345,6 +2363,7 @@ class DeepseekSparseAttnBackend(
         layer,
         metadata: DSAMetadata,
         page_table_1,
+        use_glm52_hotspot: bool = False,
     ) -> torch.Tensor:
         from sgl_kernel.flash_mla import flash_mla_with_kvcache
 
@@ -2376,21 +2395,44 @@ class DeepseekSparseAttnBackend(
             indices.shape[-1] == self.dsa_index_topk
         )  # requirement of FlashMLA decode kernel
 
-        o, _ = flash_mla_with_kvcache(
-            q=q_input,
-            k_cache=kv_cache,
-            cache_seqlens=cache_seqlens,
-            head_dim_v=v_head_dim,
-            tile_scheduler_metadata=metadata.flashmla_metadata.flashmla_metadata,
-            num_splits=metadata.flashmla_metadata.num_splits,
-            softmax_scale=sm_scale,
-            indices=indices,
-            # doc says it is not used, but if pass in None then error
-            block_table=torch.empty(
-                (q_all.shape[0], 0), dtype=torch.int32, device=q_all.device
-            ),
-            is_fp8_kvcache=True,
+        # Keep the empty block-table allocation common to stock and candidate.
+        # FlashMLA documents it as unused, but its public ABI still requires a
+        # tensor.  The GLM-5.2 dispatcher accepts only the exact production
+        # M16/M32, FP8-cache, topk=2048 interface and otherwise returns stock.
+        block_table = torch.empty(
+            (q_all.shape[0], 0), dtype=torch.int32, device=q_all.device
         )
+        o = None
+        if use_glm52_hotspot:
+            from sglang.srt.layers.glm52_opt.dispatch import (
+                try_dispatch_flashmla_sparse_decode,
+            )
+
+            o = try_dispatch_flashmla_sparse_decode(
+                q=q_input,
+                k_cache=kv_cache,
+                cache_seqlens=cache_seqlens,
+                head_dim_v=v_head_dim,
+                tile_scheduler_metadata=metadata.flashmla_metadata.flashmla_metadata,
+                num_splits=metadata.flashmla_metadata.num_splits,
+                softmax_scale=sm_scale,
+                indices=indices,
+                block_table=block_table,
+                is_fp8_kvcache=True,
+            )
+        if o is None:
+            o, _ = flash_mla_with_kvcache(
+                q=q_input,
+                k_cache=kv_cache,
+                cache_seqlens=cache_seqlens,
+                head_dim_v=v_head_dim,
+                tile_scheduler_metadata=metadata.flashmla_metadata.flashmla_metadata,
+                num_splits=metadata.flashmla_metadata.num_splits,
+                softmax_scale=sm_scale,
+                indices=indices,
+                block_table=block_table,
+                is_fp8_kvcache=True,
+            )
 
         if target_q_heads != num_q_heads:
             o = o[:, :, :num_q_heads, :]

@@ -1034,7 +1034,7 @@ class Envs:
 
     # GLM-5.2 optimized kernel dispatch (SGLang-DGMK / glm52_opt)
     SGLANG_GLM52_OPT = EnvBool(False)
-    SGLANG_GLM52_OPT_PROFILE = EnvStr("decode_max")
+    SGLANG_GLM52_OPT_PROFILE = EnvStr("serving_safe")
     SGLANG_GLM52_MANIFEST = EnvStr("")
     SGLANG_GLM52_DEEPGEMM_VARIANT = EnvStr("")
     SGLANG_GLM52_ENV_FILE = EnvStr("")
