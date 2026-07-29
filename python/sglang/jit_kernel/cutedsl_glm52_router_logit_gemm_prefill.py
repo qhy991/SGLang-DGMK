@@ -16,6 +16,7 @@ loads, and a direct FP32 global store.
 
 from __future__ import annotations
 
+import os
 from typing import NamedTuple
 
 import cuda.bindings.driver as cuda
@@ -44,7 +45,7 @@ class RouterPrefillTactic(NamedTuple):
     num_ab_stage: int
 
 
-ROUTER_LOGIT_PREFILL_BUILD_IDENTITY = "glm52_router_logit_prefill_fp32_v1"
+ROUTER_LOGIT_PREFILL_BUILD_IDENTITY = "glm52_router_logit_prefill_fp32_v2"
 ROUTER_LOGIT_PREFILL_TACTICS: tuple[RouterPrefillTactic, ...] = (
     RouterPrefillTactic(64, 64, 128, 6),
     RouterPrefillTactic(64, 128, 128, 7),
@@ -53,6 +54,21 @@ ROUTER_LOGIT_PREFILL_TACTICS: tuple[RouterPrefillTactic, ...] = (
 )
 ROUTER_LOGIT_PREFILL_TACTIC_NAMES = ("A", "B", "C", "D")
 _COMPILE_CACHE: dict[tuple[object, ...], object] = {}
+_LAUNCH_BACKEND = os.environ.get("SGLANG_GLM52_ROUTER_PREFILL_LAUNCH", "driver")
+if _LAUNCH_BACKEND not in ("driver", "tvmffi"):
+    raise ValueError(
+        "SGLANG_GLM52_ROUTER_PREFILL_LAUNCH must be driver or tvmffi"
+    )
+_USE_TVM_FFI = _LAUNCH_BACKEND == "tvmffi"
+_EXPECTED_TVM_FFI = "1" if _USE_TVM_FFI else "0"
+for _name in (
+    "CUTE_DSL_ENABLE_TVM_FFI",
+    "CUTE_EXPERIMENTAL_DSL_ENABLE_TVM_FFI",
+):
+    if os.environ.get(_name) != _EXPECTED_TVM_FFI:
+        raise RuntimeError(
+            f"{_LAUNCH_BACKEND} launch requires {_name}={_EXPECTED_TVM_FFI}"
+        )
 
 
 def resolve_router_prefill_tactic(
@@ -134,6 +150,7 @@ def _compiled_router_prefill_kernel(
         True,  # use_2cta
         False,  # use_pdl
         False,  # has_bias
+        _LAUNCH_BACKEND,
     )
     compiled = _COMPILE_CACHE.get(key)
     if compiled is None:
@@ -154,7 +171,7 @@ def _compiled_router_prefill_kernel(
             a_,
             b_,
             c_,
-            make_fake_stream(),
+            make_fake_stream(use_tvm_ffi_env_stream=_USE_TVM_FFI),
         )
         _COMPILE_CACHE[key] = compiled
     return compiled, a_, b_, c_
@@ -177,10 +194,13 @@ def _router_logit_gemm_prefill_run(
         out,
         tactic_id,
     )
-    stream = cuda.CUstream(
-        torch.cuda.current_stream(hidden_states.device).cuda_stream
-    )
-    compiled(a_, b_, c_, stream)
+    if _USE_TVM_FFI:
+        compiled(a_, b_, c_)
+    else:
+        stream = cuda.CUstream(
+            torch.cuda.current_stream(hidden_states.device).cuda_stream
+        )
+        compiled(a_, b_, c_, stream)
     return out
 
 
@@ -220,4 +240,3 @@ def cutedsl_glm52_router_logit_gemm_prefill(
         router_weight,
         tactic_id,
     )
-
