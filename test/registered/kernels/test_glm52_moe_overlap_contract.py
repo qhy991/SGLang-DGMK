@@ -1,7 +1,8 @@
 import unittest
 from contextlib import contextmanager, nullcontext
+from functools import partial
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import torch
 
@@ -66,10 +67,13 @@ class TestGlm52MoeOverlapContract(unittest.TestCase):
         recipe_a=None,
         recipe_b=None,
         max_block_n=256,
+        w2_bm16_result=None,
+        w2_bm16_eligible=False,
     ):
         events = []
         fake_deep_gemm = _FakeDeepGemm(stock_return, events)
         replacement_calls = []
+        w2_bm16_calls = []
         configured_sms = []
 
         @contextmanager
@@ -86,7 +90,26 @@ class TestGlm52MoeOverlapContract(unittest.TestCase):
             replacement_calls.append((args, kwargs))
             return replacement_result
 
+        def w2_bm16_replacement(*args, **kwargs):
+            w2_bm16_calls.append((args, kwargs))
+            if w2_bm16_result is True:
+                events.append("w2_bm16_call")
+            return w2_bm16_result
+
         lhs, rhs, out, masked_m = _inputs()
+        gemm = entrypoint.grouped_gemm_nt_f8f8bf16_masked
+        if w2_bm16_result is not None:
+            layer_contract = SimpleNamespace(
+                callsite_checked=True,
+                callsite_eligible=w2_bm16_eligible,
+            )
+            gemm = partial(
+                entrypoint._grouped_gemm_nt_f8f8bf16_masked_w2_bm16,
+                layer_contract,
+                SimpleNamespace(),
+                Mock(side_effect=AssertionError("latched ABI was rescanned")),
+                w2_bm16_replacement,
+            )
         with (
             patch.object(entrypoint, "deep_gemm", fake_deep_gemm, create=True),
             patch.object(entrypoint, "_ensure_cuda", side_effect=lambda value: value),
@@ -117,7 +140,7 @@ class TestGlm52MoeOverlapContract(unittest.TestCase):
             ),
             patch.object(dispatch, "try_dispatch_moe_masked", side_effect=replacement),
         ):
-            result = entrypoint.grouped_gemm_nt_f8f8bf16_masked(
+            result = gemm(
                 lhs,
                 rhs,
                 out,
@@ -138,6 +161,7 @@ class TestGlm52MoeOverlapContract(unittest.TestCase):
             events=events,
             configured_sms=configured_sms,
             replacement_calls=replacement_calls,
+            w2_bm16_calls=w2_bm16_calls,
             stock_calls=fake_deep_gemm.calls,
         )
 
@@ -149,8 +173,8 @@ class TestGlm52MoeOverlapContract(unittest.TestCase):
         self.assertIs(args[3], run.masked_m)
         self.assertEqual(args[4], 4)
 
-    def test_overlap_bypasses_replacement_and_preserves_return_and_sms_scope(self):
-        sentinel = object()
+    def test_overlap_bypasses_replacement_and_preserves_tuple_and_sms_scope(self):
+        sentinel = (128, 7)
         signal = object()
         overlap_args = SimpleNamespace(num_sms=116, signal=signal)
         run = self._run_wrapper(
@@ -158,10 +182,13 @@ class TestGlm52MoeOverlapContract(unittest.TestCase):
             stock_return=sentinel,
             overlap_args=overlap_args,
             max_block_n=160,
+            w2_bm16_result=False,
+            w2_bm16_eligible=True,
         )
 
         self.assertIs(run.result, sentinel)
         self.assertEqual(run.replacement_calls, [])
+        self.assertEqual(run.w2_bm16_calls, [])
         self.assertEqual(run.configured_sms, [116])
         self.assertEqual(run.events, ["sms_enter", "stock_call", "sms_exit"])
         self.assertEqual(len(run.stock_calls), 1)
@@ -177,10 +204,13 @@ class TestGlm52MoeOverlapContract(unittest.TestCase):
             stock_return=None,
             recipe_a=(1, 128),
             recipe_b=(128, 128),
+            w2_bm16_result=False,
+            w2_bm16_eligible=True,
         )
 
         self.assertIsNone(run.result)
         self.assertEqual(run.replacement_calls, [])
+        self.assertEqual(run.w2_bm16_calls, [])
         self.assertEqual(run.configured_sms, [None])
         self.assertEqual(len(run.stock_calls), 1)
         self._assert_stock_positional_abi(run.stock_calls[0], run)
@@ -197,6 +227,36 @@ class TestGlm52MoeOverlapContract(unittest.TestCase):
         self.assertEqual(run.stock_calls, [])
         self.assertEqual(run.configured_sms, [None])
         self.assertEqual(run.events, ["sms_enter", "replacement_call", "sms_exit"])
+
+    def test_scoped_w2_bm16_preserves_stock_none_return_contract(self):
+        run = self._run_wrapper(
+            replacement_result=True,
+            stock_return=object(),
+            w2_bm16_result=True,
+            w2_bm16_eligible=True,
+        )
+
+        self.assertIsNone(run.result)
+        self.assertEqual(len(run.w2_bm16_calls), 1)
+        self.assertEqual(run.replacement_calls, [])
+        self.assertEqual(run.stock_calls, [])
+        self.assertEqual(run.configured_sms, [None])
+        self.assertEqual(run.events, ["sms_enter", "w2_bm16_call", "sms_exit"])
+
+    def test_requested_but_ineligible_bypasses_legacy_replacement(self):
+        run = self._run_wrapper(
+            replacement_result=True,
+            stock_return=None,
+            w2_bm16_result=False,
+            w2_bm16_eligible=True,
+        )
+
+        self.assertIsNone(run.result)
+        self.assertEqual(len(run.w2_bm16_calls), 1)
+        self.assertEqual(run.replacement_calls, [])
+        self.assertEqual(len(run.stock_calls), 1)
+        self._assert_stock_positional_abi(run.stock_calls[0], run)
+        self.assertEqual(run.stock_calls[0][1], {})
 
     def test_eligible_replacement_decline_has_no_overlap_keywords(self):
         sentinel = object()
@@ -337,6 +397,40 @@ class TestGlm52MoeOverlapContract(unittest.TestCase):
         self.assertEqual(fake_deep_gemm.get_num_sms(), 117)
         self.assertEqual(fake_deep_gemm.get_tc_util(), 93)
 
+    def test_outer_num_sms_override_forces_w2_to_stock(self):
+        events = []
+        fake_deep_gemm = _FakeDeepGemm(None, events)
+        fake_deep_gemm.get_num_sms = Mock(return_value=148)
+        fake_deep_gemm.set_num_sms = Mock()
+        candidate = Mock(return_value=True)
+        lhs, rhs, out, masked_m = _inputs()
+        armed = partial(
+            entrypoint._grouped_gemm_nt_f8f8bf16_masked_w2_bm16,
+            SimpleNamespace(callsite_checked=True, callsite_eligible=True),
+            SimpleNamespace(),
+            Mock(side_effect=AssertionError("latched ABI was rescanned")),
+            candidate,
+        )
+        with (
+            patch.object(entrypoint, "ENABLE_JIT_DEEPGEMM", True),
+            patch.object(entrypoint, "deep_gemm", fake_deep_gemm, create=True),
+            patch.object(entrypoint, "_ensure_cuda", side_effect=lambda value: value),
+            patch.object(entrypoint, "_sanity_check_input"),
+            patch.object(
+                entrypoint.compile_utils,
+                "deep_gemm_execution_hook",
+                return_value=nullcontext(),
+            ),
+            entrypoint.configure_deep_gemm_num_sms(116),
+        ):
+            self.assertIsNone(
+                armed(lhs, rhs, out, masked_m, expected_m=4)
+            )
+        candidate.assert_not_called()
+        self.assertEqual(len(fake_deep_gemm.calls), 1)
+        fake_deep_gemm.set_num_sms.assert_has_calls(
+            [unittest.mock.call(116), unittest.mock.call(148)]
+        )
 
 if __name__ == "__main__":
     unittest.main()

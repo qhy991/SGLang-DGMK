@@ -8,7 +8,7 @@ import os
 import threading
 from contextlib import contextmanager
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 import torch
 from sglang.srt.layers.glm52_opt import config
@@ -32,7 +32,10 @@ _HIT_LOCK = threading.Lock()
 _HIT_COUNTS: dict[str, int] = {}
 _MISS_COUNTS: dict[str, int] = {}
 _HIT_FILE = Path(
-    os.environ.get("SGLANG_GLM52_OPT_HIT_FILE", "/home/ubuntu/wwxq/cache/sglang/glm52_opt_hits.json")
+    os.environ.get(
+        "SGLANG_GLM52_OPT_HIT_FILE",
+        "/home/ubuntu/wwxq/cache/sglang/glm52_opt_hits.json",
+    )
 )
 
 
@@ -507,6 +510,56 @@ def try_dispatch_fp8_gemm(
     if bias is not None:
         out = out + bias
     return out.view(*input_2d.shape[:-1], weight.shape[0])
+
+
+def try_dispatch_moe_w2_bm16(
+    contract: Any,
+    lhs: Tuple[torch.Tensor, torch.Tensor],
+    rhs: Tuple[torch.Tensor, torch.Tensor],
+    out: torch.Tensor,
+    masked_m: torch.Tensor,
+    expected_m: int,
+    *,
+    callsite_eligible: bool,
+) -> bool:
+    """Return False before launch or True after one committed launch."""
+    forward_state = (
+        contract.current_forward_state() if contract is not None else None
+    )
+    if (
+        contract is None
+        or not callsite_eligible
+        or get_op_name() != "moe_down_proj"
+        or forward_state is None
+        or not forward_state[0].is_decode()
+        or not (
+            (
+                int(forward_state[1]) == 16
+                and int(expected_m) in (4, 5)
+            )
+            or (
+                int(forward_state[1]) == 32
+                and int(expected_m) in (8, 9)
+            )
+        )
+    ):
+        return False
+
+    # Crossing this line commits to one candidate launch. Exceptions and return
+    # contract violations propagate; stock must never execute afterward.
+    result = contract.launch(
+        lhs,
+        rhs,
+        out,
+        masked_m,
+        int(expected_m),
+        masked_block_m_override=16,
+    )
+    if result is not None:
+        raise RuntimeError(
+            "W2/BM16 candidate violated the stock non-overlap None return contract"
+        )
+    return True
 
 
 def try_dispatch_moe_masked(

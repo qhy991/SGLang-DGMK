@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import contextlib
 import datetime
+import functools
 import gc
 import inspect
 import logging
@@ -290,6 +291,21 @@ def add_mla_attention_backend(backend_name):
 
 # Detect stragger ranks in model loading
 UNBALANCED_MODEL_LOADING_TIMEOUT_S = 480  # leave more time for post data processing
+
+
+def _arm_w2_forward_context(model_runner, context_factory):
+    """Wrap only an explicitly armed runner; leave OPT0's hot method untouched."""
+    stock_forward_raw = model_runner._forward_raw
+
+    @functools.wraps(stock_forward_raw)
+    def armed_forward_raw(forward_batch, *args, **kwargs):
+        with context_factory(
+            forward_batch.forward_mode,
+            int(forward_batch.input_ids.shape[0]),
+        ):
+            return stock_forward_raw(forward_batch, *args, **kwargs)
+
+    model_runner._forward_raw = armed_forward_raw
 
 
 logger = logging.getLogger(__name__)
@@ -591,7 +607,19 @@ class ModelRunner(ModelRunnerKVCacheMixin):
 
         # Update deep gemm configure
         if deep_gemm_wrapper.ENABLE_JIT_DEEPGEMM:
-            deep_gemm_wrapper.update_deep_gemm_config(gpu_id, server_args)
+            w2_bm16_forward_context = (
+                deep_gemm_wrapper.update_deep_gemm_config(
+                    gpu_id, server_args
+                )
+            )
+            if w2_bm16_forward_context is not None:
+                self._w2_bm16_forward_context = (
+                    w2_bm16_forward_context
+                )
+                _arm_w2_forward_context(
+                    self,
+                    w2_bm16_forward_context,
+                )
 
         # Load an explicitly requested GLM-5.2 hotspot provider only after the
         # worker owns its CUDA device and before model warmup / graph capture.

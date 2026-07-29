@@ -1,7 +1,10 @@
 import importlib
+import json
 import logging
 from contextlib import contextmanager
-from typing import Any, Optional, Tuple
+from contextvars import ContextVar
+from functools import partial
+from typing import Any, Callable, Optional, Tuple
 
 import torch
 
@@ -53,6 +56,18 @@ if ENABLE_JIT_DEEPGEMM:
     from deep_gemm.utils.layout import get_mn_major_tma_aligned_tensor  # noqa: F401
 
 _SANITY_CHECK = envs.SGLANG_DEEPGEMM_SANITY_CHECK.get()
+_NUM_SMS_OVERRIDE_ACTIVE: ContextVar[bool] = ContextVar(
+    "deep_gemm_num_sms_override_active", default=False
+)
+_W2_BM16_PROFILE_REQUESTED = False
+_W2_BM16_PREPARED_CONTRACT: Any = None
+_W2_BM16_DISPATCH: Optional[Callable[..., bool]] = None
+_W2_BM16_CALLSITE_PREPARE: Optional[Callable[..., bool]] = None
+
+
+def w2_bm16_profile_requested() -> bool:
+    """Cheap setup-time flag; default-off callers never import candidate code."""
+    return _W2_BM16_PROFILE_REQUESTED
 
 
 def _glm52_moe_dispatch_compatible(
@@ -148,6 +163,151 @@ def grouped_gemm_nt_f8f8bf16_masked(
                     else {}
                 ),
             )
+
+
+def _grouped_gemm_nt_f8f8bf16_masked_w2_bm16(
+    layer_contract: Any,
+    runtime_contract: Any,
+    callsite_prepare: Optional[Callable[..., bool]],
+    candidate_dispatch: Optional[Callable[..., bool]],
+    lhs: Tuple[torch.Tensor, torch.Tensor],
+    rhs: Tuple[torch.Tensor, torch.Tensor],
+    out: torch.Tensor,
+    masked_m: torch.Tensor,
+    expected_m: int,
+    overlap_args: Optional[Any] = None,
+    max_block_n: int = 256,
+    recipe_a: Optional[Tuple[int, int]] = None,
+    recipe_b: Optional[Tuple[int, int]] = None,
+):
+    """Armed W2 down-GEMM callable; never installed on the default runner."""
+    num_groups, _, k = lhs[0].shape
+    _, n, _ = rhs[0].shape
+    kernel_type = compile_utils.DeepGemmKernelType.GROUPED_GEMM_NT_F8F8BF16_MASKED
+
+    _sanity_check_input(lhs)
+    _sanity_check_input(rhs)
+
+    lhs = _ensure_cuda(lhs)
+    rhs = _ensure_cuda(rhs)
+
+    with compile_utils.deep_gemm_execution_hook(
+        expected_m, n, k, num_groups, kernel_type
+    ):
+        with configure_deep_gemm_num_sms(
+            overlap_args.num_sms if overlap_args is not None else None
+        ):
+            compatible = (
+                overlap_args is None
+                and recipe_a is None
+                and recipe_b is None
+                and not _NUM_SMS_OVERRIDE_ACTIVE.get()
+            )
+            callsite_eligible = False
+            if (
+                compatible
+                and layer_contract is not None
+                and runtime_contract is not None
+                and callsite_prepare is not None
+                and candidate_dispatch is not None
+            ):
+                if layer_contract.callsite_checked:
+                    callsite_eligible = layer_contract.callsite_eligible
+                else:
+                    callsite_eligible = callsite_prepare(
+                        layer_contract,
+                        lhs,
+                        rhs,
+                        out,
+                        masked_m,
+                        expected_m=expected_m,
+                        recipe_a=recipe_a,
+                        recipe_b=recipe_b,
+                        overlap_args=overlap_args,
+                    )
+                if callsite_eligible and candidate_dispatch(
+                    runtime_contract,
+                    lhs,
+                    rhs,
+                    out,
+                    masked_m,
+                    expected_m,
+                    callsite_eligible=True,
+                ):
+                    # The stock no-overlap ABI writes `out` and returns None.
+                    return None
+
+            # An armed-profile decline is final before launch: go directly to
+            # authoritative stock and suppress the legacy generic replacement.
+            fp4_kwargs = {}
+            if recipe_a is not None:
+                fp4_kwargs["recipe_a"] = recipe_a
+            if recipe_b is not None:
+                fp4_kwargs["recipe_b"] = recipe_b
+            return deep_gemm.fp8_m_grouped_gemm_nt_masked(
+                lhs,
+                rhs,
+                out,
+                masked_m,
+                expected_m,
+                **fp4_kwargs,
+                **(
+                    dict(
+                        enable_overlap=True,
+                        max_block_n=max_block_n,
+                        signal=overlap_args.signal,
+                    )
+                    if overlap_args is not None
+                    else {}
+                ),
+            )
+
+
+def configure_w2_bm16_masked_down_gemm(
+    runner_core: Any,
+    *,
+    w2_weight: torch.Tensor,
+    w2_scale: torch.Tensor,
+    block_shape: Optional[list[int]],
+    deep_gemm_backend: bool,
+    is_fp4_experts: bool,
+    use_mxfp8: bool,
+) -> None:
+    """Bind an armed-only per-runner callable after immutable weights exist."""
+    if not _W2_BM16_PROFILE_REQUESTED:
+        return
+
+    layer_contract = None
+    if (
+        _W2_BM16_PREPARED_CONTRACT is not None
+        and _W2_BM16_CALLSITE_PREPARE is not None
+        and _W2_BM16_DISPATCH is not None
+    ):
+        try:
+            from sglang.srt.layers.glm52_opt.experimental_deepgemm import (
+                create_w2_bm16_layer_contract,
+            )
+
+            layer_contract = create_w2_bm16_layer_contract(
+                w2_weight=w2_weight,
+                w2_scale=w2_scale,
+                block_shape=block_shape,
+                deep_gemm_backend=deep_gemm_backend,
+                is_fp4_experts=is_fp4_experts,
+                use_mxfp8=use_mxfp8,
+            )
+        except Exception as exc:
+            logger.warning("GLM-5.2 W2/BM16 layer preparation skipped: %s", exc)
+
+    runner_core.set_masked_down_gemm(
+        partial(
+            _grouped_gemm_nt_f8f8bf16_masked_w2_bm16,
+            layer_contract,
+            _W2_BM16_PREPARED_CONTRACT,
+            _W2_BM16_CALLSITE_PREPARE,
+            _W2_BM16_DISPATCH,
+        )
+    )
 
 
 def _ensure_cuda(
@@ -310,6 +470,17 @@ def tf32_hc_prenorm_gemm(
 
 
 def update_deep_gemm_config(gpu_id: int, server_args: ServerArgs):
+    global _W2_BM16_PROFILE_REQUESTED
+    global _W2_BM16_PREPARED_CONTRACT
+    global _W2_BM16_DISPATCH
+    global _W2_BM16_CALLSITE_PREPARE
+
+    _W2_BM16_PROFILE_REQUESTED = False
+    _W2_BM16_PREPARED_CONTRACT = None
+    _W2_BM16_DISPATCH = None
+    _W2_BM16_CALLSITE_PREPARE = None
+    w2_forward_context = None
+
     # deep_gemm.set_pdl can initialize CUDA state, so run it only after the
     # scheduler/TP worker has been forked and assigned a GPU.
     if envs.SGLANG_DEEPGEMM_PDL.get() and hasattr(deep_gemm, "set_pdl"):
@@ -364,9 +535,39 @@ def update_deep_gemm_config(gpu_id: int, server_args: ServerArgs):
 
     # Opt-in GLM-5.2 experimental DeepGEMM overlay (does not replace stock import).
     try:
-        from sglang.srt.layers.glm52_opt.config import deepgemm_variant, is_enabled
+        from sglang.srt.layers.glm52_opt.config import (
+            deepgemm_variant,
+            is_enabled,
+            w2_bm16_enabled,
+        )
 
-        if not initialization_requested() and is_enabled() and deepgemm_variant():
+        if w2_bm16_enabled():
+            # Arm before any fallible candidate import/preparation. If setup
+            # fails, all W2 calls explicitly choose stock and do not enter a
+            # legacy experimental dispatcher.
+            _W2_BM16_PROFILE_REQUESTED = True
+            from sglang.srt.layers.glm52_opt.experimental_deepgemm import (
+                prepare_w2_bm16_callsite_contract,
+                prepare_w2_bm16_deep_gemm,
+            )
+            from sglang.srt.layers.glm52_opt.dispatch import (
+                try_dispatch_moe_w2_bm16,
+            )
+
+            contract = prepare_w2_bm16_deep_gemm(gpu_id)
+            _W2_BM16_PREPARED_CONTRACT = contract
+            _W2_BM16_DISPATCH = try_dispatch_moe_w2_bm16
+            _W2_BM16_CALLSITE_PREPARE = prepare_w2_bm16_callsite_contract
+            w2_forward_context = contract.forward_context
+            logger.info(
+                "GLM-5.2 W2/BM16 DeepGEMM runtime prepared: %s",
+                json.dumps(contract.evidence(), sort_keys=True),
+            )
+        elif (
+            not initialization_requested()
+            and is_enabled()
+            and deepgemm_variant()
+        ):
             from sglang.srt.layers.glm52_opt.experimental_deepgemm import (
                 get_experimental_deep_gemm,
             )
@@ -378,6 +579,7 @@ def update_deep_gemm_config(gpu_id: int, server_args: ServerArgs):
             )
     except Exception as exc:
         logger.warning("GLM-5.2 DeepGEMM overlay load skipped: %s", exc)
+    return w2_forward_context
 
 
 @contextmanager
@@ -386,11 +588,13 @@ def configure_deep_gemm_num_sms(num_sms):
         yield
     else:
         original_num_sms = deep_gemm.get_num_sms()
+        token = _NUM_SMS_OVERRIDE_ACTIVE.set(True)
         deep_gemm.set_num_sms(num_sms)
         try:
             yield
         finally:
             deep_gemm.set_num_sms(original_num_sms)
+            _NUM_SMS_OVERRIDE_ACTIVE.reset(token)
 
 
 def _sanity_check_input(x_fp8: Tuple[torch.Tensor, torch.Tensor]):
