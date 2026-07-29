@@ -36,19 +36,10 @@ GLM52_ROUTER_TACTICS: Final[dict[str, Glm52RouterTactic]] = {
         backend="triton",
         block_m=4,
         num_warps=4,
-        description="four rows per four-warp CTA; generated layout must prove row ownership",
-    ),
-    "C1": Glm52RouterTactic(
-        backend="cuda",
-        block_m=4,
-        num_warps=4,
-        description="native CUDA four rows per CTA; one row owned by each warp",
-    ),
-    "C2": Glm52RouterTactic(
-        backend="cuda",
-        block_m=8,
-        num_warps=8,
-        description="native CUDA eight rows per CTA; one row owned by each warp",
+        description=(
+            "four rows per four-warp CTA; generated layout must prove "
+            "independent row reductions"
+        ),
     ),
 }
 
@@ -73,8 +64,8 @@ def _validate_glm52_router_abi(
         raise TypeError("GLM-5.2 router scores must be FP32")
     if bias.dtype != torch.float32:
         raise TypeError("GLM-5.2 router correction bias must be FP32")
-    if scores.ndim != 2 or tuple(scores.shape) not in ((16, 256), (32, 256)):
-        raise ValueError("GLM-5.2 router scores must have exact shape [16|32, 256]")
+    if scores.ndim != 2 or tuple(scores.shape) != (4096, 256):
+        raise ValueError("GLM-5.2 prefill router scores must have exact shape [4096, 256]")
     if tuple(scores.stride()) != (256, 1) or scores.storage_offset() != 0:
         raise ValueError(
             "GLM-5.2 router scores must use the production contiguous row-major layout"
@@ -95,12 +86,13 @@ def glm52_router_sigmoid_topk(
     *,
     tactic: str,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Exact-shape, default-off GLM-5.2 sigmoid no-aux TopK candidate.
+    """Exact-shape, default-off GLM-5.2 prefill sigmoid no-aux TopK candidate.
 
     The observable ABI matches the active SGLang ``moe_fused_gate`` wrapper:
-    FP32 ``[M,256]`` scores and FP32 ``[256]`` correction bias produce newly
-    allocated FP32 weights and int32 ordered expert IDs with shape ``[M,8]``.
-    The fixed boundary does not apply routed scale 2.5 inside TopK.
+    FP32 ``[4096,256]`` scores and FP32 ``[256]`` correction bias produce
+    newly allocated FP32 weights and int32 ordered expert IDs with shape
+    ``[4096,8]``. The fixed boundary does not apply routed scale 2.5 inside
+    TopK.
 
     Unsupported metadata raises before any candidate launch.  There is no
     candidate-to-stock fallback.
