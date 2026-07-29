@@ -1,0 +1,159 @@
+diff --git a/csrc/apis/gemm.hpp b/csrc/apis/gemm.hpp
+index ccd46b289..1ffdc64fc 100644
+--- a/csrc/apis/gemm.hpp
++++ b/csrc/apis/gemm.hpp
+@@ -256,7 +256,8 @@ static void m_grouped_fp8_fp4_gemm_nt_masked(const std::pair<torch::Tensor, torc
+                                              std::optional<std::tuple<int, int>> recipe_a,
+                                              std::optional<std::tuple<int, int>> recipe_b,
+                                              const std::string& compiled_dims,
+-                                             const bool& disable_ue8m0_cast) {
++                                             const bool& disable_ue8m0_cast,
++                                             const std::optional<std::tuple<int, int, int, int, int>>& w13_config = std::nullopt) {
+     // Shape must be `[G, M, K] @ [G, N, K].mT`
+     const auto major_a = get_major_type_ab(a.first);
+     const auto major_b = get_major_type_ab(b.first);
+@@ -284,13 +285,14 @@ static void m_grouped_fp8_fp4_gemm_nt_masked(const std::pair<torch::Tensor, torc
+ 
+     // Dispatch implementation
+     if (arch_major == 9 and sfa.scalar_type() == torch::kFloat) {
++        DG_HOST_ASSERT(not w13_config.has_value());
+         const auto major_sfb = get_major_type_ab(sfb);
+         sm90_m_grouped_fp8_gemm_masked_1d2d(a.first, sfa, b.first, sfb, d, masked_m,
+                                             num_groups, m, n, k, expected_m, major_a, major_b, major_sfb, compiled_dims);
+     } else if (arch_major == 10 and sfa.scalar_type() == torch::kInt) {
+         sm100_m_grouped_fp8_fp4_gemm_masked_1d1d(a.first, sfa, b.first, sfb, d, masked_m,
+                                                  num_groups, m, n, k, expected_m, gran_k_a, gran_k_b,
+-                                                 major_a, major_b, compiled_dims);
++                                                 major_a, major_b, compiled_dims, w13_config);
+     } else {
+         DG_HOST_UNREACHABLE("Unsupported architecture or scaling factor types");
+     }
+@@ -693,7 +695,8 @@ static void register_apis(pybind11::module_& m) {
+           py::arg("a"), py::arg("b"), py::arg("d"), py::arg("masked_m"),
+           py::arg("expected_m"), py::arg("recipe") = std::nullopt,
+           py::arg("recipe_a") = std::nullopt, py::arg("recipe_b") = std::nullopt,
+-          py::arg("compiled_dims") = "nk", py::arg("disable_ue8m0_cast") = false);
++          py::arg("compiled_dims") = "nk", py::arg("disable_ue8m0_cast") = false,
++          py::arg("w13_config") = std::nullopt);
+     m.def("k_grouped_fp8_gemm_tn_contiguous", &k_grouped_fp8_gemm_tn_contiguous,
+           py::arg("a"), py::arg("b"), py::arg("d"),
+           py::arg("ks_cpu"), py::arg("grouped_layout"),
+diff --git a/csrc/jit_kernels/heuristics/sm100.hpp b/csrc/jit_kernels/heuristics/sm100.hpp
+index c8e9e2e07..5bb857ad8 100644
+--- a/csrc/jit_kernels/heuristics/sm100.hpp
++++ b/csrc/jit_kernels/heuristics/sm100.hpp
+@@ -173,7 +173,11 @@ struct SM100ArchSpec {
+         };
+     }
+ 
+-    static PipelineConfig get_pipeline_config(const GemmDesc& desc, const Layout& layout, const StorageConfig& storage_config) {
++    static PipelineConfig get_pipeline_config(
++        const GemmDesc& desc,
++        const Layout& layout,
++        const StorageConfig& storage_config,
++        const std::optional<int>& num_stages_override = std::nullopt) {
+         constexpr int kNumMaxStages = 32;
+ 
+         // C/D for TMA stores
+@@ -207,9 +211,11 @@ struct SM100ArchSpec {
+         // Calculate stages
+         int smem_extra = smem_cd + smem_barriers + smem_tmem_ptr;
+         int smem_per_stage = smem_a_per_stage + smem_b_per_stage + smem_sfa_per_stage + smem_sfb_per_stage;
+-        int num_stages = std::min(
++        const int max_num_stages = std::min(
+             (smem_capacity - smem_extra) / smem_per_stage,
+             kNumMaxStages);
++        const int num_stages = num_stages_override.value_or(max_num_stages);
++        DG_HOST_ASSERT(num_stages > 0 and num_stages <= max_num_stages);
+         return {
+             smem_extra + num_stages * smem_per_stage,
+             num_stages
+diff --git a/csrc/jit_kernels/impls/sm100_fp8_fp4_gemm_1d1d.hpp b/csrc/jit_kernels/impls/sm100_fp8_fp4_gemm_1d1d.hpp
+index b203bb3ef..71f69764b 100644
+--- a/csrc/jit_kernels/impls/sm100_fp8_fp4_gemm_1d1d.hpp
++++ b/csrc/jit_kernels/impls/sm100_fp8_fp4_gemm_1d1d.hpp
+@@ -249,7 +249,8 @@ static void sm100_m_grouped_fp8_fp4_gemm_masked_1d1d(const torch::Tensor& a, con
+                                                      const int& expected_m,
+                                                      const int& gran_k_a, const int& gran_k_b,
+                                                      const cute::UMMA::Major& major_a, const cute::UMMA::Major& major_b,
+-                                                     const std::string& compiled_dims) {
++                                                     const std::string& compiled_dims,
++                                                     const std::optional<std::tuple<int, int, int, int, int>>& w13_config) {
+     const auto desc = GemmDesc {
+         .gemm_type = GemmType::MGroupedMasked,
+         .kernel_type = KernelType::Kernel1D1D,
+@@ -263,7 +264,29 @@ static void sm100_m_grouped_fp8_fp4_gemm_masked_1d1d(const torch::Tensor& a, con
+         .compiled_dims = compiled_dims,
+         .expected_m = expected_m, .expected_n = n, .expected_k = k, .expected_num_groups = num_groups
+     };
+-    const auto config = get_best_config<SM100ArchSpec>(desc);
++    const auto config = [&]() {
++        if (not w13_config.has_value())
++            return get_best_config<SM100ArchSpec>(desc);
++
++        const auto [block_m, block_n, block_k, num_stages, cluster_n] = w13_config.value();
++        DG_HOST_ASSERT(num_groups == 32 and m == 1024 and n == 4096 and k == 6144);
++        DG_HOST_ASSERT(expected_m == 4 or expected_m == 5 or expected_m == 8 or expected_m == 9);
++        DG_HOST_ASSERT(a.scalar_type() == torch::kFloat8_e4m3fn);
++        DG_HOST_ASSERT(b.scalar_type() == torch::kFloat8_e4m3fn);
++        DG_HOST_ASSERT(sfa.scalar_type() == torch::kInt and sfb.scalar_type() == torch::kInt);
++        DG_HOST_ASSERT(block_m == 32 or block_m == 64 or block_m == 96 or block_m == 128);
++        DG_HOST_ASSERT(block_n == 128 and block_k == 128);
++        DG_HOST_ASSERT(cluster_n == 1 or cluster_n == 2);
++        DG_HOST_ASSERT(desc.num_sms % cluster_n == 0);
++
++        const auto layout = Layout{/*swap_ab=*/true, block_m, block_n, block_k,
++                                   /*cluster_m=*/1, cluster_n};
++        const auto storage_config = SM100ArchSpec::get_storage_config(desc, layout);
++        const auto pipeline_config = SM100ArchSpec::get_pipeline_config(
++            desc, layout, storage_config, num_stages);
++        const auto launch_config = SM100ArchSpec::get_launch_config(desc, layout);
++        return GemmConfig{layout, storage_config, pipeline_config, launch_config};
++    }();
+ 
+     // Create tensor descriptors
+     const auto tensor_map_a = make_tma_a_desc(major_a, a, m, k,
+diff --git a/csrc/tvm_ffi_api.cpp b/csrc/tvm_ffi_api.cpp
+index 82313cf9c..ea2328e74 100644
+--- a/csrc/tvm_ffi_api.cpp
++++ b/csrc/tvm_ffi_api.cpp
+@@ -355,16 +355,21 @@ void dg_m_grouped_fp8_fp4_gemm_nt_masked(TensorView a, TensorView a_sf,
+                                  Optional<Tuple<int64_t, int64_t>> recipe_a,
+                                  Optional<Tuple<int64_t, int64_t>> recipe_b,
+                                  std::string compiled_dims,
+-                                 bool disable_ue8m0_cast) {
++                                 bool disable_ue8m0_cast,
++                                 Optional<Tuple<int64_t, int64_t, int64_t, int64_t, int64_t>> w13_config) {
+     auto recipe_opt = recipe.has_value()? std::make_optional(std::make_tuple((int)recipe.value().get<0>(), (int)recipe.value().get<1>(), (int)recipe.value().get<2>())) : std::nullopt;
+     auto recipe_a_opt = recipe_a.has_value() ? std::make_optional(std::make_tuple((int)recipe_a.value().get<0>(), (int)recipe_a.value().get<1>())) : std::nullopt;
+     auto recipe_b_opt = recipe_b.has_value() ? std::make_optional(std::make_tuple((int)recipe_b.value().get<0>(), (int)recipe_b.value().get<1>())) : std::nullopt;
++    auto w13_config_opt = w13_config.has_value() ? std::make_optional(std::make_tuple(
++        (int)w13_config.value().get<0>(), (int)w13_config.value().get<1>(),
++        (int)w13_config.value().get<2>(), (int)w13_config.value().get<3>(),
++        (int)w13_config.value().get<4>())) : std::nullopt;
+     gemm::m_grouped_fp8_fp4_gemm_nt_masked(
+         std::make_pair(convert_to_torch_tensor(a), convert_to_torch_tensor(a_sf)),
+         std::make_pair(convert_to_torch_tensor(b), convert_to_torch_tensor(b_sf)),
+         convert_to_torch_tensor(d), convert_to_torch_tensor(masked_m),
+         (int) expected_m, recipe_opt, recipe_a_opt, recipe_b_opt,
+-        compiled_dims, disable_ue8m0_cast
++        compiled_dims, disable_ue8m0_cast, w13_config_opt
+     );
+ }
+ 
+diff --git a/sgl_deep_gemm/__init__.py b/sgl_deep_gemm/__init__.py
+index 4d94f6bdd..2f9a106ff 100644
+--- a/sgl_deep_gemm/__init__.py
++++ b/sgl_deep_gemm/__init__.py
+@@ -232,9 +232,9 @@ try:
+ 
+     get_mk_alignment_for_contiguous_layout = _C.get_mk_alignment_for_contiguous_layout
+ 
+-    def m_grouped_fp8_fp4_gemm_nt_masked(a, b, d, masked_m, expected_m, recipe=None, recipe_a=None, recipe_b=None, compiled_dims='nk', disable_ue8m0_cast=False):
++    def m_grouped_fp8_fp4_gemm_nt_masked(a, b, d, masked_m, expected_m, recipe=None, recipe_a=None, recipe_b=None, compiled_dims='nk', disable_ue8m0_cast=False, w13_config=None):
+         (a, a_sf), (b, b_sf) = _parse_tensor_or_tuple(a), _parse_tensor_or_tuple(b)
+-        return _C.m_grouped_fp8_fp4_gemm_nt_masked(a, a_sf, b, b_sf, d, masked_m, expected_m, recipe, recipe_a, recipe_b, compiled_dims, disable_ue8m0_cast)
++        return _C.m_grouped_fp8_fp4_gemm_nt_masked(a, a_sf, b, b_sf, d, masked_m, expected_m, recipe, recipe_a, recipe_b, compiled_dims, disable_ue8m0_cast, w13_config)
+ 
+     fp8_m_grouped_gemm_nt_masked = m_grouped_fp8_fp4_gemm_nt_masked
+ 

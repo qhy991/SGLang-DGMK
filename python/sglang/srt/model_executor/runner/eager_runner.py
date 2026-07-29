@@ -30,6 +30,7 @@ from sglang.srt.layers.cp.utils import (
     is_cp_v2_active,
     prepare_cp_forward,
 )
+from sglang.srt.layers.glm52_opt.w13_context import w13_decode_forward_scope
 from sglang.srt.layers.pooler import EmbeddingPoolerOutput
 from sglang.srt.model_executor.cuda_graph_buffer_registry import (
     build_eager_registry,
@@ -247,7 +248,15 @@ class EagerRunner(BaseRunner):
             else contextlib.nullcontext()
         )
 
-        with ctx, pdmux_ctx:
+        with (
+            ctx,
+            pdmux_ctx,
+            w13_decode_forward_scope(
+                forward_batch,
+                int(forward_batch.input_ids.shape[0]),
+                graph_capture=False,
+            ),
+        ):
             return model_runner.model.forward(
                 forward_batch.input_ids,
                 forward_batch.positions,
