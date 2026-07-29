@@ -506,6 +506,9 @@ class DeepGemmRunnerCore(MoeRunnerCore):
 
         # Act.
         topk_ids_rs = running_state.get("topk_ids")
+        routed_num_real_tokens = (
+            int(topk_ids_rs.shape[0]) if topk_ids_rs is not None else None
+        )
         num_real_tokens = (
             topk_ids_rs.shape[0]
             if (
@@ -526,6 +529,7 @@ class DeepGemmRunnerCore(MoeRunnerCore):
             gemm1_alpha=self.config.gemm1_alpha,
             gemm1_clamp_limit=self.config.gemm1_clamp_limit,
             num_real_tokens=num_real_tokens,
+            routed_num_real_tokens=routed_num_real_tokens,
         )
         del gateup_output
 
@@ -944,6 +948,7 @@ def _varlen_deep_gemm_silu_mul_quant(
     gemm1_alpha: Optional[float] = None,
     gemm1_clamp_limit: Optional[float] = None,
     num_real_tokens: Optional[int] = None,
+    routed_num_real_tokens: Optional[int] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     from sglang.kernels.ops.moe.ep_moe_kernels import silu_and_mul_masked_post_quant_fwd
     from sglang.kernels.ops.quantization.fp8_kernel import (
@@ -979,6 +984,32 @@ def _varlen_deep_gemm_silu_mul_quant(
     D = D_2 // 2
     del D_2
     G = D // group_size
+
+    # Task 25 is default-off and exact-ABI only.  Automatic dispatch checks
+    # every host-known semantic field before allocating or launching; a miss
+    # returns None here and the unchanged stock route below remains authoritative.
+    from sglang.srt.layers.glm52_opt.config import swiglu_quant_variant
+
+    glm52_swiglu_variant = swiglu_quant_variant()
+    if glm52_swiglu_variant is not None:
+        from sglang.srt.layers.glm52_opt.swiglu_quant import (
+            maybe_silu_mul_quant_packed,
+        )
+
+        glm52_result = maybe_silu_mul_quant_packed(
+            gateup_output,
+            masked_m,
+            group_size=group_size,
+            topk=topk,
+            num_real_tokens=routed_num_real_tokens,
+            variant=glm52_swiglu_variant,
+            swiglu_limit=swiglu_limit,
+            swizzle=swizzle,
+            gemm1_alpha=gemm1_alpha,
+            gemm1_clamp_limit=gemm1_clamp_limit,
+        )
+        if glm52_result is not None:
+            return glm52_result
 
     # Fused UE8M0 pack needs 4 groups per packed int32 (the G%4 and D guards below).
     if (

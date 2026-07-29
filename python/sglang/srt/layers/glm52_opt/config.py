@@ -31,6 +31,7 @@ _GLM52_ENV_KEYS = frozenset(
         "SGLANG_GLM52_NSYS_SECONDS",
         "SGLANG_GLM52_W13_DECODE_VARIANT",
         "SGLANG_GLM52_W13_DECODE_MANIFEST",
+        "SGLANG_GLM52_SWIGLU_QUANT_VARIANT",
     }
 )
 
@@ -236,6 +237,38 @@ def allow_abi_adapter() -> bool:
     """
     ensure_glm52_env()
     return _truthy("SGLANG_GLM52_ALLOW_ABI_ADAPTER")
+
+
+@lru_cache(maxsize=1)
+def swiglu_quant_variant() -> str | None:
+    """Return the explicitly armed Task-25 decode variant.
+
+    There is intentionally no implicit winner.  Production stays on stock
+    unless OPT, the task-specific profile, the op allowlist, and one exact
+    bounded variant are all selected before worker startup.
+    """
+
+    ensure_glm52_env()
+    if not is_enabled() or profile_name() != "task25_swiglu_quant":
+        return None
+    allow = opt_ops_allowlist()
+    if allow is not None and "moe_swiglu_quant" not in allow:
+        return None
+    variant = os.environ.get("SGLANG_GLM52_SWIGLU_QUANT_VARIANT", "").strip()
+    supported = {
+        "row2048_w8",
+        "split1024_w4",
+        "group512_w1",
+        "cuda_valid_cta",
+    }
+    if not variant:
+        return None
+    if variant not in supported:
+        raise ValueError(
+            "SGLANG_GLM52_SWIGLU_QUANT_VARIANT must be one of "
+            f"{sorted(supported)}, got {variant!r}"
+        )
+    return variant
 
 
 def deepgemm_variant() -> str | None:
