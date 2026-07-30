@@ -13,6 +13,7 @@ from sglang.srt.layers.glm52_opt.context import op_context, set_forward_mode
 from sglang.srt.layers.glm52_opt.dispatch import (
     _moe_hotspot_abi_matches,
     try_dispatch_flashmla_sparse_decode,
+    try_dispatch_flashmla_sparse_prefill,
     try_dispatch_fp8_gemm,
     try_dispatch_moe_masked,
 )
@@ -737,6 +738,253 @@ def test_fused_qkv_a_graph_only_can_be_disabled_for_diagnostic_eager_leaf():
         )
         assert result is not None
         candidate.assert_called_once()
+    finally:
+        set_forward_mode(None)
+        _restore_env(saved)
+
+
+# --------------------------------------------------------------------------
+# FlashMLA sparse PREFILL (dsa_prefill_attn)
+#
+# SGLang's flashmla_kv prefill path reaches the same sm100 head64 FP8 sparse
+# kernel as decode, so the hotspot provider serves it under its own prefill
+# spec.  These contracts pin: the op is recognised but never default-on, the
+# spec is graph-only and prefill-phase, the ABI gate refuses decode shapes and
+# the decode gate refuses prefill shapes, and the graph-only guard declines
+# before any provider launch.
+# --------------------------------------------------------------------------
+
+
+def _prefill_env(**extra: str) -> dict[str, str | None]:
+    names = (
+        "SGLANG_GLM52_OPT",
+        "SGLANG_GLM52_OPT_PROFILE",
+        "SGLANG_GLM52_OPT_OPS",
+        "SGLANG_GLM52_FLASHMLA_PREFILL_GRAPH_ONLY",
+    )
+    saved = {name: os.environ.get(name) for name in names}
+    os.environ["SGLANG_GLM52_OPT"] = "1"
+    os.environ["SGLANG_GLM52_OPT_PROFILE"] = "hotspot_candidates"
+    os.environ["SGLANG_GLM52_OPT_OPS"] = "flashmla_sparse_prefill"
+    os.environ.pop("SGLANG_GLM52_FLASHMLA_PREFILL_GRAPH_ONLY", None)
+    for key, value in extra.items():
+        os.environ[key] = value
+    return saved
+
+
+def test_prefill_flashmla_is_known_but_never_default_selected():
+    """Enabling the hotspot profile for decode must not activate prefill."""
+    names = ("SGLANG_GLM52_OPT_PROFILE", "SGLANG_GLM52_OPT_OPS")
+    saved = {name: os.environ.get(name) for name in names}
+    try:
+        os.environ["SGLANG_GLM52_OPT_PROFILE"] = "hotspot_candidates"
+        os.environ.pop("SGLANG_GLM52_OPT_OPS", None)
+        assert "dsa_prefill_attn" not in config.hotspot_candidate_ops()
+        assert lookup("dsa_prefill_attn", "prefill", m=4096) is None
+        assert [s.op for s in list_enabled("prefill")] == []
+
+        os.environ["SGLANG_GLM52_OPT_OPS"] = "flashmla_sparse_prefill"
+        assert config.hotspot_candidate_ops() == frozenset({"dsa_prefill_attn"})
+        assert [s.op for s in list_enabled("prefill")] == ["dsa_prefill_attn"]
+        # the decode table is untouched by a prefill-only selection
+        assert [s.op for s in list_enabled("decode")] == []
+    finally:
+        _restore_env(saved)
+
+
+def test_prefill_flashmla_spec_abi_and_buckets():
+    saved = _prefill_env()
+    try:
+        for m in (1024, 2048, 4096):
+            spec = lookup("dsa_prefill_attn", "prefill", m=m)
+            assert spec is not None, m
+            assert spec.phase == "prefill"
+            assert spec.kind == "dsa"
+            assert spec.implementation == "hotspot_plugin"
+            assert spec.graph_only is True
+            assert (spec.topk, spec.q_heads, spec.qk_dim, spec.v_dim) == (
+                2048,
+                64,
+                576,
+                512,
+            )
+            assert (spec.page_size, spec.kv_dim) == (64, 656)
+        # decode buckets and every extent outside the locked prefill set
+        # are refused.
+        for m in (16, 32, 512, 4095, 8192):
+            assert lookup("dsa_prefill_attn", "prefill", m=m) is None
+        # the prefill spec is not reachable from the decode phase
+        assert lookup("dsa_prefill_attn", "decode", m=4096) is None
+    finally:
+        _restore_env(saved)
+
+
+def test_prefill_graph_only_env_parsing_is_isolated():
+    names = (
+        "SGLANG_GLM52_FLASHMLA_PREFILL_GRAPH_ONLY",
+        "SGLANG_GLM52_W2_GRAPH_ONLY",
+        "SGLANG_GLM52_O_PROJ_GRAPH_ONLY",
+    )
+    saved = {name: os.environ.get(name) for name in names}
+    try:
+        os.environ.pop("SGLANG_GLM52_FLASHMLA_PREFILL_GRAPH_ONLY", None)
+        assert config.graph_only_enabled("dsa_prefill_attn") is True
+        os.environ["SGLANG_GLM52_FLASHMLA_PREFILL_GRAPH_ONLY"] = "0"
+        assert config.graph_only_enabled("dsa_prefill_attn") is False
+        # sibling ops keep their own switches
+        os.environ["SGLANG_GLM52_W2_GRAPH_ONLY"] = "1"
+        os.environ["SGLANG_GLM52_O_PROJ_GRAPH_ONLY"] = "1"
+        assert config.graph_only_enabled("moe_down_proj") is True
+        assert config.graph_only_enabled("o_proj") is True
+        # decode FlashMLA has no per-op switch here and stays unrestricted
+        assert config.graph_only_enabled("dsa_decode_attn") is True
+    finally:
+        _restore_env(saved)
+
+
+def _prefill_dispatch(*, capturing: bool, m: int = 4096):
+    q = torch.empty((m, 1, 64, 576), dtype=torch.bfloat16)
+    candidate_out = torch.empty((m, 1, 64, 512), dtype=torch.bfloat16)
+    fake = torch.empty(1)
+    with (
+        patch(
+            "sglang.srt.layers.glm52_opt.dispatch._is_cuda_graph_capturing",
+            return_value=capturing,
+        ),
+        patch(
+            "sglang.srt.layers.glm52_opt.dispatch."
+            "_flashmla_prefill_hotspot_abi_matches",
+            return_value=True,
+        ) as abi,
+        patch(
+            "sglang.srt.layers.glm52_opt.dispatch._tensor_contract",
+            return_value=True,
+        ),
+        patch(
+            "sglang.srt.layers.glm52_opt.dispatch.run_flashmla_sparse_prefill",
+            return_value=(candidate_out, fake),
+        ) as candidate,
+        patch("sglang.srt.layers.glm52_opt.dispatch._record_hit") as hit,
+    ):
+        result = try_dispatch_flashmla_sparse_prefill(
+            q=q,
+            k_cache=fake,
+            cache_seqlens=fake,
+            head_dim_v=512,
+            tile_scheduler_metadata=fake,
+            num_splits=fake,
+            softmax_scale=0.0625,
+            indices=fake,
+            block_table=fake,
+            is_fp8_kvcache=True,
+        )
+    return result, candidate_out, abi, candidate, hit
+
+
+def test_prefill_graph_only_declines_eager_before_abi_and_run():
+    saved = _prefill_env()
+    try:
+        set_forward_mode(ForwardMode.EXTEND, 4096)
+        result, _out, abi, candidate, hit = _prefill_dispatch(capturing=False)
+        assert result is None
+        abi.assert_not_called()
+        candidate.assert_not_called()
+        hit.assert_not_called()
+    finally:
+        set_forward_mode(None)
+        _restore_env(saved)
+
+
+def test_prefill_selected_under_capture_preserves_return_contract():
+    saved = _prefill_env()
+    try:
+        set_forward_mode(ForwardMode.EXTEND, 4096)
+        result, out, _abi, candidate, _hit = _prefill_dispatch(capturing=True)
+        assert result is out
+        candidate.assert_called_once()
+    finally:
+        set_forward_mode(None)
+        _restore_env(saved)
+
+
+def test_prefill_graph_only_can_be_disabled_for_diagnostic_eager_leaf():
+    saved = _prefill_env(SGLANG_GLM52_FLASHMLA_PREFILL_GRAPH_ONLY="0")
+    try:
+        set_forward_mode(ForwardMode.EXTEND, 4096)
+        result, out, _abi, candidate, _hit = _prefill_dispatch(capturing=False)
+        assert result is out
+        candidate.assert_called_once()
+    finally:
+        set_forward_mode(None)
+        _restore_env(saved)
+
+
+def test_prefill_abi_gate_rejects_decode_and_wrong_geometry():
+    """The real gate (unpatched) must fail closed on phase and geometry."""
+    from sglang.srt.layers.glm52_opt.dispatch import (
+        _flashmla_prefill_hotspot_abi_matches,
+    )
+
+    saved = _prefill_env()
+    try:
+        spec = lookup("dsa_prefill_attn", "prefill", m=4096)
+        assert spec is not None
+        m = 4096
+        kwargs = dict(
+            q=torch.empty((m, 1, 64, 576), dtype=torch.bfloat16),
+            k_cache=torch.empty((7, 64, 1, 656), dtype=torch.float8_e4m3fn),
+            cache_seqlens=torch.empty((m,), dtype=torch.int32),
+            head_dim_v=512,
+            tile_scheduler_metadata=torch.empty((148, 8), dtype=torch.int32),
+            num_splits=torch.empty((m + 1,), dtype=torch.int32),
+            softmax_scale=0.0625,
+            indices=torch.empty((m, 1, 2048), dtype=torch.int32),
+            block_table=torch.empty((m, 0), dtype=torch.int32),
+            is_fp8_kvcache=True,
+        )
+        # CPU tensors can never satisfy the is_cuda checks, so this asserts the
+        # gate refuses rather than that it accepts.
+        set_forward_mode(ForwardMode.DECODE, m)
+        assert _flashmla_prefill_hotspot_abi_matches(spec, **kwargs) is False
+        set_forward_mode(ForwardMode.EXTEND, m)
+        assert _flashmla_prefill_hotspot_abi_matches(spec, **kwargs) is False
+        # a decode spec must never satisfy the prefill gate either
+        decode_spec = lookup("dsa_decode_attn", "decode", m=16)
+        assert decode_spec is None or (
+            _flashmla_prefill_hotspot_abi_matches(decode_spec, **kwargs) is False
+        )
+    finally:
+        set_forward_mode(None)
+        _restore_env(saved)
+
+
+def test_decode_gate_rejects_prefill_shapes():
+    """The decode dispatch must not pick up a prefill-sized call."""
+    names = ("SGLANG_GLM52_OPT", "SGLANG_GLM52_OPT_PROFILE", "SGLANG_GLM52_OPT_OPS")
+    saved = {name: os.environ.get(name) for name in names}
+    try:
+        os.environ["SGLANG_GLM52_OPT"] = "1"
+        os.environ["SGLANG_GLM52_OPT_PROFILE"] = "hotspot_candidates"
+        os.environ["SGLANG_GLM52_OPT_OPS"] = "flashmla_sparse_decode"
+        set_forward_mode(ForwardMode.EXTEND, 4096)
+        fake = torch.empty(1)
+        with patch(
+            "sglang.srt.layers.glm52_opt.dispatch.run_flashmla_sparse_decode"
+        ) as candidate:
+            result = try_dispatch_flashmla_sparse_decode(
+                q=torch.empty((4096, 1, 64, 576), dtype=torch.bfloat16),
+                k_cache=fake,
+                cache_seqlens=fake,
+                head_dim_v=512,
+                tile_scheduler_metadata=fake,
+                num_splits=fake,
+                softmax_scale=0.0625,
+                indices=fake,
+                block_table=fake,
+                is_fp8_kvcache=True,
+            )
+        assert result is None
+        candidate.assert_not_called()
     finally:
         set_forward_mode(None)
         _restore_env(saved)

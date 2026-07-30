@@ -2009,6 +2009,17 @@ class DeepseekSparseAttnBackend(
         elif dsa_impl == "flashmla_kv":
             if q_rope is not None:
                 q_all = concat_mla_absorb_q_general(q_nope, q_rope)
+            # GLM-5.2 opt: the prefill flashmla_kv path reaches the same
+            # sm100 head64 FP8 sparse kernel as decode, so the hotspot
+            # provider can serve it under its own prefill spec / M buckets.
+            # Selection is graph-only and fails closed on any ABI mismatch.
+            from sglang.srt.layers.glm52_opt import config as glm52_config
+
+            _use_glm52_hotspot = (
+                glm52_config.is_enabled()
+                and glm52_config.profile_name() == "hotspot_candidates"
+                and "dsa_prefill_attn" in glm52_config.hotspot_candidate_ops()
+            )
             return self._forward_flashmla_kv(
                 q_all=q_all,
                 kv_cache=kv_cache,
@@ -2018,6 +2029,8 @@ class DeepseekSparseAttnBackend(
                 layer=layer,
                 metadata=metadata,
                 page_table_1=page_table_1,
+                use_glm52_hotspot=_use_glm52_hotspot,
+                glm52_hotspot_phase="prefill",
             )
         elif dsa_impl == "fa3":
             return self._forward_fa3(
@@ -2364,6 +2377,7 @@ class DeepseekSparseAttnBackend(
         metadata: DSAMetadata,
         page_table_1,
         use_glm52_hotspot: bool = False,
+        glm52_hotspot_phase: str = "decode",
     ) -> torch.Tensor:
         from sgl_kernel.flash_mla import flash_mla_with_kvcache
 
@@ -2406,9 +2420,15 @@ class DeepseekSparseAttnBackend(
         if use_glm52_hotspot:
             from sglang.srt.layers.glm52_opt.dispatch import (
                 try_dispatch_flashmla_sparse_decode,
+                try_dispatch_flashmla_sparse_prefill,
             )
 
-            o = try_dispatch_flashmla_sparse_decode(
+            _try_dispatch = (
+                try_dispatch_flashmla_sparse_prefill
+                if glm52_hotspot_phase == "prefill"
+                else try_dispatch_flashmla_sparse_decode
+            )
+            o = _try_dispatch(
                 q=q_input,
                 k_cache=kv_cache,
                 cache_seqlens=cache_seqlens,

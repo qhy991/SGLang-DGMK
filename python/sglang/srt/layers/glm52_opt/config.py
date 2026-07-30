@@ -36,6 +36,7 @@ _GLM52_ENV_KEYS = frozenset(
         "SGLANG_GLM52_W2_GRAPH_ONLY",
         "SGLANG_GLM52_O_PROJ_GRAPH_ONLY",
         "SGLANG_GLM52_FUSED_QKV_A_GRAPH_ONLY",
+        "SGLANG_GLM52_FLASHMLA_PREFILL_GRAPH_ONLY",
     }
 )
 
@@ -150,9 +151,16 @@ _E2E_ALLOWED_OPS = _E2E_DEFAULT_OPS | _E2E_EXPLICIT_OPS
 # Triton experiments.  These are intentionally isolated from e2e_candidates:
 # selecting the hotspot profile must never also turn on an older archive swap.
 _HOTSPOT_DEFAULT_OPS = frozenset({"dsa_decode_attn", "moe_gate_proj", "moe_down_proj"})
+# Ops the profile *recognises*.  ``dsa_prefill_attn`` is deliberately known but
+# not default-selected: the prefill FlashMLA candidate stays off unless it is
+# named explicitly in SGLANG_GLM52_OPT_OPS, so enabling the hotspot profile for
+# decode work never silently activates it.
+_HOTSPOT_KNOWN_OPS = _HOTSPOT_DEFAULT_OPS | frozenset({"dsa_prefill_attn"})
 _HOTSPOT_OP_ALIASES = {
     "flashmla_sparse_decode": "dsa_decode_attn",
     "flashmla_kv": "dsa_decode_attn",
+    "flashmla_sparse_prefill": "dsa_prefill_attn",
+    "flashmla_kv_prefill": "dsa_prefill_attn",
     "moe_w13": "moe_gate_proj",
     "moe_gate_up": "moe_gate_proj",
     "moe_w2": "moe_down_proj",
@@ -197,7 +205,7 @@ def hotspot_candidate_ops() -> frozenset[str]:
     if allow is None:
         return _HOTSPOT_DEFAULT_OPS
     normalized = {_HOTSPOT_OP_ALIASES.get(op, op) for op in allow}
-    unknown = normalized - _HOTSPOT_DEFAULT_OPS
+    unknown = normalized - _HOTSPOT_KNOWN_OPS
     if unknown:
         raise ValueError(
             "Unsupported SGLANG_GLM52_OPT_OPS for hotspot_candidates: "
@@ -225,6 +233,7 @@ _GRAPH_ONLY_ENV_BY_OP = {
     "moe_down_proj": "SGLANG_GLM52_W2_GRAPH_ONLY",
     "o_proj": "SGLANG_GLM52_O_PROJ_GRAPH_ONLY",
     "fused_qkv_a_proj": "SGLANG_GLM52_FUSED_QKV_A_GRAPH_ONLY",
+    "dsa_prefill_attn": "SGLANG_GLM52_FLASHMLA_PREFILL_GRAPH_ONLY",
 }
 
 

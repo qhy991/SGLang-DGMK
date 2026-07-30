@@ -242,6 +242,44 @@ _HOTSPOT_DECODE: dict[str, KernelSpec] = {
 }
 
 
+_HOTSPOT_PREFILL: dict[str, KernelSpec] = {
+    # SGLang's ``--dsa-prefill-backend flashmla_kv`` prefill path calls the same
+    # ``flash_mla_with_kvcache`` entry decode uses, so it reaches the same
+    # ``sm100::decode::head64`` FP8 sparse kernel with batch = local extend
+    # tokens.  The ABI below is the prefill twin of ``dsa_decode_attn``: the
+    # per-token KV geometry is identical and only the admitted batch extents
+    # differ.  Graph-only, because the API-v1 provider's fixed per-call host
+    # tax is not recoverable in an eager containing region.
+    #
+    # The selected candidate is the `b3_b5_native_exact` composite, NOT the
+    # decode-accepted `p1_consumer_scale`.  A prefill ablation of all four arms
+    # in one lease showed the decode mechanism inverts here: p1/b3_b5 measured
+    # 0.978-0.982 at every locked M against a +-0.15% null, i.e. relocating the
+    # scattered scale gather into the dequant warpgroup *costs* ~2% once each
+    # of the 148 persistent CTAs sweeps ~900 KV blocks and the round trip is
+    # already pipelined.  What pays at prefill is b3_b5's issue-pressure
+    # reduction (F2FP 400->272, LDG 28->12, -792 static instructions), which
+    # was rejected at decode precisely because decode is latency- not
+    # throughput-bound.
+    "dsa_prefill_attn": KernelSpec(
+        op="dsa_prefill_attn",
+        phase="prefill",
+        archive_ref="",
+        kind="dsa",
+        implementation="hotspot_plugin",
+        profiler_name="infini_kernel_glm52_flashmla_sparse_prefill_fp8_topk2048",
+        m_values=(1024, 2048, 4096),
+        topk=2048,
+        q_heads=64,
+        qk_dim=576,
+        v_dim=512,
+        page_size=64,
+        kv_dim=656,
+        graph_only=True,
+    ),
+}
+
+
 def _decode_table() -> dict[str, KernelSpec]:
     """Profile / allowlist gated decode registry.
 
@@ -303,6 +341,14 @@ def _hotspot_decode_table() -> dict[str, KernelSpec]:
     }
 
 
+def _hotspot_prefill_table() -> dict[str, KernelSpec]:
+    return {
+        op: _HOTSPOT_PREFILL[op]
+        for op in sorted(hotspot_candidate_ops())
+        if op in _HOTSPOT_PREFILL
+    }
+
+
 def lookup(
     op_name: Optional[str], phase: str, m: Optional[int] = None
 ) -> Optional[KernelSpec]:
@@ -320,6 +366,8 @@ def lookup(
             if name == "hotspot_candidates"
             else _decode_table().get(op_name)
         )
+    elif name == "hotspot_candidates":
+        spec = _hotspot_prefill_table().get(op_name)
     elif name == "full":
         spec = _active_prefill().get(op_name)
     elif name == "e2e_candidates":
@@ -342,6 +390,8 @@ def list_enabled(phase: str) -> list[KernelSpec]:
         if profile_name() == "hotspot_candidates":
             return [s for s in _hotspot_decode_table().values() if s.enabled]
         return [s for s in _decode_table().values() if s.enabled]
+    if profile_name() == "hotspot_candidates":
+        return [s for s in _hotspot_prefill_table().values() if s.enabled]
     if profile_name() == "full":
         return [s for s in _active_prefill().values() if s.enabled]
     if profile_name() == "e2e_candidates":

@@ -27,6 +27,7 @@ INFINI_KERNEL_API_VERSION = 1
 
 _CALLBACK_BY_OP = {
     "dsa_decode_attn": "flashmla_sparse_decode",
+    "dsa_prefill_attn": "flashmla_sparse_prefill",
     "moe_gate_proj": "moe_w13",
     "moe_down_proj": "moe_w2",
 }
@@ -190,6 +191,11 @@ def _callback(op_name: str) -> Callable[..., Any]:
 def run_flashmla_sparse_decode(**kwargs):
     """Call the provider's production-signature FlashMLA decode implementation."""
     return _callback("dsa_decode_attn")(**kwargs)
+
+
+def run_flashmla_sparse_prefill(**kwargs):
+    """Call the provider's production-signature FlashMLA prefill implementation."""
+    return _callback("dsa_prefill_attn")(**kwargs)
 
 
 def run_moe_masked(

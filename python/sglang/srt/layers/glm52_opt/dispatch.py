@@ -18,7 +18,10 @@ from sglang.srt.layers.glm52_opt.context import (
     get_op_name,
 )
 from sglang.srt.layers.glm52_opt.fp8_gemm import run_fp8_gemm
-from sglang.srt.layers.glm52_opt.hotspot_provider import run_flashmla_sparse_decode
+from sglang.srt.layers.glm52_opt.hotspot_provider import (
+    run_flashmla_sparse_decode,
+    run_flashmla_sparse_prefill,
+)
 from sglang.srt.layers.glm52_opt.hotspot_provider import (
     run_moe_masked as run_hotspot_moe_masked,
 )
@@ -468,6 +471,193 @@ def try_dispatch_flashmla_sparse_decode(
     ):
         raise RuntimeError("FlashMLA hotspot provider returned an invalid output")
     _record_hit("hotspot_plugin/flashmla_sparse_decode", spec.op, phase, m=m)
+    return candidate_out
+
+
+def _flashmla_prefill_hotspot_abi_matches(
+    spec: KernelSpec,
+    *,
+    q: torch.Tensor,
+    k_cache: torch.Tensor,
+    cache_seqlens: torch.Tensor,
+    head_dim_v: int,
+    tile_scheduler_metadata: torch.Tensor,
+    num_splits: torch.Tensor,
+    softmax_scale: float,
+    indices: torch.Tensor,
+    block_table: torch.Tensor,
+    is_fp8_kvcache: bool,
+) -> bool:
+    """Fail-closed gate for the prefill twin of the FlashMLA hotspot ABI.
+
+    Identical to the decode gate except for two deliberate differences:
+    the forward mode must be EXTEND rather than DECODE, and the KV pool page
+    count is not pinned -- in prefill the pool is the whole allocated cache, so
+    its page count is a deployment property.  Everything the device template
+    actually depends on (per-token 656 B geometry, page 64, top-k 2048, 64
+    heads, 576/512 dims, BF16 Q, FP8 KV, exact strides, scale 0.0625) is still
+    checked exactly, and a decode-shaped call is rejected here.
+    """
+    if (
+        spec.implementation != "hotspot_plugin"
+        or spec.kind != "dsa"
+        or None
+        in (
+            spec.topk,
+            spec.q_heads,
+            spec.qk_dim,
+            spec.v_dim,
+            spec.page_size,
+            spec.kv_dim,
+        )
+    ):
+        return False
+    from sglang.srt.model_executor.forward_batch_info import ForwardMode
+
+    if get_forward_mode() is not ForwardMode.EXTEND:
+        return False
+    m = int(q.shape[0]) if q.ndim == 4 else -1
+    allowed = spec.m_values or ()
+    device = q.device
+    return bool(
+        m in allowed
+        and head_dim_v == spec.v_dim
+        and is_fp8_kvcache is True
+        and float(softmax_scale) == 0.0625
+        and _tensor_contract(
+            q,
+            shape=(m, 1, int(spec.q_heads), int(spec.qk_dim)),
+            stride=(
+                int(spec.q_heads) * int(spec.qk_dim),
+                int(spec.q_heads) * int(spec.qk_dim),
+                int(spec.qk_dim),
+                1,
+            ),
+            dtype=torch.bfloat16,
+        )
+        and k_cache.is_cuda
+        and k_cache.dtype == torch.float8_e4m3fn
+        and k_cache.ndim == 4
+        and k_cache.shape[0] >= 1
+        and tuple(k_cache.shape[1:]) == (int(spec.page_size), 1, int(spec.kv_dim))
+        and k_cache.is_contiguous()
+        and k_cache.storage_offset() == 0
+        and k_cache.device == device
+        and _tensor_contract(
+            cache_seqlens,
+            shape=(m,),
+            stride=(1,),
+            dtype=torch.int32,
+            device=device,
+        )
+        and _tensor_contract(
+            tile_scheduler_metadata,
+            shape=(148, 8),
+            stride=(8, 1),
+            dtype=torch.int32,
+            device=device,
+        )
+        and _tensor_contract(
+            num_splits,
+            shape=(m + 1,),
+            stride=(1,),
+            dtype=torch.int32,
+            device=device,
+        )
+        and _tensor_contract(
+            indices,
+            shape=(m, 1, int(spec.topk)),
+            stride=(int(spec.topk), int(spec.topk), 1),
+            dtype=torch.int32,
+            device=device,
+        )
+        and block_table.is_cuda
+        and block_table.dtype == torch.int32
+        and tuple(block_table.shape) == (m, 0)
+        and block_table.device == device
+    )
+
+
+def try_dispatch_flashmla_sparse_prefill(
+    *,
+    q: torch.Tensor,
+    k_cache: torch.Tensor,
+    cache_seqlens: torch.Tensor,
+    head_dim_v: int,
+    tile_scheduler_metadata: torch.Tensor,
+    num_splits: torch.Tensor,
+    softmax_scale: float,
+    indices: torch.Tensor,
+    block_table: torch.Tensor,
+    is_fp8_kvcache: bool,
+) -> Optional[torch.Tensor]:
+    """Run one exact FlashMLA prefill provider call or return ``None``.
+
+    Returning ``None`` must happen before any provider launch; once the
+    candidate has been selected the caller must not fall back.
+    """
+    if not config.is_enabled():
+        return None
+    m = int(q.shape[0]) if q.ndim == 4 else -1
+    spec = lookup("dsa_prefill_attn", "prefill", m=m)
+    if spec is None or spec.kind != "dsa":
+        _record_miss("flashmla_prefill_no_spec", "dsa_prefill_attn", "prefill", m=m)
+        return None
+    # Graph-only: decline eager before touching the ABI gate, so the eager
+    # containing region keeps running pure stock.
+    if _graph_only_declines(spec):
+        return None
+    if not _flashmla_prefill_hotspot_abi_matches(
+        spec,
+        q=q,
+        k_cache=k_cache,
+        cache_seqlens=cache_seqlens,
+        head_dim_v=head_dim_v,
+        tile_scheduler_metadata=tile_scheduler_metadata,
+        num_splits=num_splits,
+        softmax_scale=softmax_scale,
+        indices=indices,
+        block_table=block_table,
+        is_fp8_kvcache=is_fp8_kvcache,
+    ):
+        _record_miss("flashmla_prefill_abi", spec.op, "prefill", m=m)
+        return None
+
+    with _nvtx_range(_profiler_range_name(spec, m)):
+        result = run_flashmla_sparse_prefill(
+            q=q,
+            k_cache=k_cache,
+            cache_seqlens=cache_seqlens,
+            head_dim_v=head_dim_v,
+            tile_scheduler_metadata=tile_scheduler_metadata,
+            num_splits=num_splits,
+            softmax_scale=softmax_scale,
+            indices=indices,
+            block_table=block_table,
+            is_fp8_kvcache=is_fp8_kvcache,
+        )
+    if not isinstance(result, (tuple, list)) or len(result) != 2:
+        raise RuntimeError(
+            "FlashMLA prefill hotspot provider must return the stock "
+            "(output, lse) pair"
+        )
+    candidate_out = result[0]
+    if not isinstance(candidate_out, torch.Tensor) or not _tensor_contract(
+        candidate_out,
+        shape=(m, 1, int(spec.q_heads), int(spec.v_dim)),
+        stride=(
+            int(spec.q_heads) * int(spec.v_dim),
+            int(spec.q_heads) * int(spec.v_dim),
+            int(spec.v_dim),
+            1,
+        ),
+        dtype=torch.bfloat16,
+        device=q.device,
+    ):
+        raise RuntimeError(
+            "FlashMLA prefill hotspot provider returned an invalid output"
+        )
+    _record_hit("hotspot_plugin/flashmla_sparse_prefill", spec.op, "prefill", m=m)
     return candidate_out
 
 
