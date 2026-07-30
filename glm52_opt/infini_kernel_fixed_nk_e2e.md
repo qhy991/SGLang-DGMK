@@ -2,7 +2,7 @@
 
 ## Scope
 
-This branch registers three exact, default-off DeepGEMM candidates through the
+This branch registers four exact, default-off DeepGEMM candidates through the
 existing SGLang `glm52_opt` dispatcher. Candidate and stock runs share the
 same `Fp8LinearMethod` callsite, dynamic activation quantizer, FP8 tensors,
 packed int32 UE8M0 scales, BF16 output, CUDA Graph path, and serving scheduler.
@@ -16,10 +16,16 @@ deep_gemm.fp8_gemm_nt(..., compiled_dims="nk")
 |---|---|---|
 | `index_q_upproj` | DECODE, M=16/32, N=4096, K=2048 | `infini_kernel_glm52_index_q_upproj_decode_nk` |
 | `o_proj` | DECODE, M=16/32, N=6144, K=16384 | `infini_kernel_glm52_attn_o_decode_nk` |
+| `q_b_proj` | DECODE, M=16/32, N=16384, K=2048 | `infini_kernel_glm52_attn_q_b_decode_nk` |
 | `fused_qkv_a_proj` | PREFILL, M=4096, N=2624, K=6144 | `infini_kernel_glm52_fused_qkv_a_prefill_nk` |
 
-The indexer and QKV-A entries are explicit-only: an empty `OPT_OPS` does not
-enable them. The existing `o_proj` E2E default remains M16/M32 only. The
+The indexer, `q_b_proj`, and QKV-A entries are explicit-only: an empty `OPT_OPS`
+does not enable them. The existing `o_proj` E2E default remains M16/M32 only.
+`q_b_proj` (like `o_proj`) is additionally `graph_only`: eager decode declines
+to stock and only CUDA-graph capture selects the candidate
+(`SGLANG_GLM52_Q_B_PROJ_GRAPH_ONLY=0` forces a diagnostic eager leaf). Its
+`fixed_nk` path is checked before the historical q_b DeepGEMM fork, so the
+candidate is the clean `compiled_dims="nk"` specialization, not that fork. The
 registry also prevents the prefill MoE PSUM names from selecting their
 archived decode kernels.
 
