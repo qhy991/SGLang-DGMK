@@ -420,6 +420,13 @@ def try_dispatch_flashmla_sparse_decode(
     if spec is None or spec.kind != "dsa":
         _record_miss("flashmla_no_spec", "dsa_decode_attn", phase, m=m)
         return None
+    # The FlashMLA hotspot spec is ``graph_only``: outside CUDA graph capture
+    # the provider is never selected and the caller runs stock with zero
+    # provider launches.  Checked before the ABI guard so an eager decode step
+    # pays only the enable check, phase inference and spec lookup.
+    if _graph_only_declines(spec):
+        _record_miss("flashmla_graph_only", spec.op, phase, m=m)
+        return None
     if not _flashmla_hotspot_abi_matches(
         spec,
         q=q,

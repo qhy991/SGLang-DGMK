@@ -208,6 +208,14 @@ _HOTSPOT_DECODE: dict[str, KernelSpec] = {
         v_dim=512,
         page_size=64,
         kv_dim=656,
+        # The FlashMLA sparse-decode hotspot is production-graph-bound. The
+        # API-v1 Python provider path adds a fixed per-call host tax that makes
+        # the eager containing-region gate arithmetically unreachable even for a
+        # zero-cost guard, so outside CUDA-graph capture this spec declines and
+        # the stock kernel runs with no provider launch;
+        # SGLANG_GLM52_FLASHMLA_GRAPH_ONLY=0 forces eager for a diagnostic leaf
+        # measurement only.
+        graph_only=True,
     ),
     # SGLang executes gate+up as one fused W13 grouped GEMM.
     "moe_gate_proj": KernelSpec(

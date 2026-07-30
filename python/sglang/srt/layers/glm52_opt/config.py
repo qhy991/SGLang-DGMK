@@ -36,6 +36,7 @@ _GLM52_ENV_KEYS = frozenset(
         "SGLANG_GLM52_W2_GRAPH_ONLY",
         "SGLANG_GLM52_O_PROJ_GRAPH_ONLY",
         "SGLANG_GLM52_FUSED_QKV_A_GRAPH_ONLY",
+        "SGLANG_GLM52_FLASHMLA_GRAPH_ONLY",
     }
 )
 
@@ -225,6 +226,7 @@ _GRAPH_ONLY_ENV_BY_OP = {
     "moe_down_proj": "SGLANG_GLM52_W2_GRAPH_ONLY",
     "o_proj": "SGLANG_GLM52_O_PROJ_GRAPH_ONLY",
     "fused_qkv_a_proj": "SGLANG_GLM52_FUSED_QKV_A_GRAPH_ONLY",
+    "dsa_decode_attn": "SGLANG_GLM52_FLASHMLA_GRAPH_ONLY",
 }
 
 
