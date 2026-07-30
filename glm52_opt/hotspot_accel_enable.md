@@ -20,10 +20,13 @@ export SGLANG_GLM52_OPT_M_BUCKETS='o_proj:16|32,fused_qkv_a_proj:16|32,index_q_u
 
 ## FlashMLA decode + prefill (`hotspot_candidates`)
 
-| Op | Identity | Graph vs stock |
+| Op | Identity | Graph |
 |---|---|---|
-| `dsa_decode_attn` / FlashMLA | P1 + `combine_c2` | M16 ~1.27×, M32 ~1.14× |
-| `dsa_prefill_attn` | `b3_b5_native_exact` | M1024 ~1.05× … M4096 ~1.10× |
+| `dsa_decode_attn` | **preferred:** `r2a` + `combine_c2` | vs P1+c2: M16 ~1.09×, M32 ~flat |
+| `dsa_decode_attn` | baseline: P1 + `combine_c2` | vs stock: M16 ~1.27×, M32 ~1.14× |
+| `dsa_prefill_attn` | `b3_b5_native_exact` | vs stock: M1024–4096 ~1.05–1.10× |
+
+Single-bucket wins are intentionally registered (M16 decode r2a).
 
 ```bash
 HOTSPOT="$(python - <<'PY'
@@ -33,15 +36,18 @@ print(Path(m.__file__).resolve().parent)
 PY
 )"
 
-# Decode stack
+# Decode preferred stack (r2a main + c2 combine)
 export SGLANG_GLM52_OPT=1
 export SGLANG_GLM52_OPT_PROFILE=hotspot_candidates
 export SGLANG_GLM52_OPT_OPS=flashmla_sparse_decode
 export SGLANG_GLM52_OPT_M_BUCKETS='dsa_decode_attn:16|32'
-export SGLANG_GLM52_HOTSPOT_MODULE="$HOTSPOT/flashmla_combine_decode_provider.py"
-export GLM52_FLASHMLA_COMBINE_VARIANT=combine_c2_bucket_stages
+export SGLANG_GLM52_HOTSPOT_MODULE="$HOTSPOT/flashmla_stack_r2a_c2_provider.py"
 export GLM52_FLASHMLA_USE_PREBUILT=1
 # serve: --dsa-decode-backend flashmla_kv
+
+# Optional: prior P1+c2-only stack (vs stock)
+# export SGLANG_GLM52_HOTSPOT_MODULE="$HOTSPOT/flashmla_combine_decode_provider.py"
+# export GLM52_FLASHMLA_COMBINE_VARIANT=combine_c2_bucket_stages
 
 # Prefill (separate process / OPT_OPS swap)
 export SGLANG_GLM52_OPT_OPS=dsa_prefill_attn

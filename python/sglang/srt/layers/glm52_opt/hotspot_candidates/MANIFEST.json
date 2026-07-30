@@ -38,6 +38,21 @@
         "M2048": "leaf 1.0724 / region 1.0674",
         "M4096": "leaf 1.0996 / region 1.0940"
       }
+    },
+    {
+      "role": "decode_stack_r2a_preferred",
+      "phase": "decode",
+      "variant": "r2a_prologue_overlap",
+      "combine_variant": "combine_c2_bucket_stages",
+      "module_name": "infini_kernel_glm52_flashmla_sparse_decode_stack_r2a_prologue_overlap__combine_c2_bucket_stages_4f22d65fcd15e4b8",
+      "so_file": "prebuilt/infini_kernel_glm52_flashmla_sparse_decode_stack_r2a_prologue_overlap__combine_c2_bucket_stages_4f22d65fcd15e4b8.so",
+      "sha256": "7bf9ac78c3c3f7d2f4ffe6f0cbffb6fae291fae83d1625f61a222f81b1ca11e2",
+      "local_disposition": "single-bucket-win (M16); M32 neutral vs P1+c2",
+      "graph_vs_p1_c2": {
+        "M16": "leaf/region ~1.09-1.10",
+        "M32": "~1.00-1.008 (not a regression)"
+      },
+      "provider": "flashmla_stack_r2a_c2_provider.py"
     }
   ]
 }

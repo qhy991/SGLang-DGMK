@@ -1,23 +1,23 @@
 # GLM-5.2 FlashMLA hotspot candidates (vendored into SGLang)
 
-Default-off external-acceptance survivors for `flashmla_kv` sparse FP8 decode:
+Default-off external-acceptance survivors (CUDA 13.2 / sm_100 prebuilts):
 
-| Binary | Role | Local graph vs stock |
+| Binary | Role | Local graph |
 | --- | --- | --- |
-| `combine_c2_bucket_stages` `.so` | **P1 main + combine_c2** (preferred) | M16 ~1.27×, M32 ~1.14× |
-| `p1_consumer_scale` `.so` | P1 main + stock combine | M16/M32 ~1.06× |
+| `stack_r2a…__combine_c2…` `.so` | **Preferred decode:** r2a + c2 | vs P1+c2: M16 ~1.09×, M32 ~flat |
+| `combine_c2_bucket_stages` `.so` | Decode P1 main + combine_c2 | vs stock: M16 ~1.27×, M32 ~1.14× |
+| `p1_consumer_scale` `.so` | Decode P1 main + stock combine | vs stock: M16/M32 ~1.06× |
+| `dsa_prefill … b3_b5_native_exact` `.so` | **Prefill** selected identity | vs stock: M1024–4096 ~1.05–1.10× |
 
-Both cubins are **sm_100 / sm_100f**, built with **CUDA 13.2**. On CUDA 13.1 hosts
-that cannot JIT `cvt.rn.bf16x2.e4m3x2`, load the prebuilt `.so` (see below).
+See also `glm52_opt/hotspot_accel_enable.md` for fixed-N/K GEMMs (`o_proj`,
+`fused_qkv_a_proj`, `index_q_upproj`).
 
 Production default stays **off**. TP8/DP8/EP8 acceptance is still required for
 `production-win`.
 
-## Enable (stack winner)
+## Enable decode stack
 
 ```bash
-REPO_ROOT="$(python -c 'import sglang, pathlib; print(pathlib.Path(sglang.__file__).resolve().parents[3])')"
-# editable install: prefer the source tree path of this package instead
 HOTSPOT="$(python - <<'PY'
 from pathlib import Path
 import sglang.srt.layers.glm52_opt.hotspot_candidates as m
@@ -29,10 +29,24 @@ export SGLANG_GLM52_OPT=1
 export SGLANG_GLM52_OPT_PROFILE=hotspot_candidates
 export SGLANG_GLM52_OPT_OPS=flashmla_sparse_decode
 export SGLANG_GLM52_OPT_M_BUCKETS='dsa_decode_attn:16|32'
-export SGLANG_GLM52_HOTSPOT_MODULE="$HOTSPOT/flashmla_combine_decode_provider.py"
-export GLM52_FLASHMLA_COMBINE_VARIANT=combine_c2_bucket_stages
+# Preferred: r2a + c2 (M16 win; M32 neutral)
+export SGLANG_GLM52_HOTSPOT_MODULE="$HOTSPOT/flashmla_stack_r2a_c2_provider.py"
 export GLM52_FLASHMLA_USE_PREBUILT=1
-export SGLANG_GLM52_FLASHMLA_GRAPH_ONLY=1
+# Or prior P1+c2 vs stock:
+# export SGLANG_GLM52_HOTSPOT_MODULE="$HOTSPOT/flashmla_combine_decode_provider.py"
+# export GLM52_FLASHMLA_COMBINE_VARIANT=combine_c2_bucket_stages
 ```
 
-`--dsa-decode-backend flashmla_kv` is mandatory on the serve launch.
+`--dsa-decode-backend flashmla_kv` is mandatory.
+
+## Enable prefill
+
+```bash
+export SGLANG_GLM52_OPT_OPS=dsa_prefill_attn
+export SGLANG_GLM52_OPT_M_BUCKETS='dsa_prefill_attn:1024|2048|4096'
+export SGLANG_GLM52_HOTSPOT_MODULE="$HOTSPOT/flashmla_sparse_prefill_provider.py"
+export GLM52_DSA_PREFILL_VARIANT=b3_b5_native_exact
+export GLM52_DSA_PREFILL_USE_PREBUILT=1
+```
+
+`--dsa-prefill-backend flashmla_kv` is mandatory.
