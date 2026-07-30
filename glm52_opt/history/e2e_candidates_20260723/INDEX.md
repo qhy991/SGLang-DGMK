@@ -1,5 +1,11 @@
 # E2E candidate archive (2026-07-23)
 
+> **状态更新（2026-07-30）：** 本页是历史归档，不再代表当前的晋级结论。
+> production-native eager/graph/containing-region 复核已经否决本页裸
+> `e2e_candidates` 的默认集合。最终逐算子判定见
+> [`../../../docs/glm52_kernel_harness_registration_audit_zh.md`](../../../docs/glm52_kernel_harness_registration_audit_zh.md)。
+> 在运行时代码修正前，不要使用裸 `e2e_candidates`；必须显式指定 op。
+
 Archived leaf/component winners from GLM-5.2 production goals for
 **explicit end-to-end testing**. Default `serving_safe` stays empty.
 

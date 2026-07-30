@@ -1,5 +1,9 @@
 # GLM-5.2 算子注册、真实加速边界与端到端验收
 
+> Kernel-Harness 全量历史正收益、production-native 复核和最终注册等级见
+> [`glm52_kernel_harness_registration_audit_zh.md`](glm52_kernel_harness_registration_audit_zh.md)。
+> 本文主要解释当前四条精确 hook 的实现与使用方式。
+
 本文给出本分支中 GLM-5.2 算子的最终注册状态、启用方法、能够成立的
 加速条件，以及 FlashMLA PTX/SASS 和 MoE W2 实验为什么不能被宣传为生产
 加速。
