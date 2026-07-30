@@ -5,6 +5,8 @@ __pycache__/
 
 # C extensions
 *.so
+# Vendored GLM-5.2 FlashMLA tip cubins (CUDA 13.2 / sm_100)
+!python/sglang/srt/layers/glm52_opt/hotspot_candidates/prebuilt/*.so
 
 # Distribution / packaging
 .Python
@@ -209,6 +211,8 @@ work_dirs/
 
 # Compiled Dynamic libraries
 *.so
+# Vendored GLM-5.2 FlashMLA tip cubins (CUDA 13.2 / sm_100)
+!python/sglang/srt/layers/glm52_opt/hotspot_candidates/prebuilt/*.so
 *.dylib
 *.dll
 

@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "arch": "sm_100 / sm_100f",
+  "nvcc": "CUDA 13.2 (B200 validation host)",
+  "note": "CUDA 13.1 ptxas rejects cvt.rn.bf16x2.e4m3x2; prefer these prebuilts over JIT.",
+  "binaries": [
+    {
+      "role": "decode_stack_winner",
+      "phase": "decode",
+      "variant": "combine_c2_bucket_stages",
+      "main_variant": "p1_consumer_scale",
+      "module_name": "infini_kernel_glm52_flashmla_sparse_decode_combine_c2_bucket_stages_ea8c72aac9631a91",
+      "so_file": "prebuilt/infini_kernel_glm52_flashmla_sparse_decode_combine_c2_bucket_stages_ea8c72aac9631a91.so",
+      "sha256": "e509dff9cfb2ecf19febf4ba979608608588b173e8d14e71a448e74cd324180f",
+      "local_disposition": "external-acceptance-candidate",
+      "graph_vs_stock": {"M16": "1.2705-1.2753", "M32": "1.1376-1.1426"}
+    },
+    {
+      "role": "decode_main_only",
+      "phase": "decode",
+      "variant": "p1_consumer_scale",
+      "module_name": "infini_kernel_glm52_flashmla_sparse_decode_p1_consumer_scale_a39236323dc57a97",
+      "so_file": "prebuilt/infini_kernel_glm52_flashmla_sparse_decode_p1_consumer_scale_a39236323dc57a97.so",
+      "sha256": "a368b1451733140d9801d4519ba265e5d85252d83ab7ac25e8f570059b68e4e1",
+      "local_disposition": "external-acceptance-candidate",
+      "graph_vs_stock": {"M16": "1.0694-1.0728", "M32": "1.0636-1.0669"}
+    },
+    {
+      "role": "prefill_winner",
+      "phase": "prefill",
+      "variant": "b3_b5_native_exact",
+      "module_name": "infini_kernel_glm52_dsa_prefill_attn_b3_b5_native_exact_e7e997d8404f2dd5",
+      "so_file": "prebuilt/infini_kernel_glm52_dsa_prefill_attn_b3_b5_native_exact_e7e997d8404f2dd5.so",
+      "sha256": "399975000b0687f3829b23d7dc4cd3cf8130b61708f6b8e497807bcd2114ccaa",
+      "local_disposition": "external-acceptance-candidate",
+      "graph_vs_stock": {
+        "M1024": "leaf 1.0458 / region 1.0454",
+        "M2048": "leaf 1.0724 / region 1.0674",
+        "M4096": "leaf 1.0996 / region 1.0940"
+      }
+    }
+  ]
+}

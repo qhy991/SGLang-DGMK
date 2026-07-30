@@ -1,0 +1,66 @@
+# GLM-5.2 accelerating hotspots — enable in SGLang
+
+Default **off**. Local graph wins registered on branch
+`goal/glm52-hotspot-accel-bundle`. TP8/DP8/EP8 still required for production-on.
+
+## Fixed-N/K decode GEMMs (`e2e_candidates`)
+
+| Op | Graph vs stock (approx) | Notes |
+|---|---|---|
+| `o_proj` | M16 ~1.39–1.44×, M32 ~1.06–1.08× | `compiled_dims=nk`, graph-only |
+| `fused_qkv_a_proj` | M16/M32 ~1.28–1.35× leaf | graph-only |
+| `index_q_upproj` | M16 ~1.22×, M32 ~1.19× leaf | graph-only |
+
+```bash
+export SGLANG_GLM52_OPT=1
+export SGLANG_GLM52_OPT_PROFILE=e2e_candidates
+export SGLANG_GLM52_OPT_OPS=o_proj,fused_qkv_a_proj,index_q_upproj
+export SGLANG_GLM52_OPT_M_BUCKETS='o_proj:16|32,fused_qkv_a_proj:16|32,index_q_upproj:16|32'
+```
+
+## FlashMLA decode + prefill (`hotspot_candidates`)
+
+| Op | Identity | Graph vs stock |
+|---|---|---|
+| `dsa_decode_attn` / FlashMLA | P1 + `combine_c2` | M16 ~1.27×, M32 ~1.14× |
+| `dsa_prefill_attn` | `b3_b5_native_exact` | M1024 ~1.05× … M4096 ~1.10× |
+
+```bash
+HOTSPOT="$(python - <<'PY'
+from pathlib import Path
+import sglang.srt.layers.glm52_opt.hotspot_candidates as m
+print(Path(m.__file__).resolve().parent)
+PY
+)"
+
+# Decode stack
+export SGLANG_GLM52_OPT=1
+export SGLANG_GLM52_OPT_PROFILE=hotspot_candidates
+export SGLANG_GLM52_OPT_OPS=flashmla_sparse_decode
+export SGLANG_GLM52_OPT_M_BUCKETS='dsa_decode_attn:16|32'
+export SGLANG_GLM52_HOTSPOT_MODULE="$HOTSPOT/flashmla_combine_decode_provider.py"
+export GLM52_FLASHMLA_COMBINE_VARIANT=combine_c2_bucket_stages
+export GLM52_FLASHMLA_USE_PREBUILT=1
+# serve: --dsa-decode-backend flashmla_kv
+
+# Prefill (separate process / OPT_OPS swap)
+export SGLANG_GLM52_OPT_OPS=dsa_prefill_attn
+export SGLANG_GLM52_OPT_M_BUCKETS='dsa_prefill_attn:1024|2048|4096'
+export SGLANG_GLM52_HOTSPOT_MODULE="$HOTSPOT/flashmla_sparse_prefill_provider.py"
+export GLM52_DSA_PREFILL_VARIANT=b3_b5_native_exact
+export GLM52_DSA_PREFILL_USE_PREBUILT=1
+# serve: --dsa-prefill-backend flashmla_kv
+```
+
+## MoE (existing hotspot hooks)
+
+- `moe_gate_proj` / fused W13 BM16: still external-acceptance via
+  `SGLANG_GLM52_HOTSPOT_MODULE` pointing at the W13 provider (see
+  `goal/glm52-hotspot-moe-w13-decode`).
+- `moe_down_proj` W2 graph-only BM16: leaf win but region historically failed
+  the 1.03 gate; keep default off unless you accept ~1–3% region uncertainty.
+
+## Not registered (no usable ≥1% SGLang path this round)
+
+- `index_score` prefill/decode PTX (~1.027× leaf, region diluted)
+- MoE SwiGLU region rescue (leaf large, region Amdahl-capped ~1.02×)

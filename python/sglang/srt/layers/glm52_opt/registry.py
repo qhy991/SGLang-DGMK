@@ -154,6 +154,9 @@ _E2E_DECODE: dict[str, KernelSpec] = {
         m_values=(16, 32),
         n=4096,
         k=2048,
+        # Decode index_q_upproj is production graph-bound; eager dispatch tax
+        # regresses the containing region. Graph-only mirrors o_proj / fused_qkv_a.
+        graph_only=True,
     ),
     "fused_qkv_a_proj": KernelSpec(
         op="fused_qkv_a_proj",
