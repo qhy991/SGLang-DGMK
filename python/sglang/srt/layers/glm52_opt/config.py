@@ -257,16 +257,32 @@ def graph_only_enabled(op_name: str) -> bool:
 # ``BLOCK_M=32 BLOCK_N=64`` (16 pipeline stages): 96 tiles at both M=16 and
 # M=32, each loading a distinct weight slice exactly once.
 #
-# Values are ``(num_sms_override, compiled_dims)``.  ``None`` keeps DeepGEMM's
-# own ``multiProcessorCount`` default.
-_O_PROJ_DECODE_SCHEDULES: dict[str, tuple[int | None, str]] = {
+# That parity trick is NOT available: DeepGEMM's ``GemmDesc::check_validity``
+# asserts ``num_sms % 2 == 0`` before any layout is enumerated, so no odd value
+# ever reaches the comparator (confirmed on device --
+# ``Assertion error (heuristics/config.hpp:47): num_sms % 2 == 0``).  Enumerating
+# every *legal* num_sms shows no value raises M=16 above the 48 tiles round 1
+# already uses; the only reachable change is at M=32, where ``num_sms <= 94``
+# trades 96 tiles/two weight sweeps for 48 tiles/one sweep.  A schedule that
+# cannot move M=16 cannot clear a gate that requires both decode buckets, so the
+# 96-tile layout is reached instead through a narrow per-call descriptor bit in
+# the task's DeepGEMM build (``glm52_o_proj_decode_bn64``), loaded as an overlay
+# so the installed package is untouched.
+#
+# Values are ``(num_sms_override, compiled_dims, use_forked_bn64_layout)``.
+# ``None`` keeps DeepGEMM's own ``multiProcessorCount`` default.
+_O_PROJ_DECODE_SCHEDULES: dict[str, tuple[int | None, str, bool]] = {
     # Round-1 external-acceptance candidate (frozen): fixed N/K on the stock
-    # 148-SM/clustered layout.  This is the round-2 comparison denominator.
-    "nk148": (None, "nk"),
-    # Round-2 identity A: same fixed N/K, odd-SM (cluster-free) 96-tile layout.
-    "nk147": (147, "nk"),
-    # Round-2 identity B: identity A plus baking M as a compile constant.
-    "mnk147": (147, "mnk"),
+    # 148-SM clustered layout.  This is the round-2 comparison denominator.
+    "nk148": (None, "nk", False),
+    # Round-2 identity: fixed N/K on the cluster-free BLOCK_M=32/BLOCK_N=64
+    # layout -- 96 single-wave tiles at both decode M buckets, each loading a
+    # distinct weight slice exactly once.  Requires the DeepGEMM overlay.
+    "bn64": (None, "nk", True),
+    # Legal-knob reference point, measured but not a candidate: M=32-only single
+    # weight sweep.  Kept selectable because it is the best the stock package
+    # can do, and it is the honest denominator for "was the fork necessary?".
+    "nk94": (94, "nk", False),
 }
 # Fail-safe: the default stays the *measured and accepted* round-1 candidate.
 # It is only advanced to a round-2 schedule by a run that cleared the plan's
@@ -297,8 +313,8 @@ def o_proj_decode_schedule_name() -> str:
     return raw
 
 
-def o_proj_decode_schedule() -> tuple[int | None, str]:
-    """``(num_sms_override, compiled_dims)`` for the decode o_proj candidate."""
+def o_proj_decode_schedule() -> tuple[int | None, str, bool]:
+    """``(num_sms_override, compiled_dims, bn64)`` for the decode o_proj candidate."""
     return _O_PROJ_DECODE_SCHEDULES[o_proj_decode_schedule_name()]
 
 

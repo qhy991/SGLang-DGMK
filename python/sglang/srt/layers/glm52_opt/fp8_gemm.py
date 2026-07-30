@@ -137,6 +137,33 @@ def _deepgemm_num_sms(num_sms: Optional[int]):
         deep_gemm.set_num_sms(previous)
 
 
+def _bn64_gemm_module():
+    """The DeepGEMM build carrying the scoped decode o_proj bn64 layout bit.
+
+    Fails closed: if the overlay is missing or predates the bit, raise instead of
+    quietly running stock, which would time the wrong kernel as "the candidate".
+    """
+    fork = get_experimental_deep_gemm()
+    if fork is None:
+        raise RuntimeError(
+            "glm52_opt: decode o_proj bn64 schedule needs the DeepGEMM overlay; "
+            "set SGLANG_GLM52_DEEPGEMM_VARIANT and SGLANG_GLM52_DEEPGEMM_MANIFEST"
+        )
+    import inspect
+
+    try:
+        sig = inspect.signature(fork.fp8_gemm_nt)
+    except (TypeError, ValueError):  # pragma: no cover - C entry without a sig
+        sig = None
+    if sig is not None and "glm52_o_proj_decode_bn64" not in sig.parameters:
+        raise RuntimeError(
+            "glm52_opt: DeepGEMM overlay at "
+            f"{getattr(fork, '__file__', '?')} has no glm52_o_proj_decode_bn64 "
+            "argument; refusing to time stock as the bn64 candidate"
+        )
+    return fork
+
+
 def _run_packed_fp8_gemm(
     x_fp8: torch.Tensor,
     w_fp8: torch.Tensor,
@@ -146,23 +173,23 @@ def _run_packed_fp8_gemm(
     *,
     compiled_dims: Optional[str] = "nk",
     num_sms: Optional[int] = None,
+    bn64: bool = False,
 ) -> None:
-    if w_scale.dtype == torch.int32 and x_scale.dtype == torch.int32:
-        with _deepgemm_num_sms(num_sms):
-            deep_gemm.fp8_gemm_nt(
-                (x_fp8, x_scale),
-                (w_fp8, w_scale),
-                out,
-                compiled_dims=compiled_dims,
-            )
-        return
-    x_packed, w_packed = pack_scales(x_scale, w_scale)
+    if w_scale.dtype != torch.int32 or x_scale.dtype != torch.int32:
+        x_scale, w_scale = pack_scales(x_scale, w_scale)
+    if bn64:
+        module = _bn64_gemm_module()
+        kwargs = {"glm52_o_proj_decode_bn64": True}
+    else:
+        module = deep_gemm
+        kwargs = {}
     with _deepgemm_num_sms(num_sms):
-        deep_gemm.fp8_gemm_nt(
-            (x_fp8, x_packed),
-            (w_fp8, w_packed),
+        module.fp8_gemm_nt(
+            (x_fp8, x_scale),
+            (w_fp8, w_scale),
             out,
             compiled_dims=compiled_dims,
+            **kwargs,
         )
 
 
@@ -236,8 +263,9 @@ def run_fp8_gemm(
         # DeepGEMM's own num_sms.
         num_sms: Optional[int] = None
         compiled_dims = "nk"
+        bn64 = False
         if op_name == "o_proj" and phase == "decode":
-            num_sms, compiled_dims = o_proj_decode_schedule()
+            num_sms, compiled_dims, bn64 = o_proj_decode_schedule()
         _run_packed_fp8_gemm(
             x_fp8,
             w_fp8,
@@ -246,6 +274,7 @@ def run_fp8_gemm(
             out,
             compiled_dims=compiled_dims,
             num_sms=num_sms,
+            bn64=bn64,
         )
         return True, "fixed_nk"
 
