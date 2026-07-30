@@ -133,7 +133,16 @@ def test_e2e_candidates_defaults_to_archived_leaf_winners():
         assert qkv.profiler_name == "infini_kernel_glm52_fused_qkv_a_prefill_nk"
         assert qkv.n == 2624 and qkv.k == 6144
         assert lookup("fused_qkv_a_proj", "prefill", m=2048) is None
-        assert lookup("fused_qkv_a_proj", "decode", m=16) is None
+        # Decode fused_qkv_a_proj is a distinct graph-only fixed-N/K candidate
+        # (same N/K, weight shared with prefill; only M changes to {16,32}).
+        qkv_dec = lookup("fused_qkv_a_proj", "decode", m=16)
+        assert qkv_dec is not None
+        assert qkv_dec.implementation == "fixed_nk"
+        assert qkv_dec.graph_only is True
+        assert qkv_dec.n == 2624 and qkv_dec.k == 6144
+        assert qkv_dec.profiler_name == "infini_kernel_glm52_fused_qkv_a_decode_nk"
+        assert lookup("fused_qkv_a_proj", "decode", m=32) is not None
+        assert lookup("fused_qkv_a_proj", "decode", m=8) is None
 
         os.environ.pop("SGLANG_GLM52_OPT_OPS", None)
         w13 = contig_psum_kwargs("moe_gate_proj")

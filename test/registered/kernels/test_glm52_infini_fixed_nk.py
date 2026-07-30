@@ -31,6 +31,7 @@ class TestGlm52InfiniFixedNk(unittest.TestCase):
             "SGLANG_GLM52_ALLOW_ABI_ADAPTER",
             "SGLANG_GLM52_OPT_HIT_FILE",
             "SGLANG_GLM52_O_PROJ_GRAPH_ONLY",
+            "SGLANG_GLM52_FUSED_QKV_A_GRAPH_ONLY",
         )
         old_env = {key: os.environ.get(key) for key in managed_env}
 
@@ -78,12 +79,16 @@ class TestGlm52InfiniFixedNk(unittest.TestCase):
         compile_utils._ENABLE_JIT_DEEPGEMM_PRECOMPILE = False
         self.addCleanup(set_forward_mode, None)
 
+        from sglang.srt.layers.glm52_opt.config import _GRAPH_ONLY_ENV_BY_OP
+
         cases = (
             ("index_q_upproj", ForwardMode.DECODE, 16, 4096, 2048),
             ("index_q_upproj", ForwardMode.DECODE, 32, 4096, 2048),
             ("o_proj", ForwardMode.DECODE, 16, 6144, 16384),
             ("o_proj", ForwardMode.DECODE, 32, 6144, 16384),
             ("fused_qkv_a_proj", ForwardMode.EXTEND, 4096, 2624, 6144),
+            ("fused_qkv_a_proj", ForwardMode.DECODE, 16, 2624, 6144),
+            ("fused_qkv_a_proj", ForwardMode.DECODE, 32, 2624, 6144),
         )
 
         torch.manual_seed(0)
@@ -96,6 +101,7 @@ class TestGlm52InfiniFixedNk(unittest.TestCase):
                 spec = lookup(op, phase, m=m)
                 self.assertIsNotNone(spec)
                 graph_only_op = bool(spec.graph_only)
+                graph_only_env = _GRAPH_ONLY_ENV_BY_OP.get(op)
 
                 weight = torch.randn(
                     (n, k), device="cuda", dtype=torch.bfloat16
@@ -120,8 +126,9 @@ class TestGlm52InfiniFixedNk(unittest.TestCase):
                 if graph_only_op:
                     # Production setting (graph-only on): eager decode must
                     # decline to stock, take no fixed-N/K hit, and match stock
-                    # bit-for-bit.  Only o_proj is graph_only today.
-                    os.environ["SGLANG_GLM52_O_PROJ_GRAPH_ONLY"] = "1"
+                    # bit-for-bit.  o_proj and fused_qkv_a_proj are graph_only.
+                    assert graph_only_env is not None
+                    os.environ[graph_only_env] = "1"
                     before = _HIT_COUNTS.get(hit_key, 0)
                     with op_context(op):
                         declined = deepgemm_w8a8_block_fp8_linear_with_fallback(
@@ -131,7 +138,7 @@ class TestGlm52InfiniFixedNk(unittest.TestCase):
                     torch.testing.assert_close(declined, stock, rtol=0, atol=0)
                     # Diagnostic eager (graph-only off): candidate is selected;
                     # this also warms the fixed-N/K JIT before graph capture.
-                    os.environ["SGLANG_GLM52_O_PROJ_GRAPH_ONLY"] = "0"
+                    os.environ[graph_only_env] = "0"
 
                 with op_context(op):
                     candidate = deepgemm_w8a8_block_fp8_linear_with_fallback(
@@ -148,7 +155,7 @@ class TestGlm52InfiniFixedNk(unittest.TestCase):
                 # Graph capture selects the fixed-N/K candidate even under the
                 # production graph-only setting: capture overrides the decline.
                 if graph_only_op:
-                    os.environ["SGLANG_GLM52_O_PROJ_GRAPH_ONLY"] = "1"
+                    os.environ[graph_only_env] = "1"
                 graph = torch.cuda.CUDAGraph()
                 with torch.cuda.graph(graph), op_context(op):
                     graph_out = deepgemm_w8a8_block_fp8_linear_with_fallback(

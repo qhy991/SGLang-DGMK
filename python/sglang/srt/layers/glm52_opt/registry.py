@@ -155,6 +155,24 @@ _E2E_DECODE: dict[str, KernelSpec] = {
         n=4096,
         k=2048,
     ),
+    "fused_qkv_a_proj": KernelSpec(
+        op="fused_qkv_a_proj",
+        phase="decode",
+        archive_ref="",
+        kind="fp8_gemm",
+        implementation="fixed_nk",
+        profiler_name="infini_kernel_glm52_fused_qkv_a_decode_nk",
+        m_values=(16, 32),
+        n=2624,
+        k=6144,
+        # Decode fused_qkv_a_proj (prepare_qkv_latent down-projection) is
+        # production graph-bound; the eager glm52_opt dispatch tax vetoes the
+        # fixed-N/K device win in eager paired sessions exactly like o_proj.
+        # Restrict selection to CUDA-graph capture so eager decode stays on stock
+        # with no provider launch; SGLANG_GLM52_FUSED_QKV_A_GRAPH_ONLY=0 forces
+        # eager for a diagnostic leaf. Mirrors o_proj / moe_down_proj.
+        graph_only=True,
+    ),
 }
 
 _E2E_PREFILL: dict[str, KernelSpec] = {

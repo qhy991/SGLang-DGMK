@@ -35,6 +35,7 @@ _GLM52_ENV_KEYS = frozenset(
         # 0: allow eager selection for diagnostic leaf timing.
         "SGLANG_GLM52_W2_GRAPH_ONLY",
         "SGLANG_GLM52_O_PROJ_GRAPH_ONLY",
+        "SGLANG_GLM52_FUSED_QKV_A_GRAPH_ONLY",
     }
 )
 
@@ -223,6 +224,7 @@ def emit_infini_kernel_nvtx() -> bool:
 _GRAPH_ONLY_ENV_BY_OP = {
     "moe_down_proj": "SGLANG_GLM52_W2_GRAPH_ONLY",
     "o_proj": "SGLANG_GLM52_O_PROJ_GRAPH_ONLY",
+    "fused_qkv_a_proj": "SGLANG_GLM52_FUSED_QKV_A_GRAPH_ONLY",
 }
 
 

@@ -596,3 +596,147 @@ def test_o_proj_graph_only_can_be_disabled_for_diagnostic_eager_leaf():
     finally:
         set_forward_mode(None)
         _restore_env(saved)
+
+
+def test_fused_qkv_a_decode_e2e_spec_is_graph_only():
+    """Decode fused_qkv_a_proj (fixed-N/K) is an explicit-only graph_only op."""
+    names = ("SGLANG_GLM52_OPT", "SGLANG_GLM52_OPT_PROFILE", "SGLANG_GLM52_OPT_OPS")
+    saved = {name: os.environ.get(name) for name in names}
+    try:
+        os.environ["SGLANG_GLM52_OPT"] = "1"
+        os.environ["SGLANG_GLM52_OPT_PROFILE"] = "e2e_candidates"
+        # Explicit-only: it must NOT appear in the default e2e set.
+        os.environ.pop("SGLANG_GLM52_OPT_OPS", None)
+        assert lookup("fused_qkv_a_proj", "decode", m=16) is None
+        # With the explicit allowlist the decode candidate is selected.
+        os.environ["SGLANG_GLM52_OPT_OPS"] = "fused_qkv_a_proj"
+        qkv = lookup("fused_qkv_a_proj", "decode", m=16)
+        assert qkv is not None
+        assert qkv.kind == "fp8_gemm"
+        assert qkv.implementation == "fixed_nk"
+        assert qkv.graph_only is True
+        assert (qkv.n, qkv.k) == (2624, 6144)
+        assert qkv.profiler_name == "infini_kernel_glm52_fused_qkv_a_decode_nk"
+        assert lookup("fused_qkv_a_proj", "decode", m=32) is not None
+        assert lookup("fused_qkv_a_proj", "decode", m=64) is None
+    finally:
+        _restore_env(saved)
+
+
+def test_fused_qkv_a_graph_only_env_parsing():
+    """SGLANG_GLM52_FUSED_QKV_A_GRAPH_ONLY toggles only fused_qkv_a_proj."""
+    names = (
+        "SGLANG_GLM52_FUSED_QKV_A_GRAPH_ONLY",
+        "SGLANG_GLM52_O_PROJ_GRAPH_ONLY",
+        "SGLANG_GLM52_W2_GRAPH_ONLY",
+    )
+    saved = {name: os.environ.get(name) for name in names}
+    try:
+        os.environ.pop("SGLANG_GLM52_FUSED_QKV_A_GRAPH_ONLY", None)
+        assert config.graph_only_enabled("fused_qkv_a_proj") is True
+        for value in ("0", "false", "no", "OFF", " off "):
+            os.environ["SGLANG_GLM52_FUSED_QKV_A_GRAPH_ONLY"] = value
+            assert config.graph_only_enabled("fused_qkv_a_proj") is False
+        for value in ("1", "true", "on"):
+            os.environ["SGLANG_GLM52_FUSED_QKV_A_GRAPH_ONLY"] = value
+            assert config.graph_only_enabled("fused_qkv_a_proj") is True
+        # The fused_qkv_a override must not leak into o_proj / W2 and vice versa.
+        os.environ["SGLANG_GLM52_FUSED_QKV_A_GRAPH_ONLY"] = "0"
+        os.environ.pop("SGLANG_GLM52_O_PROJ_GRAPH_ONLY", None)
+        os.environ.pop("SGLANG_GLM52_W2_GRAPH_ONLY", None)
+        assert config.graph_only_enabled("fused_qkv_a_proj") is False
+        assert config.graph_only_enabled("o_proj") is True
+        assert config.graph_only_enabled("moe_down_proj") is True
+    finally:
+        _restore_env(saved)
+
+
+def _fused_qkv_a_graph_only_dispatch(*, capturing: bool):
+    """Drive one decode fused_qkv_a_proj fp8_gemm dispatch with a mocked capture."""
+    input_2d = torch.zeros((16, 8))
+    weight = torch.zeros((2624, 8))
+    scale = torch.zeros(1, dtype=torch.int32)
+    with (
+        op_context("fused_qkv_a_proj"),
+        patch(
+            "sglang.srt.layers.glm52_opt.dispatch._is_cuda_graph_capturing",
+            return_value=capturing,
+        ),
+        patch(
+            "sglang.srt.layers.glm52_opt.dispatch._fixed_nk_abi_matches",
+            return_value=True,
+        ) as abi,
+        patch(
+            "sglang.srt.layers.glm52_opt.dispatch.run_fp8_gemm",
+            return_value=(True, "fixed_nk"),
+        ) as candidate,
+        patch("sglang.srt.layers.glm52_opt.dispatch._record_hit") as hit,
+        patch("sglang.srt.layers.glm52_opt.dispatch._record_miss") as miss,
+    ):
+        result = try_dispatch_fp8_gemm(
+            input_2d, weight, scale, scale, [128, 128], torch.bfloat16
+        )
+    return result, abi, candidate, hit, miss
+
+
+def test_fused_qkv_a_graph_only_declines_eager_before_abi_and_run():
+    names = (
+        "SGLANG_GLM52_OPT",
+        "SGLANG_GLM52_OPT_PROFILE",
+        "SGLANG_GLM52_OPT_OPS",
+        "SGLANG_GLM52_FUSED_QKV_A_GRAPH_ONLY",
+    )
+    saved = {name: os.environ.get(name) for name in names}
+    try:
+        os.environ["SGLANG_GLM52_OPT"] = "1"
+        os.environ["SGLANG_GLM52_OPT_PROFILE"] = "e2e_candidates"
+        os.environ["SGLANG_GLM52_OPT_OPS"] = "fused_qkv_a_proj"
+        os.environ.pop("SGLANG_GLM52_FUSED_QKV_A_GRAPH_ONLY", None)
+        set_forward_mode(ForwardMode.DECODE, 16)
+
+        # Eager, production graph-only on: decline to stock before the ABI check
+        # and before the hit/miss lock; no candidate launch.
+        result, abi, candidate, hit, miss = _fused_qkv_a_graph_only_dispatch(
+            capturing=False
+        )
+        assert result is None
+        candidate.assert_not_called()
+        hit.assert_not_called()
+        abi.assert_not_called()
+        miss.assert_not_called()
+
+        # Under graph capture the candidate is selected and the GEMM runs once.
+        result, _abi, candidate, hit, _miss = _fused_qkv_a_graph_only_dispatch(
+            capturing=True
+        )
+        assert result is not None
+        candidate.assert_called_once()
+        hit.assert_called_once()
+    finally:
+        set_forward_mode(None)
+        _restore_env(saved)
+
+
+def test_fused_qkv_a_graph_only_can_be_disabled_for_diagnostic_eager_leaf():
+    names = (
+        "SGLANG_GLM52_OPT",
+        "SGLANG_GLM52_OPT_PROFILE",
+        "SGLANG_GLM52_OPT_OPS",
+        "SGLANG_GLM52_FUSED_QKV_A_GRAPH_ONLY",
+    )
+    saved = {name: os.environ.get(name) for name in names}
+    try:
+        os.environ["SGLANG_GLM52_OPT"] = "1"
+        os.environ["SGLANG_GLM52_OPT_PROFILE"] = "e2e_candidates"
+        os.environ["SGLANG_GLM52_OPT_OPS"] = "fused_qkv_a_proj"
+        os.environ["SGLANG_GLM52_FUSED_QKV_A_GRAPH_ONLY"] = "0"
+        set_forward_mode(ForwardMode.DECODE, 16)
+
+        result, _abi, candidate, _hit, _miss = _fused_qkv_a_graph_only_dispatch(
+            capturing=False
+        )
+        assert result is not None
+        candidate.assert_called_once()
+    finally:
+        set_forward_mode(None)
+        _restore_env(saved)
