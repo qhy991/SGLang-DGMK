@@ -26,8 +26,10 @@ def test_exact_provider_metadata_and_configs():
     one_sm = _load("provider_bm16_1sm.py")
     assert two_sm.INFINI_KERNEL_API_VERSION == 1
     assert one_sm.INFINI_KERNEL_API_VERSION == 1
-    assert two_sm._PROVIDER.config == (16, 128, 128, 12, 2)
-    assert one_sm._PROVIDER.config == (16, 128, 128, 11, 1)
+    # The sixth element selects the round-2 SF-relay-bypass experiment and
+    # must stay 0 for every validated identity.
+    assert two_sm._PROVIDER.config == (16, 128, 128, 12, 2, 0)
+    assert one_sm._PROVIDER.config == (16, 128, 128, 11, 1, 0)
     for module in (two_sm, one_sm):
         assert set(module.PROVIDER_INFO) >= {"name", "git_commit", "build_id"}
         assert module.PROVIDER_INFO["name"].startswith(
@@ -58,7 +60,7 @@ def test_hot_callback_is_one_fail_closed_candidate_call():
         4,
         compiled_dims="nk",
         disable_ue8m0_cast=True,
-        w13_config=(16, 128, 128, 12, 2),
+        w13_config=(16, 128, 128, 12, 2, 0),
     )
 
     launcher.side_effect = RuntimeError("selected candidate failed")
