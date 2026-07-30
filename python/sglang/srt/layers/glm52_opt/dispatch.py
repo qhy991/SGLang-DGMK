@@ -142,6 +142,11 @@ def _profiler_range_name(spec: KernelSpec, m: int) -> str:
     name = spec.profiler_name or (
         f"infini_kernel_glm52_{spec.op}_{spec.phase}_{spec.implementation}"
     )
+    if spec.op == "o_proj" and spec.phase == "decode":
+        # Decode o_proj's candidate identity includes its DeepGEMM schedule
+        # (launch-SM count -> BLOCK_M/BLOCK_N/cluster), so the profiler range
+        # must name the schedule that actually ran, not just the fixed dims.
+        name = f"{name}_{config.o_proj_decode_schedule_name()}"
     if spec.n is not None and spec.k is not None:
         return f"{name}[M={m},N={spec.n},K={spec.k}]"
     return f"{name}[M={m}]"

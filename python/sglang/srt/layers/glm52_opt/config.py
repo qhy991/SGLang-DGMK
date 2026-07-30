@@ -245,6 +245,63 @@ def graph_only_enabled(op_name: str) -> bool:
     return raw not in ("0", "false", "no", "off")
 
 
+# --- decode o_proj DeepGEMM schedule selection (round 2) --------------------
+#
+# DeepGEMM's SM100 layout heuristic ranks "doing multicast is better" (2-CTA
+# cluster) above tile count, and a 2-CTA cluster is only legal when ``num_sms``
+# is even.  At the stock ``num_sms=148`` the decode o_proj GEMM therefore
+# compiles to ``BLOCK_M=16 BLOCK_N=128`` — only ``ceil(6144/128) = 48`` tiles on
+# a 148-SM B200, and at M=32 a second BLOCK_M row that re-reads the whole
+# 100.7 MB weight matrix.  Handing the heuristic an **odd** ``num_sms``
+# disqualifies every clustered candidate, so it falls to
+# ``BLOCK_M=32 BLOCK_N=64`` (16 pipeline stages): 96 tiles at both M=16 and
+# M=32, each loading a distinct weight slice exactly once.
+#
+# Values are ``(num_sms_override, compiled_dims)``.  ``None`` keeps DeepGEMM's
+# own ``multiProcessorCount`` default.
+_O_PROJ_DECODE_SCHEDULES: dict[str, tuple[int | None, str]] = {
+    # Round-1 external-acceptance candidate (frozen): fixed N/K on the stock
+    # 148-SM/clustered layout.  This is the round-2 comparison denominator.
+    "nk148": (None, "nk"),
+    # Round-2 identity A: same fixed N/K, odd-SM (cluster-free) 96-tile layout.
+    "nk147": (147, "nk"),
+    # Round-2 identity B: identity A plus baking M as a compile constant.
+    "mnk147": (147, "mnk"),
+}
+# Fail-safe: the default stays the *measured and accepted* round-1 candidate.
+# It is only advanced to a round-2 schedule by a run that cleared the plan's
+# graph leaf + containing-region floors against nk148 on one GPU lease.
+_O_PROJ_DECODE_SCHEDULE_DEFAULT = "nk148"
+
+
+def o_proj_decode_schedule_name() -> str:
+    """Selected decode o_proj DeepGEMM schedule name.
+
+    ``SGLANG_GLM52_O_PROJ_DECODE_SCHED`` picks one of
+    ``_O_PROJ_DECODE_SCHEDULES``; it exists so a single process can A/B the
+    round-2 schedule against the frozen round-1 candidate on one GPU lease.
+    Fails closed (raises) on an unknown name rather than silently timing the
+    wrong kernel.
+    """
+    ensure_glm52_env()
+    raw = os.environ.get("SGLANG_GLM52_O_PROJ_DECODE_SCHED", "").strip()
+    if not raw:
+        return _O_PROJ_DECODE_SCHEDULE_DEFAULT
+    if raw not in _O_PROJ_DECODE_SCHEDULES:
+        raise ValueError(
+            "Unsupported SGLANG_GLM52_O_PROJ_DECODE_SCHED="
+            + raw
+            + "; expected one of "
+            + ", ".join(sorted(_O_PROJ_DECODE_SCHEDULES))
+        )
+    return raw
+
+
+def o_proj_decode_schedule() -> tuple[int | None, str]:
+    """``(num_sms_override, compiled_dims)`` for the decode o_proj candidate."""
+    return _O_PROJ_DECODE_SCHEDULES[o_proj_decode_schedule_name()]
+
+
 def contig_psum_kwargs(op_name: str) -> dict[str, object]:
     """Kwargs for DeepGEMM contiguous grouped GEMM PSUM layout (goals 08/09).
 

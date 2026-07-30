@@ -13,11 +13,12 @@ UE8M0 int32 scales, we unpack before calling ``run()``.
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager
 from typing import List, Optional, Tuple
 
 import deep_gemm
 import torch
-from sglang.srt.layers.glm52_opt.config import allow_abi_adapter
+from sglang.srt.layers.glm52_opt.config import allow_abi_adapter, o_proj_decode_schedule
 from sglang.srt.layers.glm52_opt.experimental_deepgemm import (
     get_experimental_deep_gemm,
     has_fused_fp8_gemm_nt,
@@ -103,6 +104,39 @@ def _run_q_b_fused(
     )
 
 
+@contextmanager
+def _deepgemm_num_sms(num_sms: Optional[int]):
+    """Scope DeepGEMM's launch-SM count for one GEMM, then restore it.
+
+    ``num_sms`` is DeepGEMM process-global state that its SM100 layout heuristic
+    reads when choosing BLOCK_M/BLOCK_N/cluster, so it must never leak past the
+    single call it was chosen for.  Validated *before* the candidate GEMM runs:
+    an out-of-range value would trip DeepGEMM's own host assert mid-launch, and
+    a silently-skipped override would time the wrong schedule.
+    """
+    if num_sms is None:
+        yield
+        return
+    if not hasattr(deep_gemm, "set_num_sms") or not hasattr(deep_gemm, "get_num_sms"):
+        raise RuntimeError(
+            "glm52_opt: deep_gemm does not expose get/set_num_sms; refusing to "
+            "run a schedule-overridden candidate on an unknown launch config"
+        )
+    previous = int(deep_gemm.get_num_sms())
+    try:
+        # DeepGEMM host-asserts 0 <= num_sms <= multiProcessorCount. Surface a
+        # named failure here rather than letting the assert fire inside launch.
+        deep_gemm.set_num_sms(int(num_sms))
+    except Exception as exc:  # pragma: no cover - host assert path
+        raise RuntimeError(
+            f"glm52_opt: deep_gemm.set_num_sms({num_sms}) rejected: {exc}"
+        ) from exc
+    try:
+        yield
+    finally:
+        deep_gemm.set_num_sms(previous)
+
+
 def _run_packed_fp8_gemm(
     x_fp8: torch.Tensor,
     w_fp8: torch.Tensor,
@@ -111,22 +145,25 @@ def _run_packed_fp8_gemm(
     out: torch.Tensor,
     *,
     compiled_dims: Optional[str] = "nk",
+    num_sms: Optional[int] = None,
 ) -> None:
     if w_scale.dtype == torch.int32 and x_scale.dtype == torch.int32:
+        with _deepgemm_num_sms(num_sms):
+            deep_gemm.fp8_gemm_nt(
+                (x_fp8, x_scale),
+                (w_fp8, w_scale),
+                out,
+                compiled_dims=compiled_dims,
+            )
+        return
+    x_packed, w_packed = pack_scales(x_scale, w_scale)
+    with _deepgemm_num_sms(num_sms):
         deep_gemm.fp8_gemm_nt(
-            (x_fp8, x_scale),
-            (w_fp8, w_scale),
+            (x_fp8, x_packed),
+            (w_fp8, w_packed),
             out,
             compiled_dims=compiled_dims,
         )
-        return
-    x_packed, w_packed = pack_scales(x_scale, w_scale)
-    deep_gemm.fp8_gemm_nt(
-        (x_fp8, x_packed),
-        (w_fp8, w_packed),
-        out,
-        compiled_dims=compiled_dims,
-    )
 
 
 def _run_archive_candidate(
@@ -192,13 +229,23 @@ def run_fp8_gemm(
     if implementation == "fixed_nk":
         if x_scale.dtype != torch.int32 or w_scale.dtype != torch.int32:
             return False, "fixed_nk_requires_packed_ue8m0"
+        # Decode o_proj is the one fixed-N/K op whose DeepGEMM *schedule* is also
+        # part of the candidate identity (round 2): the selected schedule sets
+        # both the compile-time dims and the launch-SM count the SM100 layout
+        # heuristic reads.  Every other fixed-N/K op keeps plain "nk" on
+        # DeepGEMM's own num_sms.
+        num_sms: Optional[int] = None
+        compiled_dims = "nk"
+        if op_name == "o_proj" and phase == "decode":
+            num_sms, compiled_dims = o_proj_decode_schedule()
         _run_packed_fp8_gemm(
             x_fp8,
             w_fp8,
             x_scale,
             w_scale,
             out,
-            compiled_dims="nk",
+            compiled_dims=compiled_dims,
+            num_sms=num_sms,
         )
         return True, "fixed_nk"
 
