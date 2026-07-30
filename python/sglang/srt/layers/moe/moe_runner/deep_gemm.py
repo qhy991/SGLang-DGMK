@@ -1034,18 +1034,37 @@ def _varlen_deep_gemm_silu_mul_quant(
             device=hidden_states_device,
             dtype=torch.int32 if packed_ue8m0 else torch.float32,
         )
-        silu_and_mul_masked_post_quant(
+        from sglang.srt.layers.glm52_opt.dispatch import try_dispatch_moe_act_quant
+
+        # Fail-closed: the graph-only guard, the frozen semantic mode, and the
+        # exact masked ABI are all checked before any provider launch, so an
+        # unsupported call reaches the unmodified stock kernel below.
+        if not try_dispatch_moe_act_quant(
             gateup_output,
             down_input,
             down_input_scale,
-            group_size,
-            masked_m,
-            scale_ue8m0=packed_ue8m0,
+            group_size=group_size,
+            masked_m=masked_m,
             topk=topk,
-            transposed=packed_ue8m0,
+            num_real_tokens=num_real_tokens,
             swiglu_limit=swiglu_limit,
+            gemm1_alpha=gemm1_alpha,
+            gemm1_clamp_limit=gemm1_clamp_limit,
             swizzle=swizzle,
-        )
+            packed_ue8m0=packed_ue8m0,
+        ):
+            silu_and_mul_masked_post_quant(
+                gateup_output,
+                down_input,
+                down_input_scale,
+                group_size,
+                masked_m,
+                scale_ue8m0=packed_ue8m0,
+                topk=topk,
+                transposed=packed_ue8m0,
+                swiglu_limit=swiglu_limit,
+                swizzle=swizzle,
+            )
         if packed_ue8m0:
             down_input_scale = down_input_scale.transpose(-1, -2)
     else:

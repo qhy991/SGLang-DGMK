@@ -22,6 +22,9 @@ from sglang.srt.layers.glm52_opt.hotspot_provider import run_flashmla_sparse_dec
 from sglang.srt.layers.glm52_opt.hotspot_provider import (
     run_moe_masked as run_hotspot_moe_masked,
 )
+from sglang.srt.layers.glm52_opt.hotspot_provider import (
+    run_moe_swiglu_quant as run_hotspot_moe_swiglu_quant,
+)
 from sglang.srt.layers.glm52_opt.moe_masked import run_moe_masked
 from sglang.srt.layers.glm52_opt.phase import infer_glm52_phase
 from sglang.srt.layers.glm52_opt.registry import KernelSpec, lookup
@@ -305,6 +308,164 @@ def _moe_hotspot_abi_matches(
             device=device,
         )
     )
+
+
+def _moe_act_quant_abi_matches(
+    spec: KernelSpec,
+    gateup_output: torch.Tensor,
+    output: torch.Tensor,
+    output_scale: torch.Tensor,
+    masked_m: torch.Tensor,
+    group_size: int,
+    topk: int,
+    num_real_tokens: Optional[int],
+    forward_m: Optional[int],
+) -> bool:
+    """Exact-ABI gate for the fused SwiGLU + packed-UE8M0 quant node.
+
+    ``expected_m`` is not an argument of this kernel, so the gate pins the
+    launch-time M bucket instead. ``output_scale`` is the physical
+    ``[E, G//4, T]`` int32 buffer before the caller's transpose.
+    """
+    if (
+        spec.implementation != "hotspot_plugin"
+        or spec.kind != "moe_act_quant"
+        or spec.n is None
+        or spec.k is None
+        or spec.num_groups is None
+        or spec.slab_m is None
+        or spec.topk is None
+        or forward_m not in (16, 32)
+    ):
+        return False
+    from sglang.srt.model_executor.forward_batch_info import ForwardMode
+
+    if get_forward_mode() is not ForwardMode.DECODE:
+        return False
+    # The launch-time ForwardBatch bucket is the host-known routed row count a
+    # candidate may size its grid from without reading device counts. On the
+    # GLM-5.2 path the caller's ``num_real_tokens`` is None (it is only set for
+    # the MXFP8 gpt-oss route), so it is accepted when absent and must agree
+    # when present.
+    if num_real_tokens is not None and int(num_real_tokens) != int(forward_m):
+        return False
+    if int(topk) != int(spec.topk) or int(group_size) != 128:
+        return False
+
+    groups, slab_m, gate_up, hidden = (
+        spec.num_groups,
+        spec.slab_m,
+        spec.k,
+        spec.n,
+    )
+    packed_groups = hidden // 128 // 4
+    device = gateup_output.device
+    return bool(
+        _tensor_contract(
+            gateup_output,
+            shape=(groups, slab_m, gate_up),
+            stride=(slab_m * gate_up, gate_up, 1),
+            dtype=torch.bfloat16,
+        )
+        and _tensor_contract(
+            output,
+            shape=(groups, slab_m, hidden),
+            stride=(slab_m * hidden, hidden, 1),
+            dtype=torch.float8_e4m3fn,
+            device=device,
+        )
+        and _tensor_contract(
+            output_scale,
+            shape=(groups, packed_groups, slab_m),
+            stride=(packed_groups * slab_m, slab_m, 1),
+            dtype=torch.int32,
+            device=device,
+        )
+        and _tensor_contract(
+            masked_m,
+            shape=(groups,),
+            stride=(1,),
+            dtype=torch.int32,
+            device=device,
+        )
+    )
+
+
+def try_dispatch_moe_act_quant(
+    gateup_output: torch.Tensor,
+    output: torch.Tensor,
+    output_scale: torch.Tensor,
+    *,
+    group_size: int,
+    masked_m: Optional[torch.Tensor],
+    topk: int,
+    num_real_tokens: Optional[int],
+    swiglu_limit: Optional[float],
+    gemm1_alpha: Optional[float],
+    gemm1_clamp_limit: Optional[float],
+    swizzle: bool,
+    packed_ue8m0: bool,
+) -> bool:
+    """Run one exact fused SwiGLU+quant replacement or leave stock selected.
+
+    Returns True only after the provider has run. Every unsupported semantic
+    mode, shape, stride, dtype, or eager call returns False *before* any
+    provider launch, so the caller runs the unmodified stock helper. Once the
+    provider is invoked its errors propagate; stock is never retried.
+    """
+    if not config.is_enabled():
+        return False
+    # Only the exact frozen GLM-5.2 activation mode is supported: ordinary
+    # silu, no clamp/alpha, no swizzle, packed UE8M0 scales.
+    if (
+        swiglu_limit is not None
+        or gemm1_alpha is not None
+        or gemm1_clamp_limit is not None
+        or swizzle
+        or not packed_ue8m0
+        or masked_m is None
+    ):
+        return False
+    forward_m = get_forward_m()
+    spec = lookup("moe_act_quant", "decode", m=forward_m)
+    if spec is None or spec.kind != "moe_act_quant":
+        _record_miss("moe_act_no_spec", "moe_act_quant", "decode", m=forward_m)
+        return False
+    # Declines outside capture before the ABI check and before the hit/miss
+    # lock, so eager decode keeps stock with zero provider launch.
+    if _graph_only_declines(spec):
+        return False
+    if not _moe_act_quant_abi_matches(
+        spec,
+        gateup_output,
+        output,
+        output_scale,
+        masked_m,
+        group_size,
+        topk,
+        num_real_tokens,
+        forward_m,
+    ):
+        _record_miss("moe_act_abi", spec.op, "decode", m=forward_m)
+        return False
+    with _nvtx_range(
+        _profiler_range_name(spec, int(forward_m) if forward_m is not None else -1)
+    ):
+        returned = run_hotspot_moe_swiglu_quant(
+            gateup_output=gateup_output,
+            output=output,
+            output_scale=output_scale,
+            group_size=group_size,
+            masked_m=masked_m,
+            topk=topk,
+            num_real_tokens=int(forward_m),
+        )
+    if returned is not None:
+        raise RuntimeError(
+            f"{spec.op} hotspot provider violated the stock None return contract"
+        )
+    _record_hit("hotspot_plugin", spec.op, "decode", m=forward_m)
+    return True
 
 
 def _flashmla_hotspot_abi_matches(

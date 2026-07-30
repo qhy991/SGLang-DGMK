@@ -19,6 +19,7 @@ from sglang.srt.layers.glm52_opt.config import (
 KernelKind = Literal[
     "fp8_gemm",
     "moe_masked",
+    "moe_act_quant",
     "bmm",
     "dsa",
     "score_mqa",
@@ -237,6 +238,26 @@ _HOTSPOT_DECODE: dict[str, KernelSpec] = {
         num_groups=32,
         slab_m=1024,
         expected_m_values=(4, 5, 8, 9),
+        graph_only=True,
+    ),
+    # Fused SwiGLU + packed-UE8M0 quant between W13 and W2. ``expected_m`` is
+    # not an argument of this kernel, so the spec pins only the launch-time M
+    # bucket and the exact masked activation ABI (E32 / slab 1024 / gate-up
+    # 4096 -> hidden 2048, group size 128, topk 8). graph_only for the same
+    # reason as W2: the API-v1 Python provider tax dwarfs a ~7 us node.
+    "moe_act_quant": KernelSpec(
+        op="moe_act_quant",
+        phase="decode",
+        archive_ref="",
+        kind="moe_act_quant",
+        implementation="hotspot_plugin",
+        profiler_name="infini_kernel_glm52_moe_swiglu_quant_decode",
+        m_values=(16, 32),
+        n=2048,
+        k=4096,
+        num_groups=32,
+        slab_m=1024,
+        topk=8,
         graph_only=True,
     ),
 }

@@ -28,7 +28,7 @@ def _restore_env(saved: dict[str, str | None]) -> None:
             os.environ[name] = value
 
 
-def test_hotspot_profile_registers_exact_three_decode_ops():
+def test_hotspot_profile_registers_exact_four_decode_ops():
     names = ("SGLANG_GLM52_OPT_PROFILE", "SGLANG_GLM52_OPT_OPS")
     saved = {name: os.environ.get(name) for name in names}
     try:
@@ -39,6 +39,7 @@ def test_hotspot_profile_registers_exact_three_decode_ops():
             "dsa_decode_attn",
             "moe_gate_proj",
             "moe_down_proj",
+            "moe_act_quant",
         }
 
         flashmla = lookup("dsa_decode_attn", "decode", m=16)
@@ -63,12 +64,32 @@ def test_hotspot_profile_registers_exact_three_decode_ops():
         assert w2 is not None
         assert (w2.n, w2.k) == (6144, 2048)
 
+        # The fused SwiGLU + packed-UE8M0 quant node between the two GEMMs.
+        # expected_m is not one of its arguments, so the spec pins only the M
+        # bucket and the exact masked activation ABI.
+        act = lookup("moe_act_quant", "decode", m=16)
+        assert act is not None
+        assert act.kind == "moe_act_quant"
+        assert (act.num_groups, act.slab_m, act.k, act.n, act.topk) == (
+            32,
+            1024,
+            4096,
+            2048,
+            8,
+        )
+        assert act.expected_m_values is None
+        assert act.graph_only is True
+        assert lookup("moe_act_quant", "decode", m=64) is None
+
         # User-facing fused names normalize to existing SGLang op contexts.
-        os.environ["SGLANG_GLM52_OPT_OPS"] = "flashmla_sparse_decode,moe_w13,moe_w2"
+        os.environ["SGLANG_GLM52_OPT_OPS"] = (
+            "flashmla_sparse_decode,moe_w13,moe_w2,moe_swiglu_quant"
+        )
         assert config.hotspot_candidate_ops() == {
             "dsa_decode_attn",
             "moe_gate_proj",
             "moe_down_proj",
+            "moe_act_quant",
         }
         os.environ["SGLANG_GLM52_OPT_OPS"] = "moe_w13"
         assert [spec.op for spec in list_enabled("decode")] == ["moe_gate_proj"]

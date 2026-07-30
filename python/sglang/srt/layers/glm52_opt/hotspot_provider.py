@@ -29,6 +29,7 @@ _CALLBACK_BY_OP = {
     "dsa_decode_attn": "flashmla_sparse_decode",
     "moe_gate_proj": "moe_w13",
     "moe_down_proj": "moe_w2",
+    "moe_act_quant": "moe_swiglu_quant",
 }
 
 
@@ -208,6 +209,34 @@ def run_moe_masked(
         out=out,
         masked_m=masked_m,
         expected_m=expected_m,
+    )
+
+
+def run_moe_swiglu_quant(
+    *,
+    gateup_output,
+    output,
+    output_scale,
+    group_size: int,
+    masked_m,
+    topk: int,
+    num_real_tokens: int,
+):
+    """Call the provider's fused SwiGLU + packed-UE8M0 quant implementation.
+
+    Mirrors ``sglang.jit_kernel.dsv4.silu_and_mul_masked_post_quant``: the
+    callback mutates ``output`` and ``output_scale`` in place and returns
+    ``None``. ``output_scale`` is the physical ``[E, G//4, T]`` int32 buffer,
+    not the transposed logical view the caller hands to W2.
+    """
+    return _callback("moe_act_quant")(
+        gateup_output=gateup_output,
+        output=output,
+        output_scale=output_scale,
+        group_size=group_size,
+        masked_m=masked_m,
+        topk=topk,
+        num_real_tokens=num_real_tokens,
     )
 
 

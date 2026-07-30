@@ -36,6 +36,7 @@ _GLM52_ENV_KEYS = frozenset(
         "SGLANG_GLM52_W2_GRAPH_ONLY",
         "SGLANG_GLM52_O_PROJ_GRAPH_ONLY",
         "SGLANG_GLM52_FUSED_QKV_A_GRAPH_ONLY",
+        "SGLANG_GLM52_MOE_ACT_QUANT_GRAPH_ONLY",
     }
 )
 
@@ -149,13 +150,25 @@ _E2E_ALLOWED_OPS = _E2E_DEFAULT_OPS | _E2E_EXPLICIT_OPS
 # Exact production-interface hooks for out-of-tree PTX/SASS, CUDA/CuTe, or
 # Triton experiments.  These are intentionally isolated from e2e_candidates:
 # selecting the hotspot profile must never also turn on an older archive swap.
-_HOTSPOT_DEFAULT_OPS = frozenset({"dsa_decode_attn", "moe_gate_proj", "moe_down_proj"})
+_HOTSPOT_DEFAULT_OPS = frozenset(
+    {
+        "dsa_decode_attn",
+        "moe_gate_proj",
+        "moe_down_proj",
+        # Fused SwiGLU + packed-UE8M0 quant between the two MoE GEMMs. It is a
+        # node of the same containing region, not a grouped GEMM, so it carries
+        # its own kind and ABI gate.
+        "moe_act_quant",
+    }
+)
 _HOTSPOT_OP_ALIASES = {
     "flashmla_sparse_decode": "dsa_decode_attn",
     "flashmla_kv": "dsa_decode_attn",
     "moe_w13": "moe_gate_proj",
     "moe_gate_up": "moe_gate_proj",
     "moe_w2": "moe_down_proj",
+    "moe_swiglu_quant": "moe_act_quant",
+    "moe_silu_mul_quant": "moe_act_quant",
 }
 
 
@@ -225,6 +238,7 @@ _GRAPH_ONLY_ENV_BY_OP = {
     "moe_down_proj": "SGLANG_GLM52_W2_GRAPH_ONLY",
     "o_proj": "SGLANG_GLM52_O_PROJ_GRAPH_ONLY",
     "fused_qkv_a_proj": "SGLANG_GLM52_FUSED_QKV_A_GRAPH_ONLY",
+    "moe_act_quant": "SGLANG_GLM52_MOE_ACT_QUANT_GRAPH_ONLY",
 }
 
 
