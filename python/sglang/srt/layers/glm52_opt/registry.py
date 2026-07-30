@@ -169,6 +169,31 @@ _E2E_PREFILL: dict[str, KernelSpec] = {
         n=2624,
         k=6144,
     ),
+    "o_proj": KernelSpec(
+        op="o_proj",
+        phase="prefill",
+        archive_ref="",
+        kind="fp8_gemm",
+        implementation="fixed_nk",
+        profiler_name="infini_kernel_glm52_attn_o_prefill_nk",
+        # Locked promotional prefill buckets (chunked-prefill dominant M).
+        m_values=(2048, 4096),
+        n=6144,
+        k=16384,
+        # Same fixed-N/K candidate as decode o_proj; production prefill is
+        # CUDA-graph bound by default on CUDA (Backend.BREAKABLE), so the
+        # graph_only pattern applies exactly as to decode: select under capture,
+        # decline eager with zero provider tax. Shares SGLANG_GLM52_O_PROJ_GRAPH_ONLY
+        # with the decode spec. _E2E_DECODE is untouched → decode is not regressed.
+        # Unlike latency-bound decode (nk wins ~1.39x), prefill at these Ms is
+        # tensor-pipe bound (goal-13 NCU 91% tensor-pipe, nk 256.86->256.13us) so
+        # the compile specialization is device-neutral. MEASURED no-replacement on
+        # GPU-30b619de: graph leaf/region 3-series ~1.00x at M2048 (1.0008/1.0029)
+        # and M4096 (0.9996/1.001), all < 1.03; bit-exact vs stock. Retained as an
+        # explicit e2e_candidates ablation (default off), never promoted absent a
+        # >=1.03 graph leaf+region win; decode (_E2E_DECODE) is unaffected.
+        graph_only=True,
+    ),
 }
 
 # Three default-off production-interface hooks selected from the GLM-5.2

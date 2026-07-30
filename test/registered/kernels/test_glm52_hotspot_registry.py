@@ -596,3 +596,134 @@ def test_o_proj_graph_only_can_be_disabled_for_diagnostic_eager_leaf():
     finally:
         set_forward_mode(None)
         _restore_env(saved)
+
+
+def test_o_proj_prefill_e2e_spec_is_graph_only_and_does_not_touch_decode():
+    """Prefill o_proj (fixed-N/K) is graph_only at the locked prefill Ms; the
+    decode o_proj spec is byte-unchanged (decode is not regressed)."""
+    names = ("SGLANG_GLM52_OPT", "SGLANG_GLM52_OPT_PROFILE", "SGLANG_GLM52_OPT_OPS")
+    saved = {name: os.environ.get(name) for name in names}
+    try:
+        os.environ["SGLANG_GLM52_OPT"] = "1"
+        os.environ["SGLANG_GLM52_OPT_PROFILE"] = "e2e_candidates"
+        os.environ.pop("SGLANG_GLM52_OPT_OPS", None)
+        # Prefill entry: same fixed-N/K candidate as decode, graph_only.
+        for m in (2048, 4096):
+            spec = lookup("o_proj", "prefill", m=m)
+            assert spec is not None
+            assert spec.phase == "prefill"
+            assert spec.kind == "fp8_gemm"
+            assert spec.implementation == "fixed_nk"
+            assert spec.graph_only is True
+            assert spec.n == 6144 and spec.k == 16384
+            assert spec.profiler_name == "infini_kernel_glm52_attn_o_prefill_nk"
+        # M gating: only the locked promotional buckets select in prefill.
+        for m in (16, 32, 512, 1024, 3072, 8192):
+            assert lookup("o_proj", "prefill", m=m) is None
+        # Decode spec unchanged and still graph_only at its own buckets.
+        for m in (16, 32):
+            dec = lookup("o_proj", "decode", m=m)
+            assert dec is not None
+            assert dec.graph_only is True
+            assert dec.profiler_name == "infini_kernel_glm52_attn_o_decode_nk"
+        # The prefill entry must not leak into decode buckets and vice versa.
+        assert lookup("o_proj", "decode", m=2048) is None
+        assert lookup("o_proj", "decode", m=4096) is None
+        assert lookup("o_proj", "prefill", m=16) is None
+    finally:
+        _restore_env(saved)
+
+
+def _o_proj_prefill_graph_only_dispatch(*, capturing: bool, m: int = 2048):
+    """Drive one prefill (EXTEND) o_proj fp8_gemm dispatch with a mocked capture
+    state.  Only the graph-only decline / capture-select branch is under test, so
+    the ABI check and the GEMM launch are mocked."""
+    input_2d = torch.zeros((m, 8))
+    weight = torch.zeros((6144, 8))
+    scale = torch.zeros(1, dtype=torch.int32)
+    with (
+        op_context("o_proj"),
+        patch(
+            "sglang.srt.layers.glm52_opt.dispatch._is_cuda_graph_capturing",
+            return_value=capturing,
+        ),
+        patch(
+            "sglang.srt.layers.glm52_opt.dispatch._fixed_nk_abi_matches",
+            return_value=True,
+        ) as abi,
+        patch(
+            "sglang.srt.layers.glm52_opt.dispatch.run_fp8_gemm",
+            return_value=(True, "fixed_nk"),
+        ) as candidate,
+        patch("sglang.srt.layers.glm52_opt.dispatch._record_hit") as hit,
+        patch("sglang.srt.layers.glm52_opt.dispatch._record_miss") as miss,
+    ):
+        result = try_dispatch_fp8_gemm(
+            input_2d, weight, scale, scale, [128, 128], torch.bfloat16
+        )
+    return result, abi, candidate, hit, miss
+
+
+def test_o_proj_prefill_graph_only_declines_eager_selects_under_capture():
+    """Prefill is CUDA-graph bound (BREAKABLE) by default, so the same graph-only
+    contract as decode holds: eager declines before the ABI check / hit lock with
+    zero launch; capture selects the candidate exactly once."""
+    names = (
+        "SGLANG_GLM52_OPT",
+        "SGLANG_GLM52_OPT_PROFILE",
+        "SGLANG_GLM52_OPT_OPS",
+        "SGLANG_GLM52_O_PROJ_GRAPH_ONLY",
+    )
+    saved = {name: os.environ.get(name) for name in names}
+    try:
+        os.environ["SGLANG_GLM52_OPT"] = "1"
+        os.environ["SGLANG_GLM52_OPT_PROFILE"] = "e2e_candidates"
+        os.environ["SGLANG_GLM52_OPT_OPS"] = "o_proj"
+        os.environ.pop("SGLANG_GLM52_O_PROJ_GRAPH_ONLY", None)
+        set_forward_mode(ForwardMode.EXTEND, 2048)
+
+        result, abi, candidate, hit, miss = _o_proj_prefill_graph_only_dispatch(
+            capturing=False
+        )
+        assert result is None
+        candidate.assert_not_called()
+        hit.assert_not_called()
+        abi.assert_not_called()
+        miss.assert_not_called()
+
+        result, _abi, candidate, hit, _miss = _o_proj_prefill_graph_only_dispatch(
+            capturing=True
+        )
+        assert result is not None
+        candidate.assert_called_once()
+        hit.assert_called_once()
+    finally:
+        set_forward_mode(None)
+        _restore_env(saved)
+
+
+def test_o_proj_prefill_shares_graph_only_env_with_decode():
+    """The single SGLANG_GLM52_O_PROJ_GRAPH_ONLY toggle governs o_proj in both
+    phases; =0 forces eager selection for a diagnostic prefill leaf."""
+    names = (
+        "SGLANG_GLM52_OPT",
+        "SGLANG_GLM52_OPT_PROFILE",
+        "SGLANG_GLM52_OPT_OPS",
+        "SGLANG_GLM52_O_PROJ_GRAPH_ONLY",
+    )
+    saved = {name: os.environ.get(name) for name in names}
+    try:
+        os.environ["SGLANG_GLM52_OPT"] = "1"
+        os.environ["SGLANG_GLM52_OPT_PROFILE"] = "e2e_candidates"
+        os.environ["SGLANG_GLM52_OPT_OPS"] = "o_proj"
+        os.environ["SGLANG_GLM52_O_PROJ_GRAPH_ONLY"] = "0"
+        set_forward_mode(ForwardMode.EXTEND, 4096)
+
+        result, _abi, candidate, _hit, _miss = _o_proj_prefill_graph_only_dispatch(
+            capturing=False, m=4096
+        )
+        assert result is not None
+        candidate.assert_called_once()
+    finally:
+        set_forward_mode(None)
+        _restore_env(saved)
