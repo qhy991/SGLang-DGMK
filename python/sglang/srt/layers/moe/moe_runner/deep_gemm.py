@@ -241,7 +241,28 @@ class DeepGemmRunnerCore(MoeRunnerCore):
         dispose_tensor(hidden_states)
         dispose_tensor(hidden_states_scale)
 
-        if envs.SGLANG_OPT_FIX_MEGA_MOE_MEMORY.get():
+        from sglang.srt.layers.glm52_opt.dispatch import (
+            try_dispatch_moe_swiglu_quant_prefill,
+        )
+
+        glm52_activation = try_dispatch_moe_swiglu_quant_prefill(
+            gateup_output,
+            m_indices,
+            runner_input.expert_start_loc,
+            group_size=scale_block_size,
+            swiglu_limit=self.swiglu_limit,
+            swizzle=self.use_swizzle,
+            gemm1_alpha=self.config.gemm1_alpha,
+            gemm1_clamp_limit=self.config.gemm1_clamp_limit,
+            column_major_scales=True,
+            scale_tma_aligned=deep_gemm_wrapper.DEEPGEMM_SCALE_UE8M0,
+            scale_ue8m0=deep_gemm_wrapper.DEEPGEMM_SCALE_UE8M0,
+            pdl=envs.SGLANG_DEEPGEMM_PDL.get(),
+        )
+        if glm52_activation is not None:
+            down_input_fp8, down_input_scale = glm52_activation
+            del gateup_output
+        elif envs.SGLANG_OPT_FIX_MEGA_MOE_MEMORY.get():
             swiglu_limit_arg: Optional[float] = self.swiglu_limit
 
             down_input_fp8 = torch.empty(
@@ -506,6 +527,9 @@ class DeepGemmRunnerCore(MoeRunnerCore):
 
         # Act.
         topk_ids_rs = running_state.get("topk_ids")
+        routed_num_real_tokens = (
+            int(topk_ids_rs.shape[0]) if topk_ids_rs is not None else None
+        )
         num_real_tokens = (
             topk_ids_rs.shape[0]
             if (
@@ -526,6 +550,7 @@ class DeepGemmRunnerCore(MoeRunnerCore):
             gemm1_alpha=self.config.gemm1_alpha,
             gemm1_clamp_limit=self.config.gemm1_clamp_limit,
             num_real_tokens=num_real_tokens,
+            routed_num_real_tokens=routed_num_real_tokens,
         )
         del gateup_output
 
@@ -944,6 +969,7 @@ def _varlen_deep_gemm_silu_mul_quant(
     gemm1_alpha: Optional[float] = None,
     gemm1_clamp_limit: Optional[float] = None,
     num_real_tokens: Optional[int] = None,
+    routed_num_real_tokens: Optional[int] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     from sglang.kernels.ops.moe.ep_moe_kernels import silu_and_mul_masked_post_quant_fwd
     from sglang.kernels.ops.quantization.fp8_kernel import (
@@ -979,6 +1005,24 @@ def _varlen_deep_gemm_silu_mul_quant(
     D = D_2 // 2
     del D_2
     G = D // group_size
+
+    from sglang.srt.layers.glm52_opt.dispatch import (
+        try_dispatch_moe_swiglu_quant_decode,
+    )
+
+    glm52_candidate = try_dispatch_moe_swiglu_quant_decode(
+        gateup_output,
+        masked_m,
+        group_size=group_size,
+        topk=topk,
+        swiglu_limit=swiglu_limit,
+        swizzle=swizzle,
+        gemm1_alpha=gemm1_alpha,
+        gemm1_clamp_limit=gemm1_clamp_limit,
+        num_real_tokens=routed_num_real_tokens,
+    )
+    if glm52_candidate is not None:
+        return glm52_candidate
 
     # Fused UE8M0 pack needs 4 groups per packed int32 (the G%4 and D guards below).
     if (

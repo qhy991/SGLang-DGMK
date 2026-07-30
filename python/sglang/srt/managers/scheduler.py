@@ -4475,12 +4475,17 @@ def run_scheduler_process(
             profile_name,
         )
 
+        configured_ops = opt_ops_allowlist()
         logger.info(
             "glm52_opt worker: enabled=%s profile=%s variant=%s ops=%s m_buckets=%s",
             is_enabled(),
             profile_name(),
             deepgemm_variant(),
-            sorted(opt_ops_allowlist()) if opt_ops_allowlist() else "all",
+            (
+                sorted(configured_ops)
+                if configured_ops is not None
+                else "profile-default"
+            ),
             {op: sorted(values) for op, values in opt_m_buckets().items()} or "all",
         )
     except Exception as exc:

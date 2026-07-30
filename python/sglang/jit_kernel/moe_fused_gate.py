@@ -290,6 +290,31 @@ def moe_fused_gate(
     if routed_scaling_factor is None:
         routed_scaling_factor = 1.0
 
+    from sglang.srt.layers.glm52_opt import config as glm52_opt_config
+
+    if glm52_opt_config.is_enabled():
+        from sglang.srt.layers.glm52_opt.dispatch import (
+            try_dispatch_router_sigmoid_topk,
+        )
+
+        glm52_candidate = try_dispatch_router_sigmoid_topk(
+            scores=scores,
+            bias=bias,
+            topk=topk,
+            scoring_func=scoring_func,
+            num_fused_shared_experts=num_fused_shared_experts,
+            renormalize=renormalize,
+            routed_scaling_factor=routed_scaling_factor,
+            apply_routed_scaling_factor_on_output=(
+                apply_routed_scaling_factor_on_output
+            ),
+            moe_softcapping=moe_softcapping,
+            num_expert_group=num_expert_group,
+            topk_group=topk_group,
+        )
+        if glm52_candidate is not None:
+            return glm52_candidate
+
     M, N = scores.shape
     K = topk
     K_routed = topk - num_fused_shared_experts

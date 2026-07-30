@@ -29,7 +29,14 @@ _CALLBACK_BY_OP = {
     "dsa_decode_attn": "flashmla_sparse_decode",
     "moe_gate_proj": "moe_w13",
     "moe_down_proj": "moe_w2",
+    "index_wk_weights_proj": "index_wk_weights_proj",
+    "router_logit_gemm": "router_logit_gemm",
+    "router_sigmoid_topk": "router_sigmoid_topk",
+    "moe_swiglu_quant": "moe_swiglu_quant",
 }
+_DECODE_ONLY_PROVIDER_OPS = frozenset(
+    {"dsa_decode_attn", "moe_gate_proj", "moe_down_proj"}
+)
 
 
 @dataclass(frozen=True)
@@ -83,13 +90,33 @@ def initialize_hotspot_provider(gpu_id: int | None = None) -> bool:
     """
 
     global _STATE
-    if not config.is_enabled() or config.profile_name() != "hotspot_candidates":
+    profile = config.profile_name()
+    if not config.is_enabled() or profile not in (
+        "hotspot_candidates",
+        "diagnostic_all",
+    ):
         _STATE = _ProviderState(False, "profile_inactive")
         return False
 
-    selected_ops = config.hotspot_candidate_ops()
+    requested_ops = (
+        config.hotspot_candidate_ops()
+        if profile == "hotspot_candidates"
+        else config.diagnostic_candidate_ops()
+    )
+    m_buckets = config.opt_m_buckets()
+    selected_ops = frozenset(
+        op
+        for op in requested_ops
+        if op in _CALLBACK_BY_OP
+        and not (
+            profile == "diagnostic_all"
+            and op in _DECODE_ONLY_PROVIDER_OPS
+            and op in m_buckets
+            and m_buckets[op].isdisjoint((16, 32))
+        )
+    )
     if not selected_ops:
-        _STATE = _ProviderState(False, "no_selected_ops")
+        _STATE = _ProviderState(False, "no_provider_ops")
         return False
 
     module_ref = config.hotspot_module_ref()
@@ -100,7 +127,10 @@ def initialize_hotspot_provider(gpu_id: int | None = None) -> bool:
             gpu_id=gpu_id,
             selected_ops=selected_ops,
         )
-        raise RuntimeError("hotspot_candidates requires SGLANG_GLM52_HOTSPOT_MODULE")
+        raise RuntimeError(
+            f"{profile} selected provider-backed ops and requires "
+            "SGLANG_GLM52_HOTSPOT_MODULE"
+        )
 
     with _LOCK:
         if _STATE.ready:
@@ -209,6 +239,26 @@ def run_moe_masked(
         masked_m=masked_m,
         expected_m=expected_m,
     )
+
+
+def run_index_wk_weights_proj(**kwargs):
+    """Call the exact fused indexer WK+weights BF16 projection."""
+    return _callback("index_wk_weights_proj")(**kwargs)
+
+
+def run_router_logit_gemm(**kwargs):
+    """Call the exact BF16-by-BF16 router GEMM with FP32 output."""
+    return _callback("router_logit_gemm")(**kwargs)
+
+
+def run_router_sigmoid_topk(**kwargs):
+    """Call the exact GLM-5.2 sigmoid/no-aux router selection boundary."""
+    return _callback("router_sigmoid_topk")(**kwargs)
+
+
+def run_moe_swiglu_quant(**kwargs):
+    """Call the exact decode or prefill SwiGLU-plus-packed-UE8M0 boundary."""
+    return _callback("moe_swiglu_quant")(**kwargs)
 
 
 def provider_state() -> dict[str, Any]:

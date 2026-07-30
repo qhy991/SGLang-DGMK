@@ -1,4 +1,4 @@
-"""Opt-in B200 validation for GLM-5.2 ``infini_kernel`` fixed-N/K paths.
+"""Opt-in B200 validation for every registered GLM-5.2 fixed-N/K path.
 
 Run directly:
 
@@ -42,7 +42,7 @@ class TestGlm52InfiniFixedNk(unittest.TestCase):
 
         self.addCleanup(restore_env)
         os.environ["SGLANG_GLM52_OPT"] = "1"
-        os.environ["SGLANG_GLM52_OPT_PROFILE"] = "e2e_candidates"
+        os.environ["SGLANG_GLM52_OPT_PROFILE"] = "diagnostic_all"
         os.environ["SGLANG_GLM52_ALLOW_ABI_ADAPTER"] = "0"
         os.environ.setdefault(
             "SGLANG_GLM52_OPT_HIT_FILE",
@@ -64,7 +64,7 @@ class TestGlm52InfiniFixedNk(unittest.TestCase):
         if not torch.cuda.is_available() or not is_sm100_supported():
             self.skipTest("requires an SM100 GPU")
 
-        # Compile only the five audited shapes on demand. Server-wide
+        # Compile only the exhaustive diagnostic matrix on demand. Server-wide
         # precompile enumeration is a separate startup contract.
         old_precompile = compile_utils._ENABLE_JIT_DEEPGEMM_PRECOMPILE
         self.addCleanup(
@@ -76,12 +76,22 @@ class TestGlm52InfiniFixedNk(unittest.TestCase):
         compile_utils._ENABLE_JIT_DEEPGEMM_PRECOMPILE = False
         self.addCleanup(set_forward_mode, None)
 
-        cases = (
-            ("index_q_upproj", ForwardMode.DECODE, 16, 4096, 2048),
-            ("index_q_upproj", ForwardMode.DECODE, 32, 4096, 2048),
-            ("o_proj", ForwardMode.DECODE, 16, 6144, 16384),
-            ("o_proj", ForwardMode.DECODE, 32, 6144, 16384),
-            ("fused_qkv_a_proj", ForwardMode.EXTEND, 4096, 2624, 6144),
+        fixed_shapes = (
+            ("fused_qkv_a_proj", 2624, 6144),
+            ("q_b_proj", 16384, 2048),
+            ("o_proj", 6144, 16384),
+            ("dense_gate_up_proj", 4096, 6144),
+            ("dense_down_proj", 6144, 2048),
+            ("index_q_upproj", 4096, 2048),
+            ("index_k_proj", 128, 6144),
+        )
+        cases = tuple(
+            (op, ForwardMode.DECODE, m, n, k)
+            for op, n, k in fixed_shapes
+            for m in (16, 32)
+        ) + tuple(
+            (op, ForwardMode.EXTEND, 4096, n, k)
+            for op, n, k in fixed_shapes
         )
 
         torch.manual_seed(0)

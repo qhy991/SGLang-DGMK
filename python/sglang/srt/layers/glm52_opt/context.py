@@ -126,6 +126,20 @@ def prefix_to_op_name(prefix: Optional[str]) -> Optional[str]:
     if not prefix:
         return None
     leaf = prefix.rsplit(".", 1)[-1]
+    # The standalone shared expert uses ordinary FP8 LinearBase projections,
+    # while routed experts use grouped-GEMM call sites that publish their own
+    # explicit moe_* context.  Preserve that distinction before leaf mapping;
+    # both routes contain gate_up_proj/down_proj names but have incompatible
+    # production ABIs.
+    components = prefix.split(".")
+    is_shared_expert = any(
+        component in ("shared_expert", "shared_experts")
+        for component in components
+    )
+    if is_shared_expert and leaf == "gate_up_proj":
+        return "dense_gate_up_proj"
+    if is_shared_expert and leaf == "down_proj":
+        return "dense_down_proj"
     mapping = {
         "q_a_proj": "fused_qkv_a_proj",
         "fused_qkv_a_proj": "fused_qkv_a_proj",

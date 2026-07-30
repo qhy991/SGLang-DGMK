@@ -46,6 +46,7 @@ python -m sglang.launch_server --model-path <glm-5.2-checkpoint> ...
 | `full` | Same | + fused_qkv_a, q_b, index_k/q/weights |
 | `e2e_candidates` | Default-off/allowlisted fixed-N/K diagnostics | Allowlisted fixed-N/K and MoE PSUM diagnostics |
 | `hotspot_candidates` | W13 by default; rejected FlashMLA/W2 hooks are explicit-only diagnostics | Stock |
+| `diagnostic_all` | Explicit-only exhaustive fixed-shape and provider hooks | Explicit-only fixed-N/K, graph replay, provider and PSUM hooks |
 
 Prefill `moe_gate` and `dsa_prefill_attn` stay on stock (CUDA Graph regressions).
 For the three exact packed-UE8M0 fixed-N/K candidates, single-op commands,
@@ -57,6 +58,12 @@ production FlashMLA sparse-decode and masked W13/W2 call sites, see
 For the terminal promotion matrix, exact enablement boundaries, portable W13
 build, FlashMLA PTX/SASS disposition, and W2 full-path analysis, see
 [`glm52_verified_kernel_registration_zh.md`](glm52_verified_kernel_registration_zh.md).
+For the exhaustive 15-op/29-phase registration matrix, provider ABI, negative
+result policy, and fair single-op E2E recipe, see
+[`glm52_all_candidates_registration_zh.md`](glm52_all_candidates_registration_zh.md).
+For a compact inventory of every replaceable production call site, its exact
+shape boundary, delivery mode, and current promotion status, see
+[`glm52_replaceable_operator_inventory_zh.md`](glm52_replaceable_operator_inventory_zh.md).
 
 ## Smoke test
 

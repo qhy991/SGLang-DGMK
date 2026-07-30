@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Callable, Literal, Optional
 
 from sglang.srt.layers.glm52_opt.config import (
+    diagnostic_candidate_ops,
     e2e_candidate_ops,
     hotspot_candidate_ops,
     opt_m_buckets,
@@ -24,8 +25,16 @@ KernelKind = Literal[
     "score_mqa",
     "bf16_gemm",
     "indexer",
+    "fused_activation",
 ]
-KernelImplementation = Literal["auto", "fixed_nk", "hotspot_plugin"]
+KernelImplementation = Literal[
+    "auto",
+    "fixed_nk",
+    "hotspot_plugin",
+    "diagnostic_plugin",
+    "graph_replay",
+    "contig_psum",
+]
 
 RunFn = Callable[[dict], object]
 
@@ -211,6 +220,221 @@ _HOTSPOT_DECODE: dict[str, KernelSpec] = {
 }
 
 
+def _diagnostic_fp8(
+    op: str,
+    phase: str,
+    *,
+    m_values: tuple[int, ...],
+    n: int,
+    k: int,
+) -> KernelSpec:
+    return KernelSpec(
+        op=op,
+        phase=phase,
+        archive_ref="",
+        kind="fp8_gemm",
+        implementation="fixed_nk",
+        profiler_name=f"infini_kernel_glm52_{op}_{phase}_fixed_nk",
+        m_values=m_values,
+        n=n,
+        k=k,
+    )
+
+
+# The exhaustive diagnostic table mirrors the fixed shapes used by the V2
+# GLM-5.2 kernel campaign.  It intentionally includes measured non-wins.  The
+# table is unreachable unless diagnostic_all plus an explicit OPT_OPS selection
+# is active, so it cannot broaden serving_safe.
+_DIAGNOSTIC_DECODE: dict[str, KernelSpec] = {
+    "fused_qkv_a_proj": _diagnostic_fp8(
+        "fused_qkv_a_proj", "decode", m_values=(16, 32), n=2624, k=6144
+    ),
+    "q_b_proj": _diagnostic_fp8(
+        "q_b_proj", "decode", m_values=(16, 32), n=16384, k=2048
+    ),
+    "o_proj": _diagnostic_fp8(
+        "o_proj", "decode", m_values=(16, 32), n=6144, k=16384
+    ),
+    "dense_gate_up_proj": _diagnostic_fp8(
+        "dense_gate_up_proj", "decode", m_values=(16, 32), n=4096, k=6144
+    ),
+    "dense_down_proj": _diagnostic_fp8(
+        "dense_down_proj", "decode", m_values=(16, 32), n=6144, k=2048
+    ),
+    "index_q_upproj": _diagnostic_fp8(
+        "index_q_upproj", "decode", m_values=(16, 32), n=4096, k=2048
+    ),
+    "index_k_proj": _diagnostic_fp8(
+        "index_k_proj", "decode", m_values=(16, 32), n=128, k=6144
+    ),
+    "index_weights_proj": KernelSpec(
+        op="index_weights_proj",
+        phase="decode",
+        archive_ref="",
+        kind="bf16_gemm",
+        implementation="graph_replay",
+        profiler_name="infini_kernel_glm52_index_weights_decode_graph_replay",
+        m_values=(16, 32),
+        n=32,
+        k=6144,
+    ),
+    "index_wk_weights_proj": KernelSpec(
+        op="index_wk_weights_proj",
+        phase="decode",
+        archive_ref="",
+        kind="bf16_gemm",
+        implementation="diagnostic_plugin",
+        profiler_name="infini_kernel_glm52_index_wk_weights_decode",
+        m_values=(16, 32),
+        n=160,
+        k=6144,
+    ),
+    "router_logit_gemm": KernelSpec(
+        op="router_logit_gemm",
+        phase="decode",
+        archive_ref="",
+        kind="bf16_gemm",
+        implementation="diagnostic_plugin",
+        profiler_name="infini_kernel_glm52_router_logit_gemm_decode",
+        m_values=(16, 32),
+        n=256,
+        k=6144,
+    ),
+    "router_sigmoid_topk": KernelSpec(
+        op="router_sigmoid_topk",
+        phase="decode",
+        archive_ref="",
+        kind="score_mqa",
+        implementation="diagnostic_plugin",
+        profiler_name="infini_kernel_glm52_router_sigmoid_topk_decode",
+        m_values=(16, 32),
+        n=256,
+        topk=8,
+    ),
+    "moe_swiglu_quant": KernelSpec(
+        op="moe_swiglu_quant",
+        phase="decode",
+        archive_ref="",
+        kind="fused_activation",
+        implementation="diagnostic_plugin",
+        profiler_name="infini_kernel_glm52_moe_swiglu_quant_decode",
+        m_values=(16, 32),
+        n=2048,
+        k=4096,
+        num_groups=32,
+        slab_m=1024,
+        topk=8,
+    ),
+    **_HOTSPOT_DECODE,
+}
+
+_DIAGNOSTIC_PREFILL: dict[str, KernelSpec] = {
+    "fused_qkv_a_proj": _diagnostic_fp8(
+        "fused_qkv_a_proj", "prefill", m_values=(4096,), n=2624, k=6144
+    ),
+    "q_b_proj": _diagnostic_fp8(
+        "q_b_proj", "prefill", m_values=(4096,), n=16384, k=2048
+    ),
+    "o_proj": _diagnostic_fp8(
+        "o_proj", "prefill", m_values=(4096,), n=6144, k=16384
+    ),
+    "dense_gate_up_proj": _diagnostic_fp8(
+        "dense_gate_up_proj", "prefill", m_values=(4096,), n=4096, k=6144
+    ),
+    "dense_down_proj": _diagnostic_fp8(
+        "dense_down_proj", "prefill", m_values=(4096,), n=6144, k=2048
+    ),
+    "index_q_upproj": _diagnostic_fp8(
+        "index_q_upproj", "prefill", m_values=(4096,), n=4096, k=2048
+    ),
+    "index_k_proj": _diagnostic_fp8(
+        "index_k_proj", "prefill", m_values=(4096,), n=128, k=6144
+    ),
+    "index_weights_proj": KernelSpec(
+        op="index_weights_proj",
+        phase="prefill",
+        archive_ref="",
+        kind="bf16_gemm",
+        implementation="graph_replay",
+        profiler_name="infini_kernel_glm52_index_weights_prefill_graph_replay",
+        m_values=(4096,),
+        n=32,
+        k=6144,
+    ),
+    "index_wk_weights_proj": KernelSpec(
+        op="index_wk_weights_proj",
+        phase="prefill",
+        archive_ref="",
+        kind="bf16_gemm",
+        implementation="diagnostic_plugin",
+        profiler_name="infini_kernel_glm52_index_wk_weights_prefill",
+        m_values=(4096,),
+        n=160,
+        k=6144,
+    ),
+    "moe_gate_proj": KernelSpec(
+        op="moe_gate_proj",
+        phase="prefill",
+        archive_ref="",
+        kind="moe_masked",
+        implementation="contig_psum",
+        profiler_name="infini_kernel_glm52_moe_w13_prefill_contig_psum",
+        m_values=(4096,),
+        n=4096,
+        k=6144,
+        num_groups=32,
+    ),
+    "moe_swiglu_quant": KernelSpec(
+        op="moe_swiglu_quant",
+        phase="prefill",
+        archive_ref="",
+        kind="fused_activation",
+        implementation="diagnostic_plugin",
+        profiler_name="infini_kernel_glm52_moe_swiglu_quant_prefill",
+        m_values=(4096,),
+        n=2048,
+        k=4096,
+        num_groups=32,
+        slab_m=35200,
+        topk=8,
+    ),
+    "moe_down_proj": KernelSpec(
+        op="moe_down_proj",
+        phase="prefill",
+        archive_ref="",
+        kind="moe_masked",
+        implementation="contig_psum",
+        profiler_name="infini_kernel_glm52_moe_w2_prefill_contig_psum",
+        m_values=(4096,),
+        n=6144,
+        k=2048,
+        num_groups=32,
+    ),
+    "router_logit_gemm": KernelSpec(
+        op="router_logit_gemm",
+        phase="prefill",
+        archive_ref="",
+        kind="bf16_gemm",
+        implementation="diagnostic_plugin",
+        profiler_name="infini_kernel_glm52_router_logit_gemm_prefill",
+        m_values=(4096,),
+        n=256,
+        k=6144,
+    ),
+    "router_sigmoid_topk": KernelSpec(
+        op="router_sigmoid_topk",
+        phase="prefill",
+        archive_ref="",
+        kind="score_mqa",
+        implementation="diagnostic_plugin",
+        profiler_name="infini_kernel_glm52_router_sigmoid_topk_prefill",
+        m_values=(4096,),
+        n=256,
+        topk=8,
+    ),
+}
+
+
 def _decode_table() -> dict[str, KernelSpec]:
     """Profile / allowlist gated decode registry.
 
@@ -272,6 +496,15 @@ def _hotspot_decode_table() -> dict[str, KernelSpec]:
     }
 
 
+def _diagnostic_table(phase: str) -> dict[str, KernelSpec]:
+    source = _DIAGNOSTIC_DECODE if phase == "decode" else _DIAGNOSTIC_PREFILL
+    return {
+        op: source[op]
+        for op in sorted(diagnostic_candidate_ops())
+        if op in source
+    }
+
+
 def lookup(
     op_name: Optional[str], phase: str, m: Optional[int] = None
 ) -> Optional[KernelSpec]:
@@ -287,8 +520,14 @@ def lookup(
         spec = (
             _hotspot_decode_table().get(op_name)
             if name == "hotspot_candidates"
-            else _decode_table().get(op_name)
+            else (
+                _diagnostic_table("decode").get(op_name)
+                if name == "diagnostic_all"
+                else _decode_table().get(op_name)
+            )
         )
+    elif name == "diagnostic_all":
+        spec = _diagnostic_table("prefill").get(op_name)
     elif name == "full":
         spec = _active_prefill().get(op_name)
     elif name == "e2e_candidates":
@@ -310,7 +549,11 @@ def list_enabled(phase: str) -> list[KernelSpec]:
     if phase == "decode":
         if profile_name() == "hotspot_candidates":
             return [s for s in _hotspot_decode_table().values() if s.enabled]
+        if profile_name() == "diagnostic_all":
+            return [s for s in _diagnostic_table("decode").values() if s.enabled]
         return [s for s in _decode_table().values() if s.enabled]
+    if profile_name() == "diagnostic_all":
+        return [s for s in _diagnostic_table("prefill").values() if s.enabled]
     if profile_name() == "full":
         return [s for s in _active_prefill().values() if s.enabled]
     if profile_name() == "e2e_candidates":

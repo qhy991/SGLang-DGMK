@@ -18,7 +18,13 @@ from sglang.srt.layers.glm52_opt.context import (
     get_op_name,
 )
 from sglang.srt.layers.glm52_opt.fp8_gemm import run_fp8_gemm
-from sglang.srt.layers.glm52_opt.hotspot_provider import run_flashmla_sparse_decode
+from sglang.srt.layers.glm52_opt.hotspot_provider import (
+    run_flashmla_sparse_decode,
+    run_index_wk_weights_proj,
+    run_moe_swiglu_quant,
+    run_router_logit_gemm,
+    run_router_sigmoid_topk,
+)
 from sglang.srt.layers.glm52_opt.hotspot_provider import (
     run_moe_masked as run_hotspot_moe_masked,
 )
@@ -461,6 +467,385 @@ def try_dispatch_flashmla_sparse_decode(
     return candidate_out
 
 
+def _diagnostic_plugin_spec(
+    op_name: str,
+    kind: str,
+    m: int,
+) -> tuple[KernelSpec | None, str]:
+    phase = _current_phase(m)
+    spec = lookup(op_name, phase, m=m)
+    if (
+        spec is None
+        or spec.kind != kind
+        or spec.implementation != "diagnostic_plugin"
+    ):
+        return None, phase
+    return spec, phase
+
+
+def try_dispatch_index_wk_weights_proj(
+    x: torch.Tensor,
+    weight: torch.Tensor,
+) -> Optional[torch.Tensor]:
+    """Run the exact fused indexer WK+weights provider or miss before launch."""
+    if not config.is_enabled() or x.ndim != 2:
+        return None
+    m = int(x.shape[0])
+    spec, phase = _diagnostic_plugin_spec(
+        "index_wk_weights_proj", "bf16_gemm", m
+    )
+    if spec is None or spec.n is None or spec.k is None:
+        return None
+    if not (
+        _tensor_contract(
+            x,
+            shape=(m, spec.k),
+            stride=(spec.k, 1),
+            dtype=torch.bfloat16,
+        )
+        and _tensor_contract(
+            weight,
+            shape=(spec.n, spec.k),
+            stride=(spec.k, 1),
+            dtype=torch.bfloat16,
+            device=x.device,
+        )
+    ):
+        _record_miss("index_wk_weights_abi", spec.op, phase, m=m)
+        return None
+    with _nvtx_range(_profiler_range_name(spec, m)):
+        out = run_index_wk_weights_proj(
+            x=x,
+            weight=weight,
+            phase=phase,
+        )
+    if not isinstance(out, torch.Tensor) or not _tensor_contract(
+        out,
+        shape=(m, spec.n),
+        stride=(spec.n, 1),
+        dtype=torch.bfloat16,
+        device=x.device,
+    ):
+        raise RuntimeError(
+            "index_wk_weights_proj provider returned an invalid BF16 output"
+        )
+    _record_hit("diagnostic_plugin", spec.op, phase, m=m)
+    return out
+
+
+def try_dispatch_router_logit_gemm(
+    hidden_states: torch.Tensor,
+    router_weight: torch.Tensor,
+) -> Optional[torch.Tensor]:
+    """Run the exact router GEMM provider or miss before candidate selection."""
+    if not config.is_enabled() or hidden_states.ndim != 2:
+        return None
+    m = int(hidden_states.shape[0])
+    spec, phase = _diagnostic_plugin_spec("router_logit_gemm", "bf16_gemm", m)
+    if spec is None or spec.n is None or spec.k is None:
+        return None
+    if not (
+        _tensor_contract(
+            hidden_states,
+            shape=(m, spec.k),
+            stride=(spec.k, 1),
+            dtype=torch.bfloat16,
+        )
+        and _tensor_contract(
+            router_weight,
+            shape=(spec.n, spec.k),
+            stride=(spec.k, 1),
+            dtype=torch.bfloat16,
+            device=hidden_states.device,
+        )
+    ):
+        _record_miss("router_logit_gemm_abi", spec.op, phase, m=m)
+        return None
+    with _nvtx_range(_profiler_range_name(spec, m)):
+        out = run_router_logit_gemm(
+            hidden_states=hidden_states,
+            router_weight=router_weight,
+            phase=phase,
+        )
+    if not isinstance(out, torch.Tensor) or not _tensor_contract(
+        out,
+        shape=(m, spec.n),
+        stride=(spec.n, 1),
+        dtype=torch.float32,
+        device=hidden_states.device,
+    ):
+        raise RuntimeError("router_logit_gemm provider returned an invalid output")
+    _record_hit("diagnostic_plugin", spec.op, phase, m=m)
+    return out
+
+
+def try_dispatch_router_sigmoid_topk(
+    *,
+    scores: torch.Tensor,
+    bias: torch.Tensor,
+    topk: int,
+    scoring_func: str,
+    num_fused_shared_experts: int,
+    renormalize: bool,
+    routed_scaling_factor: float,
+    apply_routed_scaling_factor_on_output: bool,
+    moe_softcapping: float,
+    num_expert_group: int,
+    topk_group: int,
+) -> Optional[tuple[torch.Tensor, torch.Tensor]]:
+    """Run the exact sigmoid/no-aux router selection provider."""
+    if not config.is_enabled() or scores.ndim != 2:
+        return None
+    m = int(scores.shape[0])
+    spec, phase = _diagnostic_plugin_spec(
+        "router_sigmoid_topk", "score_mqa", m
+    )
+    if spec is None or spec.n is None or spec.topk is None:
+        return None
+    metadata_matches = (
+        scoring_func.lower() == "sigmoid"
+        and topk == spec.topk
+        and num_fused_shared_experts == 0
+        and renormalize is True
+        and apply_routed_scaling_factor_on_output is False
+        and float(moe_softcapping) == 0.0
+        and num_expert_group == 1
+        and topk_group == 1
+    )
+    if not (
+        metadata_matches
+        and _tensor_contract(
+            scores,
+            shape=(m, spec.n),
+            stride=(spec.n, 1),
+            dtype=torch.float32,
+        )
+        and _tensor_contract(
+            bias,
+            shape=(spec.n,),
+            stride=(1,),
+            dtype=torch.float32,
+            device=scores.device,
+        )
+    ):
+        _record_miss("router_sigmoid_topk_abi", spec.op, phase, m=m)
+        return None
+    with _nvtx_range(_profiler_range_name(spec, m)):
+        result = run_router_sigmoid_topk(
+            scores=scores,
+            bias=bias,
+            topk=topk,
+            scoring_func=scoring_func,
+            num_fused_shared_experts=num_fused_shared_experts,
+            renormalize=renormalize,
+            routed_scaling_factor=routed_scaling_factor,
+            apply_routed_scaling_factor_on_output=(
+                apply_routed_scaling_factor_on_output
+            ),
+            moe_softcapping=moe_softcapping,
+            num_expert_group=num_expert_group,
+            topk_group=topk_group,
+            phase=phase,
+        )
+    if not isinstance(result, (tuple, list)) or len(result) != 2:
+        raise RuntimeError("router_sigmoid_topk provider must return (weights, ids)")
+    weights, ids = result
+    if not isinstance(weights, torch.Tensor) or not _tensor_contract(
+        weights,
+        shape=(m, spec.topk),
+        stride=(spec.topk, 1),
+        dtype=torch.float32,
+        device=scores.device,
+    ):
+        raise RuntimeError("router_sigmoid_topk provider returned invalid weights")
+    if not isinstance(ids, torch.Tensor) or not _tensor_contract(
+        ids,
+        shape=(m, spec.topk),
+        stride=(spec.topk, 1),
+        dtype=torch.int32,
+        device=scores.device,
+    ):
+        raise RuntimeError("router_sigmoid_topk provider returned invalid ids")
+    _record_hit("diagnostic_plugin", spec.op, phase, m=m)
+    return weights, ids
+
+
+def try_dispatch_moe_swiglu_quant_decode(
+    gateup_output: torch.Tensor,
+    masked_m: Optional[torch.Tensor],
+    *,
+    group_size: int,
+    topk: int,
+    swiglu_limit: Optional[float],
+    swizzle: bool,
+    gemm1_alpha: Optional[float],
+    gemm1_clamp_limit: Optional[float],
+    num_real_tokens: Optional[int],
+) -> Optional[tuple[torch.Tensor, torch.Tensor]]:
+    """Run the Task-25-shaped decode fusion provider."""
+    if (
+        not config.is_enabled()
+        or num_real_tokens not in (16, 32)
+        or masked_m is None
+    ):
+        return None
+    m = int(num_real_tokens)
+    spec, phase = _diagnostic_plugin_spec(
+        "moe_swiglu_quant", "fused_activation", m
+    )
+    if spec is None or phase != "decode":
+        return None
+    metadata_matches = (
+        group_size == 128
+        and topk == 8
+        and swiglu_limit is None
+        and swizzle is False
+        and gemm1_alpha is None
+        and gemm1_clamp_limit is None
+    )
+    if not (
+        metadata_matches
+        and _tensor_contract(
+            gateup_output,
+            shape=(32, 1024, 4096),
+            stride=(1024 * 4096, 4096, 1),
+            dtype=torch.bfloat16,
+        )
+        and _tensor_contract(
+            masked_m,
+            shape=(32,),
+            stride=(1,),
+            dtype=torch.int32,
+            device=gateup_output.device,
+        )
+    ):
+        _record_miss("moe_swiglu_quant_decode_abi", spec.op, phase, m=m)
+        return None
+    with _nvtx_range(_profiler_range_name(spec, m)):
+        result = run_moe_swiglu_quant(
+            phase=phase,
+            gateup_output=gateup_output,
+            masked_m=masked_m,
+            group_size=group_size,
+            topk=topk,
+            num_real_tokens=m,
+        )
+    if not isinstance(result, (tuple, list)) or len(result) != 2:
+        raise RuntimeError("moe_swiglu_quant provider must return (output, scales)")
+    output, scales = result
+    if not isinstance(output, torch.Tensor) or not _tensor_contract(
+        output,
+        shape=(32, 1024, 2048),
+        stride=(1024 * 2048, 2048, 1),
+        dtype=torch.float8_e4m3fn,
+        device=gateup_output.device,
+    ):
+        raise RuntimeError("moe_swiglu_quant decode provider returned invalid output")
+    if not isinstance(scales, torch.Tensor) or not _tensor_contract(
+        scales,
+        shape=(32, 1024, 4),
+        stride=(4096, 1, 1024),
+        dtype=torch.int32,
+        device=gateup_output.device,
+    ):
+        raise RuntimeError("moe_swiglu_quant decode provider returned invalid scales")
+    _record_hit("diagnostic_plugin", spec.op, phase, m=m)
+    return output, scales
+
+
+def try_dispatch_moe_swiglu_quant_prefill(
+    gateup_output: torch.Tensor,
+    m_indices: torch.Tensor,
+    endpoint: Optional[torch.Tensor],
+    *,
+    group_size: int,
+    swiglu_limit: Optional[float],
+    swizzle: bool,
+    gemm1_alpha: Optional[float],
+    gemm1_clamp_limit: Optional[float],
+    column_major_scales: bool,
+    scale_tma_aligned: bool,
+    scale_ue8m0: bool,
+    pdl: bool,
+) -> Optional[tuple[torch.Tensor, torch.Tensor]]:
+    """Run the Task-29-shaped contiguous prefill fusion provider."""
+    if not config.is_enabled() or endpoint is None:
+        return None
+    forward_m = get_forward_m()
+    m = int(forward_m) if forward_m is not None else -1
+    spec, phase = _diagnostic_plugin_spec(
+        "moe_swiglu_quant", "fused_activation", m
+    )
+    if spec is None or phase != "prefill":
+        return None
+    metadata_matches = (
+        group_size == 128
+        and swiglu_limit is None
+        and swizzle is False
+        and gemm1_alpha is None
+        and gemm1_clamp_limit is None
+        and column_major_scales is True
+        and scale_tma_aligned is True
+        and scale_ue8m0 is True
+        and pdl is True
+    )
+    if not (
+        metadata_matches
+        and _tensor_contract(
+            gateup_output,
+            shape=(35200, 4096),
+            stride=(4096, 1),
+            dtype=torch.bfloat16,
+        )
+        and _tensor_contract(
+            m_indices,
+            shape=(35200,),
+            stride=(1,),
+            dtype=torch.int32,
+            device=gateup_output.device,
+        )
+        and _tensor_contract(
+            endpoint,
+            shape=(32,),
+            stride=(1,),
+            dtype=torch.int32,
+            device=gateup_output.device,
+        )
+    ):
+        _record_miss("moe_swiglu_quant_prefill_abi", spec.op, phase, m=m)
+        return None
+    with _nvtx_range(_profiler_range_name(spec, m)):
+        result = run_moe_swiglu_quant(
+            phase=phase,
+            gateup_output=gateup_output,
+            m_indices=m_indices,
+            endpoint=endpoint,
+            group_size=group_size,
+            pdl=pdl,
+        )
+    if not isinstance(result, (tuple, list)) or len(result) != 2:
+        raise RuntimeError("moe_swiglu_quant provider must return (output, scales)")
+    output, scales = result
+    if not isinstance(output, torch.Tensor) or not _tensor_contract(
+        output,
+        shape=(35200, 2048),
+        stride=(2048, 1),
+        dtype=torch.float8_e4m3fn,
+        device=gateup_output.device,
+    ):
+        raise RuntimeError("moe_swiglu_quant prefill provider returned invalid output")
+    if not isinstance(scales, torch.Tensor) or not _tensor_contract(
+        scales,
+        shape=(35200, 4),
+        stride=(1, 35200),
+        dtype=torch.int32,
+        device=gateup_output.device,
+    ):
+        raise RuntimeError("moe_swiglu_quant prefill provider returned invalid scales")
+    _record_hit("diagnostic_plugin", spec.op, phase, m=m)
+    return output, scales
+
+
 def record_psum_hit(op: Optional[str], m: Optional[int] = None) -> None:
     """Count contig PSUM layout applications (goals 08/09)."""
     phase = "prefill"
@@ -548,6 +933,11 @@ def try_dispatch_moe_masked(
         )
     if spec is None or spec.kind != "moe_masked":
         _record_miss("moe_no_spec", op, phase, m=forward_m)
+        return False
+    if spec.implementation == "contig_psum":
+        # This registration is consumed by the contiguous grouped-GEMM runner,
+        # never by the masked decode ABI handled here.
+        _record_miss("moe_contig_psum_wrong_callsite", op, phase, m=forward_m)
         return False
     # Prefill moe_gate: Graph regresses at large M — never swap.
     if phase == "prefill" and op == "moe_gate_proj":

@@ -20,7 +20,7 @@ from .elementwise import (
     fused_rope_inplace,
 )
 from .fp8_wo_a import sglang_per_token_group_quant_fp8_dsv4_wo_a
-from .gemm import linear_bf16_fp32
+from .gemm import linear_bf16_fp32, router_linear_bf16_fp32
 from .moe import (
     hash_topk,
     mask_topk_ids,
@@ -49,6 +49,7 @@ __all__ = [
     "sglang_per_token_group_quant_fp8_dsv4_wo_a",
     "make_name",
     "linear_bf16_fp32",
+    "router_linear_bf16_fp32",
     "get_paged_mqa_logits_metadata",
     "triton_create_paged_compress_data",
     "topk_transform_512",

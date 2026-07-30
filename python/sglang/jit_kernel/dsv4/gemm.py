@@ -22,3 +22,21 @@ def linear_bf16_fp32(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         return z
     else:
         return torch.mm(x, y.t(), out_dtype=torch.float32)
+
+
+def router_linear_bf16_fp32(
+    hidden_states: torch.Tensor,
+    router_weight: torch.Tensor,
+) -> torch.Tensor:
+    """GLM-5.2 router interception with the unchanged GEMM as fallback."""
+    from sglang.srt.layers.glm52_opt import config as glm52_opt_config
+
+    if glm52_opt_config.is_enabled():
+        from sglang.srt.layers.glm52_opt.dispatch import (
+            try_dispatch_router_logit_gemm,
+        )
+
+        candidate = try_dispatch_router_logit_gemm(hidden_states, router_weight)
+        if candidate is not None:
+            return candidate
+    return linear_bf16_fp32(hidden_states, router_weight)

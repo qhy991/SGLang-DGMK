@@ -542,8 +542,21 @@ class Indexer(MultiPlatformOp):
         return weights.unsqueeze(-1) * q_scale * self.softmax_scale
 
     def _fused_k_weights(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        kw, _ = self.wk_weights_proj(x)
+        kw = self._run_wk_weights_proj(x)
         return kw.split([self.head_dim, self.n_heads], dim=-1)
+
+    def _run_wk_weights_proj(self, x: torch.Tensor) -> torch.Tensor:
+        if _is_cuda:
+            from sglang.srt.layers.glm52_opt.dispatch import (
+                try_dispatch_index_wk_weights_proj,
+            )
+
+            candidate = try_dispatch_index_wk_weights_proj(
+                x, self.wk_weights_proj.weight
+            )
+            if candidate is not None:
+                return candidate
+        return self.wk_weights_proj(x)[0]
 
     def _maybe_rotate(self, x: torch.Tensor) -> torch.Tensor:
         # Fusion drops the (logit-preserving) Hadamard rotation; without it the
@@ -750,7 +763,7 @@ class Indexer(MultiPlatformOp):
             out_cache_loc = out_cache_loc[:num_tokens]
 
         if self.alt_stream is None or not enable_dual_stream:
-            kw, _ = self.wk_weights_proj(x)
+            kw = self._run_wk_weights_proj(x)
             key, weights_raw = kw.split([self.head_dim, self.n_heads], dim=-1)
             if num_tokens is not None:
                 key = key[:num_tokens]
@@ -785,7 +798,7 @@ class Indexer(MultiPlatformOp):
             if num_tokens is not None:
                 q = q[:num_tokens]
 
-        kw, _ = self.wk_weights_proj(x)
+        kw = self._run_wk_weights_proj(x)
         key, weights_raw = kw.split([self.head_dim, self.n_heads], dim=-1)
         if num_tokens is not None:
             key = key[:num_tokens]

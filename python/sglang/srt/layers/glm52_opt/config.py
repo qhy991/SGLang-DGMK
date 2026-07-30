@@ -160,6 +160,45 @@ _HOTSPOT_OP_ALIASES = {
     "moe_w2": "moe_down_proj",
 }
 
+# Exhaustive, default-off registration surface for operator-by-operator E2E
+# diagnosis.  Unlike serving_safe/e2e_candidates this set intentionally also
+# contains candidates that were flat, regressed, or failed a containing-region
+# gate.  Nothing is selected unless OPT_OPS is non-empty (or explicitly "all").
+_DIAGNOSTIC_ALLOWED_OPS = frozenset(
+    {
+        "fused_qkv_a_proj",
+        "q_b_proj",
+        "o_proj",
+        "dense_gate_up_proj",
+        "dense_down_proj",
+        "index_q_upproj",
+        "index_k_proj",
+        "index_weights_proj",
+        "index_wk_weights_proj",
+        "dsa_decode_attn",
+        "moe_gate_proj",
+        "moe_swiglu_quant",
+        "moe_down_proj",
+        "router_logit_gemm",
+        "router_sigmoid_topk",
+    }
+)
+_DIAGNOSTIC_OP_ALIASES = {
+    **_HOTSPOT_OP_ALIASES,
+    "attention_qkv_a": "fused_qkv_a_proj",
+    "attention_q_b": "q_b_proj",
+    "attention_o": "o_proj",
+    "shared_gate_up": "dense_gate_up_proj",
+    "shared_down": "dense_down_proj",
+    "indexer_wq_b": "index_q_upproj",
+    "indexer_wk": "index_k_proj",
+    "indexer_weights": "index_weights_proj",
+    "indexer_wk_weights": "index_wk_weights_proj",
+    "swiglu_quant": "moe_swiglu_quant",
+    "router_gemm": "router_logit_gemm",
+    "router_topk": "router_sigmoid_topk",
+}
+
 
 def opt_ops_allowlist() -> frozenset[str] | None:
     """Optional comma-separated decode op allowlist (SGLANG_GLM52_OPT_OPS).
@@ -208,6 +247,33 @@ def hotspot_candidate_ops() -> frozenset[str]:
     return frozenset(normalized)
 
 
+def diagnostic_candidate_ops() -> frozenset[str]:
+    """Explicit ops selected by ``SGLANG_GLM52_OPT_PROFILE=diagnostic_all``.
+
+    A bare profile selects nothing.  This is deliberate: diagnostic candidates
+    include measured non-wins, and enabling several at once destroys attribution.
+    ``SGLANG_GLM52_OPT_OPS=all`` is supported as an explicit smoke-test mode;
+    fair performance runs should still select exactly one canonical op or alias.
+    """
+    allow = opt_ops_allowlist()
+    if allow is None:
+        return frozenset()
+    if "all" in allow:
+        if len(allow) != 1:
+            raise ValueError(
+                "SGLANG_GLM52_OPT_OPS=all cannot be combined with other ops"
+            )
+        return _DIAGNOSTIC_ALLOWED_OPS
+    normalized = {_DIAGNOSTIC_OP_ALIASES.get(op, op) for op in allow}
+    unknown = normalized - _DIAGNOSTIC_ALLOWED_OPS
+    if unknown:
+        raise ValueError(
+            "Unsupported SGLANG_GLM52_OPT_OPS for diagnostic_all: "
+            + ", ".join(sorted(unknown))
+        )
+    return frozenset(normalized)
+
+
 def hotspot_module_ref() -> str:
     """Python module name or absolute provider ``.py`` path for hotspot ops."""
     ensure_glm52_env()
@@ -224,13 +290,21 @@ def emit_infini_kernel_nvtx() -> bool:
 def contig_psum_kwargs(op_name: str) -> dict[str, object]:
     """Kwargs for DeepGEMM contiguous grouped GEMM PSUM layout (goals 08/09).
 
-    Returns ``{}`` unless OPT is on, profile is ``e2e_candidates``, and ``op_name``
-    is an enabled MoE contig PSUM candidate.  Callers must also supply the
-    ``expert_start_loc`` endpoint tensor from ``ep_scatter`` as the layout.
+    Returns ``{}`` unless OPT is on, the active profile explicitly selects
+    ``op_name``, and it is an MoE contig PSUM candidate.  Callers must also
+    supply the ``expert_start_loc`` endpoint tensor from ``ep_scatter`` as the
+    layout.
     """
-    if not is_enabled() or profile_name() != "e2e_candidates":
+    if not is_enabled():
         return {}
-    if op_name not in _E2E_CONTIG_PSUM_OPS or op_name not in e2e_candidate_ops():
+    profile = profile_name()
+    if profile == "e2e_candidates":
+        selected = e2e_candidate_ops()
+    elif profile == "diagnostic_all":
+        selected = diagnostic_candidate_ops()
+    else:
+        return {}
+    if op_name not in _E2E_CONTIG_PSUM_OPS or op_name not in selected:
         return {}
     return {
         "compiled_dims": "nk",

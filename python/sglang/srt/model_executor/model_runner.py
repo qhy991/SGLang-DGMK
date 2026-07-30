@@ -601,7 +601,8 @@ class ModelRunner(ModelRunnerKVCacheMixin):
 
         if (
             glm52_opt_config.is_enabled()
-            and glm52_opt_config.profile_name() == "hotspot_candidates"
+            and glm52_opt_config.profile_name()
+            in ("hotspot_candidates", "diagnostic_all")
         ):
             from sglang.srt.layers.glm52_opt.hotspot_provider import (
                 initialize_hotspot_provider,
