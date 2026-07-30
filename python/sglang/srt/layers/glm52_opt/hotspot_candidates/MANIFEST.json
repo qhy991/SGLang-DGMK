@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "arch": "sm_100 / sm_100f",
+  "nvcc": "CUDA 13.2 (B200 validation host)",
+  "note": "CUDA 13.1 ptxas rejects cvt.rn.bf16x2.e4m3x2; use these prebuilts instead of JIT.",
+  "binaries": [
+    {
+      "role": "stack_winner",
+      "variant": "combine_c2_bucket_stages",
+      "main_variant": "p1_consumer_scale",
+      "module_name": "infini_kernel_glm52_flashmla_sparse_decode_combine_c2_bucket_stages_ea8c72aac9631a91",
+      "so_file": "prebuilt/infini_kernel_glm52_flashmla_sparse_decode_combine_c2_bucket_stages_ea8c72aac9631a91.so",
+      "sha256": "e509dff9cfb2ecf19febf4ba979608608588b173e8d14e71a448e74cd324180f",
+      "size_bytes": 1348528,
+      "build_id": "ea8c72aac9631a9134540d9d970b627737b55acc9623e30ae49f26b4a96d84c9",
+      "local_disposition": "external-acceptance-candidate",
+      "graph_vs_stock": {"M16": "1.2705-1.2753", "M32": "1.1376-1.1426"}
+    },
+    {
+      "role": "main_only",
+      "variant": "p1_consumer_scale",
+      "module_name": "infini_kernel_glm52_flashmla_sparse_decode_p1_consumer_scale_a39236323dc57a97",
+      "so_file": "prebuilt/infini_kernel_glm52_flashmla_sparse_decode_p1_consumer_scale_a39236323dc57a97.so",
+      "sha256": "a368b1451733140d9801d4519ba265e5d85252d83ab7ac25e8f570059b68e4e1",
+      "size_bytes": 1158008,
+      "build_id": "a39236323dc57a97fbfc28fa479c5cd56ce94c065824912fbd95a98a15160649",
+      "flashmla_git_commit": "b5af443ea7c1e9b2d85793e7afe4e61c5b1df19e",
+      "local_disposition": "external-acceptance-candidate (graph-only r3)",
+      "graph_vs_stock": {"M16": "1.0694-1.0728", "M32": "1.0636-1.0669"}
+    }
+  ]
+}
