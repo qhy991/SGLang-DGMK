@@ -35,6 +35,7 @@ _GLM52_ENV_KEYS = frozenset(
         # 0: allow eager selection for diagnostic leaf timing.
         "SGLANG_GLM52_W2_GRAPH_ONLY",
         "SGLANG_GLM52_O_PROJ_GRAPH_ONLY",
+        "SGLANG_GLM52_Q_B_PROJ_GRAPH_ONLY",
     }
 )
 
@@ -142,7 +143,10 @@ def profile_name() -> str:
 # serving_safe.  See glm52_opt/history/e2e_candidates_20260723/INDEX.md.
 _E2E_DEFAULT_OPS = frozenset({"o_proj", "moe_gate_proj", "moe_down_proj"})
 _E2E_CONTIG_PSUM_OPS = frozenset({"moe_gate_proj", "moe_down_proj"})
-_E2E_EXPLICIT_OPS = frozenset({"fused_qkv_a_proj", "index_q_upproj"})
+# q_b_proj (decode fixed-N/K, graph_only) is explicit-only: it never joins the
+# archived default e2e set, so o_proj's default e2e_candidates behavior is
+# unchanged. Select with SGLANG_GLM52_OPT_OPS=q_b_proj. Mirrors index_q_upproj.
+_E2E_EXPLICIT_OPS = frozenset({"fused_qkv_a_proj", "index_q_upproj", "q_b_proj"})
 _E2E_ALLOWED_OPS = _E2E_DEFAULT_OPS | _E2E_EXPLICIT_OPS
 
 # Exact production-interface hooks for out-of-tree PTX/SASS, CUDA/CuTe, or
@@ -223,6 +227,7 @@ def emit_infini_kernel_nvtx() -> bool:
 _GRAPH_ONLY_ENV_BY_OP = {
     "moe_down_proj": "SGLANG_GLM52_W2_GRAPH_ONLY",
     "o_proj": "SGLANG_GLM52_O_PROJ_GRAPH_ONLY",
+    "q_b_proj": "SGLANG_GLM52_Q_B_PROJ_GRAPH_ONLY",
 }
 
 

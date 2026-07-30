@@ -144,6 +144,28 @@ _E2E_DECODE: dict[str, KernelSpec] = {
         # leaf. Mirrors moe_down_proj / FlashMLA dsa_decode_attn.
         graph_only=True,
     ),
+    "q_b_proj": KernelSpec(
+        op="q_b_proj",
+        phase="decode",
+        archive_ref="",
+        kind="fp8_gemm",
+        implementation="fixed_nk",
+        profiler_name="infini_kernel_glm52_attn_q_b_decode_nk",
+        m_values=(16, 32),
+        n=16384,
+        k=2048,
+        # Decode q_b_proj is production graph-bound; the eager glm52_opt dispatch
+        # tax (Python lookup/alloc/hit-accounting) vetoes the fixed-N/K device
+        # win in every eager paired session (goal-14 packed fork was the prior
+        # negative route). Restrict selection to CUDA-graph capture so eager
+        # decode stays on stock with no provider launch;
+        # SGLANG_GLM52_Q_B_PROJ_GRAPH_ONLY=0 forces eager for a diagnostic leaf.
+        # Mirrors o_proj / moe_down_proj / FlashMLA dsa_decode_attn. The
+        # fixed_nk path (fp8_gemm.run_fp8_gemm) is checked before the historical
+        # q_b DeepGEMM fork, so this candidate is the clean compiled_dims="nk"
+        # specialization, not the goal-14 fork.
+        graph_only=True,
+    ),
     "index_q_upproj": KernelSpec(
         op="index_q_upproj",
         phase="decode",
