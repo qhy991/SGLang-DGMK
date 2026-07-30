@@ -31,6 +31,9 @@ _GLM52_ENV_KEYS = frozenset(
         "SGLANG_GLM52_NSYS_SECONDS",
         "SGLANG_GLM52_INFINI_KERNEL_NVTX",
         "SGLANG_GLM52_HOTSPOT_MODULE",
+        # 1 (default for graph_only specs): only select under graph capture.
+        # 0: allow eager selection for diagnostic leaf timing.
+        "SGLANG_GLM52_INDEX_Q_UPPROJ_GRAPH_ONLY",
     }
 )
 
@@ -212,6 +215,30 @@ def emit_infini_kernel_nvtx() -> bool:
     """Whether selected kernels get profiler-only ``infini_kernel`` ranges."""
     ensure_glm52_env()
     return _truthy("SGLANG_GLM52_INFINI_KERNEL_NVTX")
+
+
+# Per-op override for ``KernelSpec.graph_only``.  Each entry names the env var
+# that can disable graph-only selection for diagnostic eager timing.
+_GRAPH_ONLY_ENV_BY_OP = {
+    "index_q_upproj": "SGLANG_GLM52_INDEX_Q_UPPROJ_GRAPH_ONLY",
+}
+
+
+def graph_only_enabled(op_name: str) -> bool:
+    """Whether a ``graph_only`` spec keeps its capture-only restriction.
+
+    Decode ``index_q_upproj`` is production-graph-bound.  The eager glm52_opt
+    dispatch path adds a fixed host tax per call that makes the eager containing
+    region regress against stock, so a ``graph_only`` spec defaults to selecting
+    under CUDA-graph capture only.  Set the op's env to ``0`` to force eager
+    selection for a diagnostic leaf measurement.
+    """
+    ensure_glm52_env()
+    key = _GRAPH_ONLY_ENV_BY_OP.get(op_name)
+    if key is None:
+        return True
+    raw = os.environ.get(key, "1").strip().lower()
+    return raw not in ("0", "false", "no", "off")
 
 
 def contig_psum_kwargs(op_name: str) -> dict[str, object]:

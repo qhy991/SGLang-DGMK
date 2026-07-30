@@ -51,6 +51,12 @@ class KernelSpec:
     v_dim: int | None = None
     page_size: int | None = None
     kv_dim: int | None = None
+    # When True, try_dispatch may select the candidate only while the current
+    # CUDA stream is capturing a graph. Eager calls fall back to stock before
+    # any provider launch. Used by decode index_q_upproj: the fixed-N/K device
+    # win only appears under CUDA-graph replay, while the eager glm52_opt
+    # dispatch tax regresses the eager containing region.
+    graph_only: bool = False
 
 
 _DECODE: dict[str, KernelSpec] = {
@@ -142,6 +148,14 @@ _E2E_DECODE: dict[str, KernelSpec] = {
         m_values=(16, 32),
         n=4096,
         k=2048,
+        # Decode index_q_upproj (Indexer.wq_b q-up projection) is production
+        # graph-bound: the fixed-N/K compiled_dims="nk" win only holds under
+        # CUDA-graph replay, and the eager glm52_opt dispatch tax regresses the
+        # eager containing region. Restrict selection to CUDA-graph capture so
+        # eager decode stays on stock with no provider launch;
+        # SGLANG_GLM52_INDEX_Q_UPPROJ_GRAPH_ONLY=0 forces eager for a diagnostic
+        # leaf. Mirrors the accepted decode o_proj graph-only policy.
+        graph_only=True,
     ),
 }
 

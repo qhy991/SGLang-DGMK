@@ -31,12 +31,16 @@ logger = logging.getLogger(__name__)
 _HIT_LOCK = threading.Lock()
 _HIT_COUNTS: dict[str, int] = {}
 _MISS_COUNTS: dict[str, int] = {}
-_HIT_FILE = Path(
-    os.environ.get("SGLANG_GLM52_OPT_HIT_FILE", "/home/ubuntu/wwxq/cache/sglang/glm52_opt_hits.json")
-)
+_HIT_FILE_RAW = os.environ.get(
+    "SGLANG_GLM52_OPT_HIT_FILE",
+    "/home/ubuntu/wwxq/cache/sglang/glm52_opt_hits.json",
+).strip()
+_HIT_FILE = Path(_HIT_FILE_RAW) if _HIT_FILE_RAW else None
 
 
 def _flush_stats() -> None:
+    if _HIT_FILE is None:
+        return
     try:
         _HIT_FILE.parent.mkdir(parents=True, exist_ok=True)
         payload = {"hits": dict(_HIT_COUNTS), "misses": dict(_MISS_COUNTS)}
@@ -111,6 +115,27 @@ def _nvtx_range(name: str):
                     pass
 
     return _cm()
+
+
+def _is_cuda_graph_capturing() -> bool:
+    try:
+        return bool(torch.cuda.is_current_stream_capturing())
+    except Exception:
+        return False
+
+
+def _graph_only_declines(spec: KernelSpec) -> bool:
+    """Whether a ``graph_only`` spec must decline this eager call.
+
+    Returns True only outside CUDA graph capture, so the caller can return the
+    stock path before any provider launch.  Deliberately takes no hit/miss lock:
+    this runs on every eager decode step.
+    """
+    return (
+        spec.graph_only
+        and config.graph_only_enabled(spec.op)
+        and not _is_cuda_graph_capturing()
+    )
 
 
 def _profiler_range_name(spec: KernelSpec, m: int) -> str:
@@ -473,6 +498,12 @@ def try_dispatch_fp8_gemm(
     spec = lookup(op, phase, m=m)
     if spec is None or spec.kind != "fp8_gemm":
         _record_miss("no_spec", op, phase, m=m)
+        return None
+    # A graph_only fp8_gemm spec (decode index_q_upproj) declines outside
+    # CUDA-graph capture before the ABI check and before the hit/miss lock, so
+    # eager decode returns the stock path with zero provider launch and no
+    # glm52_opt tax.
+    if _graph_only_declines(spec):
         return None
     if not _fixed_nk_abi_matches(
         spec,
