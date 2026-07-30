@@ -48,10 +48,27 @@ EXPECTED_BASE_BLOBS = {
 DEFAULT_SOURCE = Path(
     "/home/qinhaiyan/glm52-hotspot-goal-runs/worktrees/moe-w13-decode/deepgemm"
 )
-DEFAULT_OUTPUT = Path(
-    "/home/qinhaiyan/glm52-hotspot-goal-runs/cache/moe_w13_decode/"
-    "deepgemm/w13_variants"
-)
+HOTSPOT_CACHE_ROOT = Path("/home/qinhaiyan/glm52-hotspot-goal-runs/cache")
+LEGACY_TASK_CACHE = HOTSPOT_CACHE_ROOT / "moe_w13_decode"
+
+
+def task_cache_root() -> Path:
+    """Resolve the task-local cache the launcher exported for this goal.
+
+    Each dedicated task owns one cache directory. A later round must build its
+    own artifacts instead of reusing or overwriting another task's binary cache,
+    so the root is taken from the launcher environment rather than hardcoded.
+    """
+    build_dir = os.environ.get("GLM52_TASK_BUILD_DIR", "").strip()
+    if build_dir:
+        root = Path(build_dir).resolve().parent
+        if root.parent != HOTSPOT_CACHE_ROOT.resolve():
+            raise RuntimeError(f"task build dir is outside the hotspot cache: {root}")
+        return root
+    return LEGACY_TASK_CACHE.resolve()
+
+
+DEFAULT_OUTPUT = task_cache_root() / "deepgemm" / "w13_variants"
 BASE_CFLAGS = [
     "-std=c++17",
     "-O3",
@@ -112,9 +129,7 @@ def tree_sha256(root: Path) -> str:
 
 
 def ensure_output_root(output: Path) -> None:
-    task_cache = Path(
-        "/home/qinhaiyan/glm52-hotspot-goal-runs/cache/moe_w13_decode"
-    ).resolve()
+    task_cache = task_cache_root()
     resolved = output.resolve()
     if task_cache not in resolved.parents:
         raise RuntimeError(f"output must stay below task-local cache: {resolved}")

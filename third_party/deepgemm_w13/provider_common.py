@@ -27,6 +27,15 @@ MANIFEST = Path(
     "/home/qinhaiyan/glm52-hotspot-goal-runs/cache/moe_w13_decode/"
     "deepgemm/w13_variants/manifest.json"
 )
+# A later round builds its own artifacts in its own task-local cache, so the
+# manifest and the expected candidate source identity are per-provider inputs.
+DEFAULT_SOURCE_IDENTITY = {
+    "base_commit": BASE_COMMIT,
+    "candidate_commit": CANDIDATE_COMMIT,
+    "candidate_diff_sha256": CANDIDATE_DIFF_SHA256,
+    "stock_source_tree_sha256": STOCK_TREE_SHA256,
+    "candidate_source_tree_sha256": CANDIDATE_TREE_SHA256,
+}
 REQUIRED_PDL = True
 REQUIRED_NUM_SMS = 148
 REQUIRED_TC_UTIL = 100
@@ -81,18 +90,15 @@ def _load_candidate(package: Path, module_name: str) -> ModuleType:
     return module
 
 
-def _validate_manifest(torch: Any) -> tuple[dict[str, Any], Path]:
-    manifest = json.loads(MANIFEST.read_text())
+def _validate_manifest(
+    torch: Any,
+    manifest_path: Path,
+    expected_source: dict[str, str],
+) -> tuple[dict[str, Any], Path]:
+    manifest = json.loads(manifest_path.read_text())
     if manifest.get("schema_version") != 3:
         raise RuntimeError("W13 build manifest schema mismatch")
     source = manifest.get("source", {})
-    expected_source = {
-        "base_commit": BASE_COMMIT,
-        "candidate_commit": CANDIDATE_COMMIT,
-        "candidate_diff_sha256": CANDIDATE_DIFF_SHA256,
-        "stock_source_tree_sha256": STOCK_TREE_SHA256,
-        "candidate_source_tree_sha256": CANDIDATE_TREE_SHA256,
-    }
     actual_source = {key: source.get(key) for key in expected_source}
     if actual_source != expected_source:
         raise RuntimeError(
@@ -110,7 +116,9 @@ def _validate_manifest(torch: Any) -> tuple[dict[str, Any], Path]:
     ):
         raise RuntimeError("W13 build/runtime contract mismatch")
     record = manifest.get("variants", {}).get("candidate")
-    if not isinstance(record, dict) or record.get("commit") != CANDIDATE_COMMIT:
+    if not isinstance(record, dict) or record.get("commit") != expected_source[
+        "candidate_commit"
+    ]:
         raise RuntimeError("W13 candidate build record is missing")
     package = Path(str(record.get("package", ""))).resolve()
     shared_object = Path(str(record.get("shared_object", ""))).resolve()
@@ -130,9 +138,18 @@ def _validate_manifest(torch: Any) -> tuple[dict[str, Any], Path]:
 class Provider:
     """One startup-bound, one-launch-hot-path DeepGEMM provider."""
 
-    def __init__(self, *, name: str, config: tuple[int, int, int, int, int]):
+    def __init__(
+        self,
+        *,
+        name: str,
+        config: tuple[int, int, int, int, int, int],
+        manifest: Path | None = None,
+        expected_source: dict[str, str] | None = None,
+    ):
         self.name = name
         self.config = config
+        self.manifest = Path(manifest) if manifest is not None else MANIFEST
+        self.expected_source = dict(expected_source or DEFAULT_SOURCE_IDENTITY)
         self._lock = threading.Lock()
         self._module: ModuleType | None = None
         self._launcher: Any = None
@@ -155,7 +172,9 @@ class Provider:
                 )
             if torch.cuda.get_device_capability(current) != (10, 0):
                 raise RuntimeError("W13 provider requires sm_100")
-            record, jit_cache = _validate_manifest(torch)
+            record, jit_cache = _validate_manifest(
+                torch, self.manifest, self.expected_source
+            )
             saved = {
                 name: os.environ.get(name)
                 for name in (
@@ -258,7 +277,10 @@ class Provider:
                 if not frozen:
                     raise RuntimeError("W13 candidate warmup produced no JIT files")
 
-                probe = MANIFEST.parent / f"unbound-provider-probe-{os.getpid()}"
+                probe = (
+                    self.manifest.parent
+                    / f"unbound-provider-probe-{os.getpid()}"
+                )
                 if probe.exists():
                     raise RuntimeError(f"W13 cache probe already exists: {probe}")
                 os.environ["DG_JIT_CACHE_DIR"] = str(probe)
@@ -284,8 +306,8 @@ class Provider:
                     "gpu_id": gpu_id,
                     "config": list(self.config),
                     "runtime_state": runtime_state,
-                    "manifest": str(MANIFEST),
-                    "manifest_sha256": _sha256(MANIFEST),
+                    "manifest": str(self.manifest),
+                    "manifest_sha256": _sha256(self.manifest),
                     "shared_object": record["shared_object"],
                     "shared_object_sha256": record["shared_object_sha256"],
                     "jit_cache": str(jit_cache),

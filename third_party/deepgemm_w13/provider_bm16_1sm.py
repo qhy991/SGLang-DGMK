@@ -22,7 +22,7 @@ PROVIDER_INFO = {
 }
 _PROVIDER = _COMMON.Provider(
     name="bm16_1sm",
-    config=(16, 128, 128, 11, 1),
+    config=(16, 128, 128, 11, 1, 0),
 )
 
 

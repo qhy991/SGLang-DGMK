@@ -88,21 +88,25 @@ def assert_source_constants(
 
 def _candidate_directory_identity(
     directory: Path,
-) -> tuple[str, int, str]:
+) -> tuple[str, int, str, str]:
+    # Round-2 added the `_sfrelaybypass` experiment suffix.
     match = re.fullmatch(
-        rf"kernel\.({PREFIX}_em(4|5|8|9)_bm16_(1sm|2sm))\.[0-9a-f]+",
+        rf"kernel\.({PREFIX}_em(4|5|8|9)_bm16_(1sm|2sm)(_sfrelaybypass)?)"
+        rf"\.[0-9a-f]+",
         directory.name,
     )
     if match is None:
         raise AssertionError(f"unexpected candidate directory: {directory.name}")
-    symbol, expected_m_text, topology = match.groups()
-    return symbol, int(expected_m_text), topology
+    symbol, expected_m_text, topology, bypass = match.groups()
+    relay_mode = "sf_relay_bypass" if bypass else "relay"
+    return symbol, int(expected_m_text), topology, relay_mode
 
 
 def _context_duplicate_record(
     symbol: str,
     canonical: Path,
     alternatives: list[Path],
+    include_hash: str,
 ) -> dict[str, Any]:
     canonical_source = (canonical / "kernel.cu").read_text()
     canonical_body = canonical_source.splitlines()[1:]
@@ -133,7 +137,7 @@ def _context_duplicate_record(
             "that include tree before compiling the same named wrapper"
         ),
         "canonical_production_directory": str(canonical.resolve()),
-        "canonical_include_hash": CANDIDATE_INCLUDE_HASH,
+        "canonical_include_hash": include_hash,
         "canonical_sass_sha256": canonical_sass_sha,
         "alternatives": rendered,
     }
@@ -143,23 +147,29 @@ def audit_candidate(
     cache: Path,
     *,
     allow_context_duplicates: bool,
+    include_hash: str = CANDIDATE_INCLUDE_HASH,
+    relay_mode: str = "relay",
+    expected_m_values: tuple[int, ...] = EXPECTED_M_VALUES,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     all_directories = sorted((cache / "cache").glob(f"kernel.{PREFIX}_*"))
     groups: dict[tuple[int, str], list[Path]] = {}
     symbols: dict[tuple[int, str], str] = {}
     for directory in all_directories:
-        symbol, expected_m, topology = _candidate_directory_identity(directory)
+        symbol, expected_m, topology, mode = _candidate_directory_identity(directory)
+        if mode != relay_mode:
+            continue
         key = (expected_m, topology)
         groups.setdefault(key, []).append(directory)
         symbols[key] = symbol
     expected_keys = {
         (expected_m, topology)
-        for expected_m in EXPECTED_M_VALUES
+        for expected_m in expected_m_values
         for topology in ("1sm", "2sm")
     }
     if set(groups) != expected_keys:
         raise AssertionError(
-            f"candidate identity set mismatch: {set(groups)} != {expected_keys}"
+            f"candidate identity set mismatch for {relay_mode}: "
+            f"{set(groups)} != {expected_keys}"
         )
     directories: list[Path] = []
     context_duplicates: list[dict[str, Any]] = []
@@ -169,7 +179,7 @@ def audit_candidate(
             directory
             for directory in choices
             if (directory / "kernel.cu").read_text().splitlines()[0]
-            == f"// Includes' hash value: {CANDIDATE_INCLUDE_HASH}"
+            == f"// Includes' hash value: {include_hash}"
         ]
         if len(production) != 1:
             raise AssertionError(
@@ -188,17 +198,19 @@ def audit_candidate(
                     symbols[key],
                     canonical,
                     alternatives,
+                    include_hash,
                 )
             )
         directories.append(canonical)
-    if len(directories) != 8:
+    if len(directories) != len(expected_keys):
         raise AssertionError(
-            f"expected 8 production candidate kernels, found {len(directories)}"
+            f"expected {len(expected_keys)} production candidate kernels for "
+            f"{relay_mode}, found {len(directories)}"
         )
     records: list[dict[str, Any]] = []
     seen: set[tuple[int, str]] = set()
     for directory in directories:
-        symbol, expected_m, topology = _candidate_directory_identity(directory)
+        symbol, expected_m, topology, _ = _candidate_directory_identity(directory)
         if (expected_m, topology) in seen:
             raise AssertionError(f"duplicate candidate identity {(expected_m, topology)}")
         seen.add((expected_m, topology))
@@ -313,13 +325,10 @@ def audit_candidate(
                 },
             }
         )
-    expected = {
-        (expected_m, topology)
-        for expected_m in EXPECTED_M_VALUES
-        for topology in ("1sm", "2sm")
-    }
-    if seen != expected:
-        raise AssertionError(f"candidate identity set mismatch: {seen} != {expected}")
+    if seen != expected_keys:
+        raise AssertionError(
+            f"candidate identity set mismatch: {seen} != {expected_keys}"
+        )
     return records, context_duplicates
 
 
@@ -416,12 +425,33 @@ def main() -> int:
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--allow-context-duplicates", action="store_true")
+    parser.add_argument(
+        "--include-hash",
+        default=CANDIDATE_INCLUDE_HASH,
+        help="generated-source include hash of the audited candidate build",
+    )
+    parser.add_argument(
+        "--relay-mode",
+        choices=("relay", "sf_relay_bypass"),
+        default="relay",
+        help="audit the validated relay portfolio or the round-2 experiment",
+    )
+    parser.add_argument(
+        "--expected-m",
+        type=int,
+        nargs="+",
+        default=list(EXPECTED_M_VALUES),
+        help="expected-M points the audited portfolio must contain",
+    )
     args = parser.parse_args()
     manifest_path = args.manifest.expanduser().resolve()
     manifest = json.loads(manifest_path.read_text())
     candidate, context_duplicates = audit_candidate(
         Path(manifest["variants"]["candidate"]["jit_cache"]).resolve(),
         allow_context_duplicates=args.allow_context_duplicates,
+        include_hash=args.include_hash,
+        relay_mode=args.relay_mode,
+        expected_m_values=tuple(args.expected_m),
     )
     result = {
         "schema_version": 1,
