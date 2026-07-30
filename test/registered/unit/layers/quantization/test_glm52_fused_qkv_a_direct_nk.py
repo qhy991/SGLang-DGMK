@@ -168,6 +168,12 @@ def _construct_attention(
 ):
     with ExitStack() as stack:
         stack.enter_context(
+            patch(
+                "sglang.srt.layers.glm52_opt.config.is_enabled",
+                return_value=False,
+            )
+        )
+        stack.enter_context(
             patch.object(
                 deepseek_v2_module,
                 "get_parallel",
@@ -378,6 +384,43 @@ class TestModelIsolation(unittest.TestCase):
                 for key, value in config_updates.items():
                     setattr(config, key, value)
                 self.assertFalse(_fingerprint(config, **arg_updates))
+
+    def test_legacy_registry_and_direct_route_are_mutually_exclusive(self):
+        with (
+            patch(
+                "sglang.srt.layers.glm52_opt.config.is_enabled",
+                return_value=True,
+            ),
+            patch(
+                "sglang.srt.layers.glm52_opt.registry.lookup",
+                side_effect=lambda op, phase, m: (
+                    object()
+                    if (op, phase, m)
+                    == ("fused_qkv_a_proj", "prefill", 4096)
+                    else None
+                ),
+            ),
+            self.assertRaisesRegex(ValueError, "enable exactly one"),
+        ):
+            deepseek_v2_module._reject_glm52_fused_qkv_a_route_conflict(
+                enable_decode_direct_nk=False,
+                enable_prefill_direct_nk=True,
+            )
+
+        with (
+            patch(
+                "sglang.srt.layers.glm52_opt.config.is_enabled",
+                return_value=False,
+            ),
+            patch(
+                "sglang.srt.layers.glm52_opt.registry.lookup",
+            ) as lookup,
+        ):
+            deepseek_v2_module._reject_glm52_fused_qkv_a_route_conflict(
+                enable_decode_direct_nk=True,
+                enable_prefill_direct_nk=True,
+            )
+        lookup.assert_not_called()
 
     def test_real_attention_constructor_marks_only_exact_target(self):
         attention = _construct_attention(_target_config())

@@ -31,6 +31,7 @@ _GLM52_ENV_KEYS = frozenset(
         "SGLANG_GLM52_NSYS_SECONDS",
         "SGLANG_GLM52_INFINI_KERNEL_NVTX",
         "SGLANG_GLM52_HOTSPOT_MODULE",
+        "SGLANG_GLM52_W13_MANIFEST",
     }
 )
 
@@ -144,7 +145,13 @@ _E2E_ALLOWED_OPS = _E2E_DEFAULT_OPS | _E2E_EXPLICIT_OPS
 # Exact production-interface hooks for out-of-tree PTX/SASS, CUDA/CuTe, or
 # Triton experiments.  These are intentionally isolated from e2e_candidates:
 # selecting the hotspot profile must never also turn on an older archive swap.
-_HOTSPOT_DEFAULT_OPS = frozenset({"dsa_decode_attn", "moe_gate_proj", "moe_down_proj"})
+# Only W13 cleared every local eager/graph/containing-region gate. FlashMLA
+# and W2 remain explicit diagnostic registrations so a bare hotspot profile
+# cannot accidentally select a measured non-win.
+_HOTSPOT_DEFAULT_OPS = frozenset({"moe_gate_proj"})
+_HOTSPOT_ALLOWED_OPS = frozenset(
+    {"dsa_decode_attn", "moe_gate_proj", "moe_down_proj"}
+)
 _HOTSPOT_OP_ALIASES = {
     "flashmla_sparse_decode": "dsa_decode_attn",
     "flashmla_kv": "dsa_decode_attn",
@@ -192,7 +199,7 @@ def hotspot_candidate_ops() -> frozenset[str]:
     if allow is None:
         return _HOTSPOT_DEFAULT_OPS
     normalized = {_HOTSPOT_OP_ALIASES.get(op, op) for op in allow}
-    unknown = normalized - _HOTSPOT_DEFAULT_OPS
+    unknown = normalized - _HOTSPOT_ALLOWED_OPS
     if unknown:
         raise ValueError(
             "Unsupported SGLANG_GLM52_OPT_OPS for hotspot_candidates: "

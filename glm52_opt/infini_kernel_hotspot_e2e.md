@@ -1,5 +1,13 @@
 # GLM-5.2 `infini_kernel` hotspot provider
 
+> **Terminal status (2026-07-30):** this file defines the common experimental
+> ABI. Only W13 BM16/2-SM cleared all local gates and is selected by a bare
+> `hotspot_candidates` profile. FlashMLA PTX/SASS and W2 are retained as
+> explicit-only diagnostic registrations after `no-replacement` results.
+> See
+> [`docs/glm52_verified_kernel_registration_zh.md`](../docs/glm52_verified_kernel_registration_zh.md)
+> for authoritative results and external-test commands.
+
 ## Outcome and safety boundary
 
 This branch registers three decode hotspots at their real SGLang production

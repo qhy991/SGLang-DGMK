@@ -7,9 +7,10 @@ the exact fused GLM-5.2 W13 decode ABI:
 - `provider_bm16_1sm.py`: `(16,128,128,11,1)`
 
 `build_variants.py` reconstructs stock from DeepGEMM
-`731e7c7a97d269e4b9f482ea18d0e709a948f293` and candidate from the dedicated
-task branch. It builds both extensions with the same clean command and stages
-them under the task-local cache. Both DSOs use hidden C++ visibility plus
+`731e7c7a97d269e4b9f482ea18d0e709a948f293` and reconstructs measured candidate
+`87e0359edbb461181d3bba218442132007b9a738` from the bundled, SHA-256-checked
+patch. It builds both extensions with the same clean command and stages them
+under the selected output directory. Both DSOs use hidden C++ visibility plus
 `-Wl,-Bsymbolic` so their JIT include-parser/compiler statics remain local
 when stock and candidate are loaded side by side. It never installs or
 overwrites a package.
@@ -18,7 +19,9 @@ CPU-only materialization audit:
 
 ```bash
 CUDA_VISIBLE_DEVICES='' \
-python3 third_party/deepgemm_w13/build_variants.py --audit-materialization
+python3 third_party/deepgemm_w13/build_variants.py \
+  --source /path/to/clean/DeepGEMM \
+  --audit-materialization
 ```
 
 Clean host build:
@@ -27,8 +30,9 @@ Clean host build:
 CUDA_VISIBLE_DEVICES='' \
 CUDA_HOME=/usr/local/cuda-13.2 \
 MAX_JOBS=4 \
-/home/qinhaiyan/miniconda3/envs/sglang/bin/python \
-third_party/deepgemm_w13/build_variants.py --force
+python third_party/deepgemm_w13/build_variants.py \
+  --source /path/to/clean/DeepGEMM \
+  --force
 ```
 
 At startup the selected provider validates the manifest and DSO, binds its
@@ -43,5 +47,10 @@ SGLANG_GLM52_OPT=1
 SGLANG_GLM52_OPT_PROFILE=hotspot_candidates
 SGLANG_GLM52_OPT_OPS=moe_w13
 SGLANG_GLM52_OPT_M_BUCKETS=moe_gate_proj:16|32
+SGLANG_GLM52_W13_MANIFEST=$PWD/.cache/glm52_w13_variants/manifest.json
 SGLANG_GLM52_HOTSPOT_MODULE=<absolute provider_bm16_{2sm,1sm}.py>
 ```
+
+The default build output is `.cache/glm52_w13_variants`. Override it with
+`--output`; point every worker at its resulting `manifest.json` through
+`SGLANG_GLM52_W13_MANIFEST`.

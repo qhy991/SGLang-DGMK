@@ -23,10 +23,13 @@ STOCK_TREE_SHA256 = (
 CANDIDATE_TREE_SHA256 = (
     "d682daa65b8ba0ac3846d766910b8c751e0568fe62087084271bb354e46c49e4"
 )
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = Path(
-    "/home/qinhaiyan/glm52-hotspot-goal-runs/cache/moe_w13_decode/"
-    "deepgemm/w13_variants/manifest.json"
-)
+    os.environ.get(
+        "SGLANG_GLM52_W13_MANIFEST",
+        str(_REPO_ROOT / ".cache" / "glm52_w13_variants" / "manifest.json"),
+    )
+).expanduser().resolve()
 REQUIRED_PDL = True
 REQUIRED_NUM_SMS = 148
 REQUIRED_TC_UTIL = 100

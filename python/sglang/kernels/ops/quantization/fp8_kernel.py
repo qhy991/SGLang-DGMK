@@ -148,6 +148,19 @@ def deep_gemm_fp8_fp8_bf16_nt(
 
 
 @register_custom_op(mutates_args=["C"])
+def deep_gemm_fp8_fp8_bf16_nt_fused_qkv_a_compiled_nk(
+    A: torch.Tensor,
+    As: torch.Tensor,
+    B: torch.Tensor,
+    Bs: torch.Tensor,
+    C: torch.Tensor,
+) -> None:
+    deep_gemm_wrapper.gemm_nt_f8f8bf16_fused_qkv_a_compiled_nk(
+        (A, As), (B, Bs), C
+    )
+
+
+@register_custom_op(mutates_args=["C"])
 def deep_gemm_mxfp8_fp8_bf16_nt(
     A: torch.Tensor,
     As: torch.Tensor,
@@ -1379,6 +1392,29 @@ def w8a8_block_fp8_matmul_deepgemm(
     assert C.dtype == torch.bfloat16 and deep_gemm_wrapper.ENABLE_JIT_DEEPGEMM
 
     deep_gemm_fp8_fp8_bf16_nt(A, As, B, Bs, C)
+
+    return C
+
+
+def w8a8_block_fp8_matmul_deepgemm_fused_qkv_a_compiled_nk(
+    A: torch.Tensor,
+    B: torch.Tensor,
+    As: torch.Tensor,
+    Bs: torch.Tensor,
+    block_size: List[int],
+    output_dtype: torch.dtype,
+) -> torch.Tensor:
+    """Task01 packed FP8 GEMM with runtime M and compile-time N/K."""
+    M, N, K, C = prepare_block_fp8_matmul_inputs(
+        A, B, As, Bs, block_size, output_dtype
+    )
+
+    assert (M, N, K) in ((16, 2624, 6144), (32, 2624, 6144)), (
+        f"unsupported fused-QKV-A compiled-N/K bucket: {(M, N, K)}"
+    )
+    assert C.dtype == torch.bfloat16 and deep_gemm_wrapper.ENABLE_JIT_DEEPGEMM
+
+    deep_gemm_fp8_fp8_bf16_nt_fused_qkv_a_compiled_nk(A, As, B, Bs, C)
 
     return C
 

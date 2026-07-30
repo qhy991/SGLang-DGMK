@@ -27,19 +27,18 @@ def _restore_env(saved: dict[str, str | None]) -> None:
             os.environ[name] = value
 
 
-def test_hotspot_profile_registers_exact_three_decode_ops():
+def test_hotspot_profile_defaults_to_promotable_w13_and_keeps_diagnostics_explicit():
     names = ("SGLANG_GLM52_OPT_PROFILE", "SGLANG_GLM52_OPT_OPS")
     saved = {name: os.environ.get(name) for name in names}
     try:
         os.environ["SGLANG_GLM52_OPT_PROFILE"] = "hotspot_candidates"
         os.environ.pop("SGLANG_GLM52_OPT_OPS", None)
         specs = {spec.op: spec for spec in list_enabled("decode")}
-        assert set(specs) == {
-            "dsa_decode_attn",
-            "moe_gate_proj",
-            "moe_down_proj",
-        }
+        assert set(specs) == {"moe_gate_proj"}
 
+        # Rejected FlashMLA PTX/SASS and W2 experiments remain registered for
+        # explicit diagnostics, but a bare profile cannot select either.
+        os.environ["SGLANG_GLM52_OPT_OPS"] = "flashmla_sparse_decode,moe_w2"
         flashmla = lookup("dsa_decode_attn", "decode", m=16)
         assert flashmla is not None
         assert flashmla.implementation == "hotspot_plugin"
@@ -51,13 +50,22 @@ def test_hotspot_profile_registers_exact_three_decode_ops():
         assert lookup("dsa_decode_attn", "decode", m=64) is None
 
         w13 = lookup("moe_gate_proj", "decode", m=32)
-        assert w13 is not None
-        assert (w13.num_groups, w13.slab_m, w13.n, w13.k) == (
+        assert w13 is None
+        os.environ["SGLANG_GLM52_OPT_OPS"] = "moe_w13"
+        w13_explicit = lookup("moe_gate_proj", "decode", m=32)
+        assert w13_explicit is not None
+        assert (
+            w13_explicit.num_groups,
+            w13_explicit.slab_m,
+            w13_explicit.n,
+            w13_explicit.k,
+        ) == (
             32,
             1024,
             4096,
             6144,
         )
+        os.environ["SGLANG_GLM52_OPT_OPS"] = "moe_w2"
         w2 = lookup("moe_down_proj", "decode", m=16)
         assert w2 is not None
         assert (w2.n, w2.k) == (6144, 2048)

@@ -105,6 +105,7 @@ class DeepGemmKernelType(IntEnum):
     GROUPED_GEMM_NT_BF16_CONTIG = auto()
     GEMM_NT_F8F8BF16 = auto()
     GEMM_NT_BF16BF16F32 = auto()
+    GEMM_NT_F8F8BF16_FUSED_QKV_A_COMPILED_NK = auto()
 
 
 _INITIALIZATION_DICT: Dict[Tuple[DeepGemmKernelType, int, int, int], bool] = dict()
@@ -146,12 +147,18 @@ def _maybe_compile_deep_gemm_one_type_all(
             f"{' It only takes a little time (typically 1 sec) if you have run `python3 -m sglang.compile_deep_gemm`. ' if not _IN_PRECOMPILE_STAGE else ''}"
         )
 
+        m_list = (
+            [16, 32]
+            if kernel_type
+            == DeepGemmKernelType.GEMM_NT_F8F8BF16_FUSED_QKV_A_COMPILED_NK
+            else _BUILTIN_M_LIST
+        )
         _compile_deep_gemm_one_type_all(
             kernel_type=kernel_type,
             n=n,
             k=k,
             num_groups=num_groups,
-            m_list=_BUILTIN_M_LIST,
+            m_list=m_list,
         )
 
 
@@ -232,6 +239,7 @@ class _BaseWarmupExecutor:
     def create(kernel_type: DeepGemmKernelType, **kwargs):
         return {
             DeepGemmKernelType.GEMM_NT_F8F8BF16: _NormalWarmupExecutor,
+            DeepGemmKernelType.GEMM_NT_F8F8BF16_FUSED_QKV_A_COMPILED_NK: _FusedQkvACompiledNkWarmupExecutor,
             DeepGemmKernelType.GROUPED_GEMM_NT_F8F8BF16_CONTIG: _GroupedContWarmupExecutor,
             DeepGemmKernelType.GROUPED_GEMM_NT_F8F8BF16_MASKED: _GroupedMaskedWarmupExecutor,
             DeepGemmKernelType.GEMM_NT_BF16BF16F32: _BF16F32WarmupExecutor,
@@ -245,7 +253,10 @@ class _BaseWarmupExecutor:
     ) -> int:
         # Return the required memory space in GB for warmup executor
         _GB = 1 << 30
-        if kernel_type == DeepGemmKernelType.GEMM_NT_F8F8BF16:
+        if kernel_type in (
+            DeepGemmKernelType.GEMM_NT_F8F8BF16,
+            DeepGemmKernelType.GEMM_NT_F8F8BF16_FUSED_QKV_A_COMPILED_NK,
+        ):
             return (max_m * k + n * k + max_m * n * 2) / _GB
         elif kernel_type == DeepGemmKernelType.GROUPED_GEMM_NT_F8F8BF16_CONTIG:
             return (max_m * k + num_groups * n * k + max_m * 4 + max_m * n * 2) / _GB
@@ -313,6 +324,43 @@ class _NormalWarmupExecutor(_BaseWarmupExecutor):
             (self.lhs_q[:m], self.lhs_s[:m]),
             (self.rhs_q, self.rhs_s),
             self.out[:m],
+        )
+
+
+class _FusedQkvACompiledNkWarmupExecutor(_BaseWarmupExecutor):
+    """Prewarm only the two Task01 packed-UE8M0 compiled-N/K buckets."""
+
+    _SUPPORTED_M = (16, 32)
+
+    def __init__(self, max_m: int, n: int, k: int, num_groups: int):
+        assert max_m == 32 and n == 2624 and k == 6144 and num_groups == 1
+        packed_k = ceil_div(k, _BLOCK_SIZE * 4)
+        self.lhs_q = torch.empty(
+            (max_m, k), device="cuda", dtype=torch.float8_e4m3fn
+        )
+        self.lhs_s = {
+            m: torch.ones(
+                (packed_k, m), device="cuda", dtype=torch.int32
+            ).T
+            for m in self._SUPPORTED_M
+        }
+        self.rhs_q = torch.empty(
+            (n, k), device="cuda", dtype=torch.float8_e4m3fn
+        )
+        self.rhs_s = torch.ones(
+            (packed_k, n), device="cuda", dtype=torch.int32
+        ).T
+        self.out = torch.empty(
+            (max_m, n), device="cuda", dtype=torch.bfloat16
+        )
+
+    def execute(self, m):
+        assert m in self._SUPPORTED_M
+        deep_gemm.fp8_gemm_nt(
+            (self.lhs_q[:m], self.lhs_s[m]),
+            (self.rhs_q, self.rhs_s),
+            self.out[:m],
+            compiled_dims="nk",
         )
 
 

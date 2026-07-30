@@ -43,6 +43,10 @@ It may be enabled only for controlled acceptance:
 export SGLANG_OPT_GLM52_FUSED_QKV_A_PREFILL_DIRECT_NK=1
 ```
 
+Do not simultaneously enable the legacy `SGLANG_GLM52_OPT` registry entry for
+`fused_qkv_a_proj/prefill/M4096`. The model constructor now rejects that
+ambiguous double registration instead of silently choosing one route.
+
 Unset the variable or set it to `0` for immediate rollback. Do not make it
 default-on until the external acceptance procedure passes.
 

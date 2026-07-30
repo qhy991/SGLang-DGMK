@@ -604,6 +604,9 @@ class Fp8LinearMethod(LinearMethodBase):
                 layer.register_parameter("input_scale", None)
 
     def process_weights_after_loading_block_quant(self, layer: Module) -> None:
+        use_glm52_fused_qkv_a_direct_nk_runner = (
+            is_glm52_fused_qkv_a_decode_direct_nk_runner(self.w8a8_block_fp8_linear)
+        )
         if self.convert_mxfp8_to_block:
             from sglang.srt.layers.quantization.mxfp8_block_convert import (
                 convert_mxfp8_weight_to_block_fp8,
@@ -652,6 +655,7 @@ class Fp8LinearMethod(LinearMethodBase):
             use_deepgemm_runner = (
                 self.w8a8_block_fp8_linear
                 is deepgemm_w8a8_block_fp8_linear_with_fallback
+                or use_glm52_fused_qkv_a_direct_nk_runner
             )
             requant_block_scale_ue8m0_for_deepgemm(
                 layer.weight,
@@ -665,6 +669,13 @@ class Fp8LinearMethod(LinearMethodBase):
 
         layer.weight.data = weight.data
         layer.weight_scale_inv.data = weight_scale.data
+
+        if use_glm52_fused_qkv_a_direct_nk_runner:
+            self.w8a8_block_fp8_linear = bind_glm52_fused_qkv_a_decode_direct_nk_runner(
+                layer.weight,
+                layer.weight_scale_inv,
+                self.weight_block_size,
+            )
 
         if (
             _use_aiter_bpreshuffle_gfx95

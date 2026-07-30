@@ -10,6 +10,7 @@ neither module is installed into the active Python environment.
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import os
@@ -25,6 +26,10 @@ from pathlib import Path
 from typing import Any
 
 BASE_COMMIT = "731e7c7a97d269e4b9f482ea18d0e709a948f293"
+CANDIDATE_COMMIT = "87e0359edbb461181d3bba218442132007b9a738"
+CANDIDATE_DIFF_SHA256 = (
+    "465c8373c0a37970225a0e93267b6c399431b23e22cf35b4511db2308df98092"
+)
 CUTLASS_COMMIT = "f3fde58372d33e9a5650ba7b80fc48b3b49d40c8"
 FMT_COMMIT = "553ec11ec06fbe0beebfbb45f9dc3c9eabd83d28"
 EXPECTED_BASE_BLOBS = {
@@ -45,13 +50,12 @@ EXPECTED_BASE_BLOBS = {
         "243eeaa71fa65cecaddd7298245438cb371ca765d7bf914a9427e132be8d5f26"
     ),
 }
-DEFAULT_SOURCE = Path(
-    "/home/qinhaiyan/glm52-hotspot-goal-runs/worktrees/moe-w13-decode/deepgemm"
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+CANDIDATE_PATCH = Path(__file__).resolve().with_name(
+    "deepgemm_w13_bm16_87e0359.patch.b64"
 )
-DEFAULT_OUTPUT = Path(
-    "/home/qinhaiyan/glm52-hotspot-goal-runs/cache/moe_w13_decode/"
-    "deepgemm/w13_variants"
-)
+DEFAULT_SOURCE = os.environ.get("SGLANG_GLM52_W13_DEEPGEMM_SOURCE")
+DEFAULT_OUTPUT = _REPO_ROOT / ".cache" / "glm52_w13_variants"
 BASE_CFLAGS = [
     "-std=c++17",
     "-O3",
@@ -112,29 +116,31 @@ def tree_sha256(root: Path) -> str:
 
 
 def ensure_output_root(output: Path) -> None:
-    task_cache = Path(
-        "/home/qinhaiyan/glm52-hotspot-goal-runs/cache/moe_w13_decode"
-    ).resolve()
     resolved = output.resolve()
-    if task_cache not in resolved.parents:
-        raise RuntimeError(f"output must stay below task-local cache: {resolved}")
-    free = shutil.disk_usage(task_cache).free
+    forbidden = {
+        Path("/").resolve(),
+        Path.home().resolve(),
+        _REPO_ROOT.resolve(),
+    }
+    if resolved in forbidden or len(resolved.parts) < 3:
+        raise RuntimeError(f"refusing unsafe W13 output root: {resolved}")
+    existing = resolved
+    while not existing.exists():
+        existing = existing.parent
+    free = shutil.disk_usage(existing).free
     if free < 8 * 1024**3:
         raise RuntimeError(
             f"refusing build below 8 GiB free: {free / 1024**3:.2f} GiB"
         )
 
 
-def verify_source(source: Path, candidate_commit: str) -> dict[str, Any]:
+def verify_source(source: Path) -> dict[str, Any]:
     if run("git", "-C", str(source), "status", "--porcelain"):
         raise RuntimeError("DeepGEMM source must be clean before materialization")
-    if run("git", "-C", str(source), "rev-parse", "HEAD") != candidate_commit:
-        raise RuntimeError("candidate commit is not the dedicated worktree HEAD")
-    if (
-        run("git", "-C", str(source), "merge-base", BASE_COMMIT, candidate_commit)
-        != BASE_COMMIT
-    ):
-        raise RuntimeError("candidate is not based on the required DeepGEMM commit")
+    subprocess.run(
+        ["git", "-C", str(source), "cat-file", "-e", f"{BASE_COMMIT}^{{commit}}"],
+        check=True,
+    )
     revisions = {
         "cutlass": run("git", "-C", str(source / "third-party/cutlass"), "rev-parse", "HEAD"),
         "fmt": run("git", "-C", str(source / "third-party/fmt"), "rev-parse", "HEAD"),
@@ -151,13 +157,14 @@ def verify_source(source: Path, candidate_commit: str) -> dict[str, Any]:
     }
     if base_blobs != EXPECTED_BASE_BLOBS:
         raise RuntimeError(f"base blob identity mismatch: {base_blobs}")
-    diff = subprocess.check_output(
-        ["git", "-C", str(source), "diff", "--binary", BASE_COMMIT, candidate_commit]
+    diff = base64.b64decode(
+        "".join(CANDIDATE_PATCH.read_text().splitlines()),
+        validate=True,
     )
-    if not diff:
-        raise RuntimeError("candidate commit has no source diff")
+    if sha256_bytes(diff) != CANDIDATE_DIFF_SHA256:
+        raise RuntimeError("bundled W13 candidate patch identity mismatch")
     return {
-        "candidate_commit": candidate_commit,
+        "candidate_commit": CANDIDATE_COMMIT,
         "candidate_diff_sha256": sha256_bytes(diff),
         "candidate_diff_bytes": len(diff),
         "base_blob_sha256": base_blobs,
@@ -181,7 +188,13 @@ def extract_archive(repository: Path, commit: str, destination: Path) -> None:
         archive.unlink(missing_ok=True)
 
 
-def materialize(source: Path, commit: str, destination: Path) -> str:
+def materialize(
+    source: Path,
+    commit: str,
+    destination: Path,
+    *,
+    candidate_patch: bytes | None = None,
+) -> str:
     destination.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(
         dir=destination.parent, prefix=f".{destination.name}."
@@ -200,6 +213,26 @@ def materialize(source: Path, commit: str, destination: Path) -> str:
                 dependency_commit,
                 dependency,
             )
+        if candidate_patch is not None:
+            patch_path = Path(temporary) / "candidate.patch"
+            patch_path.write_bytes(candidate_patch)
+            subprocess.run(
+                [
+                    "git",
+                    "apply",
+                    "--unsafe-paths",
+                    "--directory",
+                    str(tree),
+                    str(patch_path),
+                ],
+                cwd=_REPO_ROOT,
+                check=True,
+            )
+            # ``git apply`` recreates modified files under the caller's umask.
+            # The measured candidate commit records these six files as 0644,
+            # and file mode participates in the signed source-tree identity.
+            for relative in EXPECTED_BASE_BLOBS:
+                (tree / relative).chmod(0o644)
         digest = tree_sha256(tree)
         if destination.exists():
             shutil.rmtree(destination)
@@ -208,7 +241,7 @@ def materialize(source: Path, commit: str, destination: Path) -> str:
 
 
 def audit_materialization(
-    source: Path, candidate_commit: str, scratch_parent: Path
+    source: Path, candidate_patch: bytes, scratch_parent: Path
 ) -> dict[str, str]:
     scratch_parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(
@@ -220,7 +253,10 @@ def audit_materialization(
                 source, BASE_COMMIT, root / "stock-a"
             ),
             "candidate_source_tree_sha256": materialize(
-                source, candidate_commit, root / "candidate-a"
+                source,
+                BASE_COMMIT,
+                root / "candidate-a",
+                candidate_patch=candidate_patch,
             ),
         }
         second = {
@@ -228,7 +264,10 @@ def audit_materialization(
                 source, BASE_COMMIT, root / "stock-b"
             ),
             "candidate_source_tree_sha256": materialize(
-                source, candidate_commit, root / "candidate-b"
+                source,
+                BASE_COMMIT,
+                root / "candidate-b",
+                candidate_patch=candidate_patch,
             ),
         }
         if first != second:
@@ -328,7 +367,7 @@ def build_manifest(
     variants: dict[str, dict[str, Any]] = {}
     commits = {
         "stock": BASE_COMMIT,
-        "candidate": str(identity["candidate_commit"]),
+        "candidate": CANDIDATE_COMMIT,
     }
     for variant, commit in commits.items():
         tree = output / "sources" / variant
@@ -336,7 +375,14 @@ def build_manifest(
         build_dir = output / "compile" / variant
         if build_dir.exists():
             shutil.rmtree(build_dir)
-        source_digest = materialize(source, commit, tree)
+        source_digest = materialize(
+            source,
+            BASE_COMMIT if variant == "candidate" else commit,
+            tree,
+            candidate_patch=(
+                identity["candidate_diff"] if variant == "candidate" else None
+            ),
+        )
         if source_digest != reconstruction[f"{variant}_source_tree_sha256"]:
             raise RuntimeError(f"{variant} source tree changed after audit")
         copy_package_source(tree, package)
@@ -414,24 +460,39 @@ def build_manifest(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source", type=Path, default=DEFAULT_SOURCE)
+    parser.add_argument(
+        "--source",
+        type=Path,
+        default=Path(DEFAULT_SOURCE) if DEFAULT_SOURCE else None,
+        help=(
+            "clean DeepGEMM checkout containing the pinned base and dependency "
+            "commits (or set SGLANG_GLM52_W13_DEEPGEMM_SOURCE)"
+        ),
+    )
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--candidate-commit")
     parser.add_argument("--audit-materialization", action="store_true")
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
+    if args.source is None:
+        parser.error(
+            "--source or SGLANG_GLM52_W13_DEEPGEMM_SOURCE is required"
+        )
     source = args.source.expanduser().resolve()
     output = args.output.expanduser().resolve()
     ensure_output_root(output)
-    candidate_commit = args.candidate_commit or run(
-        "git", "-C", str(source), "rev-parse", "HEAD"
-    )
-    identity = verify_source(source, candidate_commit)
+    if args.candidate_commit not in (None, CANDIDATE_COMMIT):
+        parser.error(
+            f"only the measured candidate commit {CANDIDATE_COMMIT} is supported"
+        )
+    identity = verify_source(source)
     output.mkdir(parents=True, exist_ok=True)
-    reconstruction = audit_materialization(source, candidate_commit, output)
+    reconstruction = audit_materialization(
+        source, identity["candidate_diff"], output
+    )
     audit = {
         **reconstruction,
-        "candidate_commit": candidate_commit,
+        "candidate_commit": CANDIDATE_COMMIT,
         "candidate_diff_sha256": identity["candidate_diff_sha256"],
         "candidate_diff_bytes": identity["candidate_diff_bytes"],
     }

@@ -1579,6 +1579,42 @@ def _is_glm52_dsa_target_fused_qkv_a(
     )
 
 
+def _reject_glm52_fused_qkv_a_route_conflict(
+    *,
+    enable_decode_direct_nk: bool,
+    enable_prefill_direct_nk: bool,
+) -> None:
+    """Reject simultaneous legacy-registry and layer-private QKV-A routing."""
+    if not (enable_decode_direct_nk or enable_prefill_direct_nk):
+        return
+
+    from sglang.srt.layers.glm52_opt import config as glm52_opt_config
+
+    if not glm52_opt_config.is_enabled():
+        return
+
+    from sglang.srt.layers.glm52_opt.registry import lookup
+
+    conflicts = []
+    if enable_decode_direct_nk and any(
+        lookup("fused_qkv_a_proj", "decode", m=m) is not None
+        for m in (16, 32)
+    ):
+        conflicts.append("decode M16/M32")
+    if (
+        enable_prefill_direct_nk
+        and lookup("fused_qkv_a_proj", "prefill", m=4096) is not None
+    ):
+        conflicts.append("prefill M4096")
+    if conflicts:
+        raise ValueError(
+            "GLM-5.2 fused-QKV-A direct-N/K and the legacy glm52_opt registry "
+            "select the same route for "
+            + ", ".join(conflicts)
+            + "; enable exactly one registration path"
+        )
+
+
 class DeepseekV2AttentionMLA(
     nn.Module,
     DeepseekMHAForwardMixin,
@@ -1660,6 +1696,14 @@ class DeepseekV2AttentionMLA(
             )
             enable_glm52_fused_qkv_a_prefill_direct_nk = (
                 envs.SGLANG_OPT_GLM52_FUSED_QKV_A_PREFILL_DIRECT_NK.get()
+            )
+            _reject_glm52_fused_qkv_a_route_conflict(
+                enable_decode_direct_nk=(
+                    enable_glm52_fused_qkv_a_decode_direct_nk
+                ),
+                enable_prefill_direct_nk=(
+                    enable_glm52_fused_qkv_a_prefill_direct_nk
+                ),
             )
             if (
                 (
