@@ -31,6 +31,9 @@ _GLM52_ENV_KEYS = frozenset(
         "SGLANG_GLM52_NSYS_SECONDS",
         "SGLANG_GLM52_INFINI_KERNEL_NVTX",
         "SGLANG_GLM52_HOTSPOT_MODULE",
+        # 1 (default for FlashMLA graph_only specs): only select under capture.
+        # 0: allow eager selection for diagnostic leaf timing.
+        "SGLANG_GLM52_FLASHMLA_GRAPH_ONLY",
     }
 )
 
@@ -212,6 +215,21 @@ def emit_infini_kernel_nvtx() -> bool:
     """Whether selected kernels get profiler-only ``infini_kernel`` ranges."""
     ensure_glm52_env()
     return _truthy("SGLANG_GLM52_INFINI_KERNEL_NVTX")
+
+
+def flashmla_graph_only_enabled() -> bool:
+    """Honor ``SGLANG_GLM52_FLASHMLA_GRAPH_ONLY`` (default on).
+
+    FlashMLA hotspot decode is production-graph-bound. The Python API-v1
+    provider path adds a fixed host tax that makes the eager containing-region
+    gate unreachable even for a zero-cost guard, so selection defaults to
+    CUDA-graph capture only. Set the env to ``0`` for diagnostic eager leaves.
+    """
+    ensure_glm52_env()
+    raw = os.environ.get("SGLANG_GLM52_FLASHMLA_GRAPH_ONLY", "1").strip().lower()
+    if raw in ("0", "false", "no", "off"):
+        return False
+    return True
 
 
 def contig_psum_kwargs(op_name: str) -> dict[str, object]:

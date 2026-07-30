@@ -51,6 +51,11 @@ class KernelSpec:
     v_dim: int | None = None
     page_size: int | None = None
     kv_dim: int | None = None
+    # When True, try_dispatch may select the candidate only while the current
+    # CUDA stream is capturing a graph. Eager calls fall back to stock before
+    # any provider launch. Used by FlashMLA decode: production is graph-bound
+    # and the Python API-v1 provider tax makes eager containing unreachable.
+    graph_only: bool = False
 
 
 _DECODE: dict[str, KernelSpec] = {
@@ -178,6 +183,7 @@ _HOTSPOT_DECODE: dict[str, KernelSpec] = {
         v_dim=512,
         page_size=64,
         kv_dim=656,
+        graph_only=True,
     ),
     # SGLang executes gate+up as one fused W13 grouped GEMM.
     "moe_gate_proj": KernelSpec(

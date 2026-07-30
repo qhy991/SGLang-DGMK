@@ -6,7 +6,8 @@ import json
 import logging
 import os
 import threading
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
+from functools import lru_cache
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -88,13 +89,16 @@ def _current_phase(token_num: int) -> str:
 
 
 def _nvtx_range(name: str):
-    """Default-off profiler range; authoritative A/B emits no NVTX events."""
+    """Default-off profiler range; authoritative A/B emits no NVTX events.
+
+    When NVTX is disabled, return ``nullcontext()`` so the hot path does not
+    pay for entering/exiting an empty Python context manager (~1.7 us).
+    """
+    if not config.emit_infini_kernel_nvtx():
+        return nullcontext()
 
     @contextmanager
     def _cm():
-        if not config.emit_infini_kernel_nvtx():
-            yield
-            return
         pushed = False
         try:
             torch.cuda.nvtx.range_push(name)
@@ -111,6 +115,50 @@ def _nvtx_range(name: str):
                     pass
 
     return _cm()
+
+
+def _is_cuda_graph_capturing() -> bool:
+    try:
+        return bool(torch.cuda.is_current_stream_capturing())
+    except Exception:
+        return False
+
+
+@lru_cache(maxsize=64)
+def _lookup_cached(
+    op_name: str, phase: str, m: int, profile: str
+) -> Optional[KernelSpec]:
+    """Cache resolved hotspot/decode specs for fixed (op, phase, m, profile)."""
+    return lookup(op_name, phase, m=m)
+
+
+@lru_cache(maxsize=32)
+def _flashmla_expected_contracts(
+    m: int, q_heads: int, qk_dim: int, v_dim: int, topk: int, page_size: int, kv_dim: int
+) -> dict[str, object]:
+    """Precompute FlashMLA ABI shape/stride tuples for one M bucket."""
+    expected_num_pages = {16: 2049, 32: 4097}.get(m)
+    return {
+        "expected_num_pages": expected_num_pages,
+        "q_shape": (m, 1, q_heads, qk_dim),
+        "q_stride": (q_heads * qk_dim, q_heads * qk_dim, qk_dim, 1),
+        "kv_shape": (expected_num_pages, page_size, 1, kv_dim)
+        if expected_num_pages is not None
+        else None,
+        "cache_seqlens_shape": (m,),
+        "cache_seqlens_stride": (1,),
+        "tile_meta_shape": (148, 8),
+        "tile_meta_stride": (8, 1),
+        "num_splits_shape": (m + 1,),
+        "num_splits_stride": (1,),
+        "indices_shape": (m, 1, topk),
+        "indices_stride": (topk, topk, 1),
+        "block_table_shape": (m, 0),
+        "out_shape": (m, 1, q_heads, v_dim),
+        "out_stride": (q_heads * v_dim, q_heads * v_dim, v_dim, 1),
+        "lse_shape": (m, q_heads, 1),
+        "lse_stride": (q_heads, 1, q_heads),
+    }
 
 
 def _profiler_range_name(spec: KernelSpec, m: int) -> str:
@@ -315,7 +363,16 @@ def _flashmla_hotspot_abi_matches(
     if get_forward_mode() is not ForwardMode.DECODE:
         return False
     m = int(q.shape[0]) if q.ndim == 4 else -1
-    expected_num_pages = {16: 2049, 32: 4097}.get(m)
+    contracts = _flashmla_expected_contracts(
+        m,
+        int(spec.q_heads),
+        int(spec.qk_dim),
+        int(spec.v_dim),
+        int(spec.topk),
+        int(spec.page_size),
+        int(spec.kv_dim),
+    )
+    expected_num_pages = contracts["expected_num_pages"]
     device = q.device
     return bool(
         expected_num_pages is not None
@@ -324,58 +381,47 @@ def _flashmla_hotspot_abi_matches(
         and float(softmax_scale) == 0.0625
         and _tensor_contract(
             q,
-            shape=(m, 1, int(spec.q_heads), int(spec.qk_dim)),
-            stride=(
-                int(spec.q_heads) * int(spec.qk_dim),
-                int(spec.q_heads) * int(spec.qk_dim),
-                int(spec.qk_dim),
-                1,
-            ),
+            shape=contracts["q_shape"],
+            stride=contracts["q_stride"],
             dtype=torch.bfloat16,
         )
         and k_cache.is_cuda
         and k_cache.dtype == torch.float8_e4m3fn
-        and tuple(k_cache.shape)
-        == (
-            expected_num_pages,
-            int(spec.page_size),
-            1,
-            int(spec.kv_dim),
-        )
+        and tuple(k_cache.shape) == contracts["kv_shape"]
         and k_cache.is_contiguous()
         and k_cache.storage_offset() == 0
         and k_cache.device == device
         and _tensor_contract(
             cache_seqlens,
-            shape=(m,),
-            stride=(1,),
+            shape=contracts["cache_seqlens_shape"],
+            stride=contracts["cache_seqlens_stride"],
             dtype=torch.int32,
             device=device,
         )
         and _tensor_contract(
             tile_scheduler_metadata,
-            shape=(148, 8),
-            stride=(8, 1),
+            shape=contracts["tile_meta_shape"],
+            stride=contracts["tile_meta_stride"],
             dtype=torch.int32,
             device=device,
         )
         and _tensor_contract(
             num_splits,
-            shape=(m + 1,),
-            stride=(1,),
+            shape=contracts["num_splits_shape"],
+            stride=contracts["num_splits_stride"],
             dtype=torch.int32,
             device=device,
         )
         and _tensor_contract(
             indices,
-            shape=(m, 1, int(spec.topk)),
-            stride=(int(spec.topk), int(spec.topk), 1),
+            shape=contracts["indices_shape"],
+            stride=contracts["indices_stride"],
             dtype=torch.int32,
             device=device,
         )
         and block_table.is_cuda
         and block_table.dtype == torch.int32
-        and tuple(block_table.shape) == (m, 0)
+        and tuple(block_table.shape) == contracts["block_table_shape"]
         and block_table.device == device
     )
 
@@ -393,14 +439,30 @@ def try_dispatch_flashmla_sparse_decode(
     block_table: torch.Tensor,
     is_fp8_kvcache: bool,
 ) -> Optional[torch.Tensor]:
-    """Run one exact FlashMLA provider call or return ``None`` before launch."""
+    """Run one exact FlashMLA provider call or return ``None`` before launch.
+
+    FlashMLA hotspot specs default to ``graph_only``: outside CUDA graph
+    capture the call returns ``None`` immediately so eager decode uses stock
+    and avoids the API-v1 Python provider tax on the containing region.
+    """
     if not config.is_enabled():
         return None
     m = int(q.shape[0]) if q.ndim == 4 else -1
     phase = _current_phase(m)
-    spec = lookup("dsa_decode_attn", phase, m=m)
+    spec = (
+        _lookup_cached("dsa_decode_attn", phase, m, config.profile_name())
+        if m > 0
+        else None
+    )
     if spec is None or spec.kind != "dsa":
         _record_miss("flashmla_no_spec", "dsa_decode_attn", phase, m=m)
+        return None
+    if (
+        spec.graph_only
+        and config.flashmla_graph_only_enabled()
+        and not _is_cuda_graph_capturing()
+    ):
+        # Cheap eager miss: do not take the hit/miss lock on every decode step.
         return None
     if not _flashmla_hotspot_abi_matches(
         spec,
@@ -418,7 +480,19 @@ def try_dispatch_flashmla_sparse_decode(
         _record_miss("flashmla_abi", spec.op, phase, m=m)
         return None
 
-    with _nvtx_range(_profiler_range_name(spec, m)):
+    contracts = _flashmla_expected_contracts(
+        m,
+        int(spec.q_heads),
+        int(spec.qk_dim),
+        int(spec.v_dim),
+        int(spec.topk),
+        int(spec.page_size),
+        int(spec.kv_dim),
+    )
+    nvtx_name = (
+        _profiler_range_name(spec, m) if config.emit_infini_kernel_nvtx() else ""
+    )
+    with _nvtx_range(nvtx_name):
         result = run_flashmla_sparse_decode(
             q=q,
             k_cache=k_cache,
@@ -438,21 +512,16 @@ def try_dispatch_flashmla_sparse_decode(
     candidate_out, candidate_lse = result
     if not isinstance(candidate_out, torch.Tensor) or not _tensor_contract(
         candidate_out,
-        shape=(m, 1, int(spec.q_heads), int(spec.v_dim)),
-        stride=(
-            int(spec.q_heads) * int(spec.v_dim),
-            int(spec.q_heads) * int(spec.v_dim),
-            int(spec.v_dim),
-            1,
-        ),
+        shape=contracts["out_shape"],
+        stride=contracts["out_stride"],
         dtype=torch.bfloat16,
         device=q.device,
     ):
         raise RuntimeError("FlashMLA hotspot provider returned an invalid output")
     if not isinstance(candidate_lse, torch.Tensor) or not _tensor_contract(
         candidate_lse,
-        shape=(m, int(spec.q_heads), 1),
-        stride=(int(spec.q_heads), 1, int(spec.q_heads)),
+        shape=contracts["lse_shape"],
+        stride=contracts["lse_stride"],
         dtype=torch.float32,
         device=q.device,
     ):

@@ -43,6 +43,7 @@ def test_hotspot_profile_registers_exact_three_decode_ops():
         flashmla = lookup("dsa_decode_attn", "decode", m=16)
         assert flashmla is not None
         assert flashmla.implementation == "hotspot_plugin"
+        assert flashmla.graph_only is True
         assert (flashmla.topk, flashmla.q_heads, flashmla.qk_dim) == (
             2048,
             64,
@@ -223,6 +224,7 @@ def test_selected_flashmla_candidate_preserves_public_return_contract():
         "SGLANG_GLM52_OPT",
         "SGLANG_GLM52_OPT_PROFILE",
         "SGLANG_GLM52_OPT_OPS",
+        "SGLANG_GLM52_FLASHMLA_GRAPH_ONLY",
     )
     saved = {name: os.environ.get(name) for name in names}
     q = torch.empty((16, 1, 64, 576), dtype=torch.bfloat16)
@@ -234,6 +236,10 @@ def test_selected_flashmla_candidate_preserves_public_return_contract():
         os.environ["SGLANG_GLM52_OPT_OPS"] = "flashmla_sparse_decode"
         set_forward_mode(ForwardMode.DECODE, 16)
         with (
+            patch(
+                "sglang.srt.layers.glm52_opt.dispatch._is_cuda_graph_capturing",
+                return_value=True,
+            ),
             patch(
                 "sglang.srt.layers.glm52_opt.dispatch._flashmla_hotspot_abi_matches",
                 return_value=True,
@@ -262,6 +268,54 @@ def test_selected_flashmla_candidate_preserves_public_return_contract():
             )
         assert result is candidate_out
         candidate.assert_called_once()
+    finally:
+        set_forward_mode(None)
+        _restore_env(saved)
+
+
+def test_flashmla_graph_only_skips_eager_selection():
+    names = (
+        "SGLANG_GLM52_OPT",
+        "SGLANG_GLM52_OPT_PROFILE",
+        "SGLANG_GLM52_OPT_OPS",
+        "SGLANG_GLM52_FLASHMLA_GRAPH_ONLY",
+    )
+    saved = {name: os.environ.get(name) for name in names}
+    q = torch.empty((16, 1, 64, 576), dtype=torch.bfloat16)
+    fake = torch.empty(1)
+    try:
+        os.environ["SGLANG_GLM52_OPT"] = "1"
+        os.environ["SGLANG_GLM52_OPT_PROFILE"] = "hotspot_candidates"
+        os.environ["SGLANG_GLM52_OPT_OPS"] = "flashmla_sparse_decode"
+        os.environ.pop("SGLANG_GLM52_FLASHMLA_GRAPH_ONLY", None)  # default on
+        set_forward_mode(ForwardMode.DECODE, 16)
+        with (
+            patch(
+                "sglang.srt.layers.glm52_opt.dispatch._is_cuda_graph_capturing",
+                return_value=False,
+            ),
+            patch(
+                "sglang.srt.layers.glm52_opt.dispatch.run_flashmla_sparse_decode",
+            ) as candidate,
+            patch(
+                "sglang.srt.layers.glm52_opt.dispatch._flashmla_hotspot_abi_matches",
+            ) as abi,
+        ):
+            result = try_dispatch_flashmla_sparse_decode(
+                q=q,
+                k_cache=fake,
+                cache_seqlens=fake,
+                head_dim_v=512,
+                tile_scheduler_metadata=fake,
+                num_splits=fake,
+                softmax_scale=0.0625,
+                indices=fake,
+                block_table=fake,
+                is_fp8_kvcache=True,
+            )
+        assert result is None
+        candidate.assert_not_called()
+        abi.assert_not_called()
     finally:
         set_forward_mode(None)
         _restore_env(saved)
@@ -524,6 +578,7 @@ def test_selected_flashmla_candidate_rejects_invalid_lse():
         "SGLANG_GLM52_OPT",
         "SGLANG_GLM52_OPT_PROFILE",
         "SGLANG_GLM52_OPT_OPS",
+        "SGLANG_GLM52_FLASHMLA_GRAPH_ONLY",
     )
     saved = {name: os.environ.get(name) for name in names}
     q = torch.empty((16, 1, 64, 576), dtype=torch.bfloat16)
@@ -536,6 +591,10 @@ def test_selected_flashmla_candidate_rejects_invalid_lse():
         os.environ["SGLANG_GLM52_OPT_OPS"] = "flashmla_sparse_decode"
         set_forward_mode(ForwardMode.DECODE, 16)
         with (
+            patch(
+                "sglang.srt.layers.glm52_opt.dispatch._is_cuda_graph_capturing",
+                return_value=True,
+            ),
             patch(
                 "sglang.srt.layers.glm52_opt.dispatch._flashmla_hotspot_abi_matches",
                 return_value=True,
