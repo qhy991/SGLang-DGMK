@@ -34,6 +34,7 @@ _GLM52_ENV_KEYS = frozenset(
         # 1 (default for graph_only specs): only select under graph capture.
         # 0: allow eager selection for diagnostic leaf timing.
         "SGLANG_GLM52_W2_GRAPH_ONLY",
+        "SGLANG_GLM52_O_PROJ_GRAPH_ONLY",
     }
 )
 
@@ -221,6 +222,7 @@ def emit_infini_kernel_nvtx() -> bool:
 # that can disable graph-only selection for diagnostic eager timing.
 _GRAPH_ONLY_ENV_BY_OP = {
     "moe_down_proj": "SGLANG_GLM52_W2_GRAPH_ONLY",
+    "o_proj": "SGLANG_GLM52_O_PROJ_GRAPH_ONLY",
 }
 
 

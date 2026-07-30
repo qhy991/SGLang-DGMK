@@ -30,6 +30,7 @@ class TestGlm52InfiniFixedNk(unittest.TestCase):
             "SGLANG_GLM52_OPT_M_BUCKETS",
             "SGLANG_GLM52_ALLOW_ABI_ADAPTER",
             "SGLANG_GLM52_OPT_HIT_FILE",
+            "SGLANG_GLM52_O_PROJ_GRAPH_ONLY",
         )
         old_env = {key: os.environ.get(key) for key in managed_env}
 
@@ -55,6 +56,7 @@ class TestGlm52InfiniFixedNk(unittest.TestCase):
             set_forward_mode,
         )
         from sglang.srt.layers.glm52_opt.dispatch import _HIT_COUNTS
+        from sglang.srt.layers.glm52_opt.registry import lookup
         from sglang.srt.layers.quantization.fp8_utils import (
             deepgemm_w8a8_block_fp8_linear_with_fallback,
         )
@@ -90,6 +92,10 @@ class TestGlm52InfiniFixedNk(unittest.TestCase):
                 os.environ["SGLANG_GLM52_OPT_OPS"] = op
                 os.environ["SGLANG_GLM52_OPT_M_BUCKETS"] = f"{op}:{m}"
                 set_forward_mode(mode, m)
+                phase = "decode" if mode is ForwardMode.DECODE else "prefill"
+                spec = lookup(op, phase, m=m)
+                self.assertIsNotNone(spec)
+                graph_only_op = bool(spec.graph_only)
 
                 weight = torch.randn(
                     (n, k), device="cuda", dtype=torch.bfloat16
@@ -109,8 +115,24 @@ class TestGlm52InfiniFixedNk(unittest.TestCase):
                     )
 
                 os.environ["SGLANG_GLM52_OPT"] = "1"
-                phase = "decode" if mode is ForwardMode.DECODE else "prefill"
                 hit_key = f"fp8_gemm/fixed_nk:{op}:{phase}:m{m}"
+
+                if graph_only_op:
+                    # Production setting (graph-only on): eager decode must
+                    # decline to stock, take no fixed-N/K hit, and match stock
+                    # bit-for-bit.  Only o_proj is graph_only today.
+                    os.environ["SGLANG_GLM52_O_PROJ_GRAPH_ONLY"] = "1"
+                    before = _HIT_COUNTS.get(hit_key, 0)
+                    with op_context(op):
+                        declined = deepgemm_w8a8_block_fp8_linear_with_fallback(
+                            x, weight, [128, 128], weight_scale
+                        )
+                    self.assertEqual(_HIT_COUNTS.get(hit_key, 0), before)
+                    torch.testing.assert_close(declined, stock, rtol=0, atol=0)
+                    # Diagnostic eager (graph-only off): candidate is selected;
+                    # this also warms the fixed-N/K JIT before graph capture.
+                    os.environ["SGLANG_GLM52_O_PROJ_GRAPH_ONLY"] = "0"
+
                 with op_context(op):
                     candidate = deepgemm_w8a8_block_fp8_linear_with_fallback(
                         x, weight, [128, 128], weight_scale
@@ -118,11 +140,15 @@ class TestGlm52InfiniFixedNk(unittest.TestCase):
                 self.assertGreater(_HIT_COUNTS.get(hit_key, 0), 0)
                 torch.testing.assert_close(candidate, stock, rtol=0, atol=0)
 
-                # Warm fixed-N/K JIT before graph capture.
+                # Warm fixed-N/K JIT before graph capture (eager selection).
                 with op_context(op):
                     deepgemm_w8a8_block_fp8_linear_with_fallback(
                         x, weight, [128, 128], weight_scale
                     )
+                # Graph capture selects the fixed-N/K candidate even under the
+                # production graph-only setting: capture overrides the decline.
+                if graph_only_op:
+                    os.environ["SGLANG_GLM52_O_PROJ_GRAPH_ONLY"] = "1"
                 graph = torch.cuda.CUDAGraph()
                 with torch.cuda.graph(graph), op_context(op):
                     graph_out = deepgemm_w8a8_block_fp8_linear_with_fallback(

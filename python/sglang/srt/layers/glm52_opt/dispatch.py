@@ -499,6 +499,11 @@ def try_dispatch_fp8_gemm(
     if spec is None or spec.kind != "fp8_gemm":
         _record_miss("no_spec", op, phase, m=m)
         return None
+    # A graph_only fp8_gemm spec (decode o_proj) declines outside CUDA-graph
+    # capture before the ABI check and before the hit/miss lock, so eager decode
+    # returns the stock path with zero provider launch and no glm52_opt tax.
+    if _graph_only_declines(spec):
+        return None
     if not _fixed_nk_abi_matches(
         spec,
         input_2d,

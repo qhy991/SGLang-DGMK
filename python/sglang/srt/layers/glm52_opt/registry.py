@@ -136,6 +136,13 @@ _E2E_DECODE: dict[str, KernelSpec] = {
         m_values=(16, 32),
         n=6144,
         k=16384,
+        # Decode o_proj is production graph-bound and the eager glm52_opt
+        # dispatch tax (Python lookup/alloc/hit-accounting) vetoes the fixed-N/K
+        # device win in every eager paired session (goal-10). Restrict selection
+        # to CUDA-graph capture so eager decode stays on stock with no provider
+        # launch; SGLANG_GLM52_O_PROJ_GRAPH_ONLY=0 forces eager for a diagnostic
+        # leaf. Mirrors moe_down_proj / FlashMLA dsa_decode_attn.
+        graph_only=True,
     ),
     "index_q_upproj": KernelSpec(
         op="index_q_upproj",
