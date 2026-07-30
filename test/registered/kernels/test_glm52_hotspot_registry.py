@@ -218,6 +218,157 @@ def test_abi_miss_falls_back_before_any_candidate_launch():
         _restore_env(saved)
 
 
+def test_only_w2_hotspot_spec_is_graph_only():
+    names = ("SGLANG_GLM52_OPT_PROFILE", "SGLANG_GLM52_OPT_OPS")
+    saved = {name: os.environ.get(name) for name in names}
+    try:
+        os.environ["SGLANG_GLM52_OPT_PROFILE"] = "hotspot_candidates"
+        os.environ.pop("SGLANG_GLM52_OPT_OPS", None)
+        specs = {spec.op: spec for spec in list_enabled("decode")}
+        assert specs["moe_down_proj"].graph_only is True
+        assert specs["moe_gate_proj"].graph_only is False
+        assert specs["dsa_decode_attn"].graph_only is False
+    finally:
+        _restore_env(saved)
+
+
+def test_w2_graph_only_env_parsing():
+    saved = {"SGLANG_GLM52_W2_GRAPH_ONLY": os.environ.get("SGLANG_GLM52_W2_GRAPH_ONLY")}
+    try:
+        os.environ.pop("SGLANG_GLM52_W2_GRAPH_ONLY", None)
+        assert config.graph_only_enabled("moe_down_proj") is True
+        for value in ("0", "false", "no", "OFF", " off "):
+            os.environ["SGLANG_GLM52_W2_GRAPH_ONLY"] = value
+            assert config.graph_only_enabled("moe_down_proj") is False
+        for value in ("1", "true", "on"):
+            os.environ["SGLANG_GLM52_W2_GRAPH_ONLY"] = value
+            assert config.graph_only_enabled("moe_down_proj") is True
+        # An op with no registered override is never eager-forced.
+        os.environ["SGLANG_GLM52_W2_GRAPH_ONLY"] = "0"
+        assert config.graph_only_enabled("moe_gate_proj") is True
+    finally:
+        _restore_env(saved)
+
+
+def _w2_graph_only_dispatch(*, capturing: bool, expected_m: int = 4):
+    """Drive one W2 hotspot dispatch with a mocked capture state."""
+    fake = SimpleNamespace(shape=(32, 1024, 6144), ndim=3)
+    pair = (fake, fake)
+    with (
+        op_context("moe_down_proj"),
+        patch(
+            "sglang.srt.layers.glm52_opt.dispatch._is_cuda_graph_capturing",
+            return_value=capturing,
+        ),
+        patch(
+            "sglang.srt.layers.glm52_opt.dispatch._moe_hotspot_abi_matches",
+            return_value=True,
+        ) as abi,
+        patch(
+            "sglang.srt.layers.glm52_opt.dispatch.run_hotspot_moe_masked",
+            return_value=None,
+        ) as candidate,
+        patch("sglang.srt.layers.glm52_opt.dispatch._record_hit") as hit,
+        patch("sglang.srt.layers.glm52_opt.dispatch._record_miss") as miss,
+    ):
+        selected = try_dispatch_moe_masked(pair, pair, fake, fake, expected_m)
+    return selected, abi, candidate, hit, miss
+
+
+def test_w2_graph_only_declines_eager_before_any_provider_launch():
+    names = (
+        "SGLANG_GLM52_OPT",
+        "SGLANG_GLM52_OPT_PROFILE",
+        "SGLANG_GLM52_OPT_OPS",
+        "SGLANG_GLM52_W2_GRAPH_ONLY",
+    )
+    saved = {name: os.environ.get(name) for name in names}
+    try:
+        os.environ["SGLANG_GLM52_OPT"] = "1"
+        os.environ["SGLANG_GLM52_OPT_PROFILE"] = "hotspot_candidates"
+        os.environ["SGLANG_GLM52_OPT_OPS"] = "moe_w2"
+        os.environ.pop("SGLANG_GLM52_W2_GRAPH_ONLY", None)
+        set_forward_mode(ForwardMode.DECODE, 16)
+
+        selected, abi, candidate, hit, miss = _w2_graph_only_dispatch(capturing=False)
+        assert not selected
+        candidate.assert_not_called()
+        hit.assert_not_called()
+        # The eager decline must stay off the ABI and hit/miss lock paths.
+        abi.assert_not_called()
+        miss.assert_not_called()
+
+        selected, _abi, candidate, hit, _miss = _w2_graph_only_dispatch(capturing=True)
+        assert selected
+        candidate.assert_called_once()
+        hit.assert_called_once()
+    finally:
+        set_forward_mode(None)
+        _restore_env(saved)
+
+
+def test_w2_graph_only_can_be_disabled_for_diagnostic_eager_leaf():
+    names = (
+        "SGLANG_GLM52_OPT",
+        "SGLANG_GLM52_OPT_PROFILE",
+        "SGLANG_GLM52_OPT_OPS",
+        "SGLANG_GLM52_W2_GRAPH_ONLY",
+    )
+    saved = {name: os.environ.get(name) for name in names}
+    try:
+        os.environ["SGLANG_GLM52_OPT"] = "1"
+        os.environ["SGLANG_GLM52_OPT_PROFILE"] = "hotspot_candidates"
+        os.environ["SGLANG_GLM52_OPT_OPS"] = "moe_w2"
+        os.environ["SGLANG_GLM52_W2_GRAPH_ONLY"] = "0"
+        set_forward_mode(ForwardMode.DECODE, 16)
+
+        selected, _abi, candidate, _hit, _miss = _w2_graph_only_dispatch(capturing=False)
+        assert selected
+        candidate.assert_called_once()
+    finally:
+        set_forward_mode(None)
+        _restore_env(saved)
+
+
+def test_w13_hotspot_is_not_restricted_by_w2_graph_only():
+    names = (
+        "SGLANG_GLM52_OPT",
+        "SGLANG_GLM52_OPT_PROFILE",
+        "SGLANG_GLM52_OPT_OPS",
+        "SGLANG_GLM52_W2_GRAPH_ONLY",
+    )
+    saved = {name: os.environ.get(name) for name in names}
+    fake = SimpleNamespace(shape=(32, 1024, 4096), ndim=3)
+    pair = (fake, fake)
+    try:
+        os.environ["SGLANG_GLM52_OPT"] = "1"
+        os.environ["SGLANG_GLM52_OPT_PROFILE"] = "hotspot_candidates"
+        os.environ["SGLANG_GLM52_OPT_OPS"] = "moe_w13"
+        os.environ.pop("SGLANG_GLM52_W2_GRAPH_ONLY", None)
+        set_forward_mode(ForwardMode.DECODE, 16)
+        with (
+            op_context("moe_gate_proj"),
+            patch(
+                "sglang.srt.layers.glm52_opt.dispatch._is_cuda_graph_capturing",
+                return_value=False,
+            ),
+            patch(
+                "sglang.srt.layers.glm52_opt.dispatch._moe_hotspot_abi_matches",
+                return_value=True,
+            ),
+            patch(
+                "sglang.srt.layers.glm52_opt.dispatch.run_hotspot_moe_masked",
+                return_value=None,
+            ) as candidate,
+            patch("sglang.srt.layers.glm52_opt.dispatch._record_hit"),
+        ):
+            assert try_dispatch_moe_masked(pair, pair, fake, fake, 4)
+        candidate.assert_called_once()
+    finally:
+        set_forward_mode(None)
+        _restore_env(saved)
+
+
 def test_w2_expected_m_matrix_is_bound_to_forward_bucket():
     names = ("SGLANG_GLM52_OPT_PROFILE", "SGLANG_GLM52_OPT_OPS")
     saved = {name: os.environ.get(name) for name in names}

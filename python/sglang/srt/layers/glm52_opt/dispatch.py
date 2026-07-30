@@ -117,6 +117,27 @@ def _nvtx_range(name: str):
     return _cm()
 
 
+def _is_cuda_graph_capturing() -> bool:
+    try:
+        return bool(torch.cuda.is_current_stream_capturing())
+    except Exception:
+        return False
+
+
+def _graph_only_declines(spec: KernelSpec) -> bool:
+    """Whether a ``graph_only`` spec must decline this eager call.
+
+    Returns True only outside CUDA graph capture, so the caller can return the
+    stock path before any provider launch.  Deliberately takes no hit/miss lock:
+    this runs on every eager decode step.
+    """
+    return (
+        spec.graph_only
+        and config.graph_only_enabled(spec.op)
+        and not _is_cuda_graph_capturing()
+    )
+
+
 def _profiler_range_name(spec: KernelSpec, m: int) -> str:
     name = spec.profiler_name or (
         f"infini_kernel_glm52_{spec.op}_{spec.phase}_{spec.implementation}"
@@ -520,6 +541,12 @@ def try_dispatch_moe_masked(
     masked_m: torch.Tensor,
     expected_m: int,
 ) -> bool:
+    """Run one exact MoE grouped-masked replacement or leave stock selected.
+
+    The MoE W2 hotspot spec is ``graph_only``: outside CUDA graph capture the
+    call returns ``False`` immediately so eager decode uses stock and avoids the
+    API-v1 Python provider tax on the containing region.
+    """
     if not config.is_enabled():
         return False
     op = get_op_name()
@@ -545,6 +572,8 @@ def try_dispatch_moe_masked(
     x_fp8, x_scale = lhs
     w_fp8, w_scale = rhs
     if spec.implementation == "hotspot_plugin":
+        if _graph_only_declines(spec):
+            return False
         if not _moe_hotspot_abi_matches(
             spec,
             lhs,
