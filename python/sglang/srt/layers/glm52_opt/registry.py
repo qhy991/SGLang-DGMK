@@ -242,6 +242,45 @@ _HOTSPOT_DECODE: dict[str, KernelSpec] = {
 }
 
 
+# GLM-5.2 dsa_prefill_attn under an explicit --dsa-prefill-backend flashmla_kv.
+# SGLang folds extend tokens onto FlashMLA's batch axis with seq_len_q == 1, so
+# prefill reaches the same sm100 head64 V32 sparse template as decode; only the
+# batch extent differs.  All three incremental-prefill buckets cleared graph
+# leaf and containing-region >= 1.03 on two physical B200s under both
+# index-locality bounds (worst estimator 1.0458 / 1.0454 at M1024, rising to
+# 1.0996 / 1.0940 at M4096) with bitwise-identical output.  The selected
+# provider variant is b3_b5_native_exact; the decode-accepted p1_consumer_scale
+# measures 1.6-2.0% worse here and misses the floor at M1024.  See the campaign
+# report for the paired series.
+_HOTSPOT_PREFILL: dict[str, KernelSpec] = {
+    "dsa_prefill_attn": KernelSpec(
+        op="dsa_prefill_attn",
+        phase="prefill",
+        archive_ref="",
+        kind="dsa",
+        implementation="hotspot_plugin",
+        profiler_name="infini_kernel_glm52_dsa_prefill_attn_fp8_topk2048",
+        m_values=(1024, 2048, 4096),
+        topk=2048,
+        q_heads=64,
+        qk_dim=576,
+        v_dim=512,
+        page_size=64,
+        kv_dim=656,
+        graph_only=True,
+    ),
+}
+
+
+def _hotspot_prefill_table() -> dict[str, KernelSpec]:
+    """Prefill hotspot specs, gated by the same explicit op allowlist."""
+    return {
+        op: _HOTSPOT_PREFILL[op]
+        for op in sorted(hotspot_candidate_ops())
+        if op in _HOTSPOT_PREFILL
+    }
+
+
 def _decode_table() -> dict[str, KernelSpec]:
     """Profile / allowlist gated decode registry.
 
@@ -320,6 +359,8 @@ def lookup(
             if name == "hotspot_candidates"
             else _decode_table().get(op_name)
         )
+    elif name == "hotspot_candidates":
+        spec = _hotspot_prefill_table().get(op_name)
     elif name == "full":
         spec = _active_prefill().get(op_name)
     elif name == "e2e_candidates":

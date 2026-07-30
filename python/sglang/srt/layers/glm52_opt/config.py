@@ -150,9 +150,16 @@ _E2E_ALLOWED_OPS = _E2E_DEFAULT_OPS | _E2E_EXPLICIT_OPS
 # Triton experiments.  These are intentionally isolated from e2e_candidates:
 # selecting the hotspot profile must never also turn on an older archive swap.
 _HOTSPOT_DEFAULT_OPS = frozenset({"dsa_decode_attn", "moe_gate_proj", "moe_down_proj"})
+# dsa_prefill_attn is selectable but deliberately NOT in the default set: adding
+# a prefill op to the defaults would silently change every existing decode
+# hotspot campaign that selects the profile without SGLANG_GLM52_OPT_OPS.  It
+# must be named explicitly.
+_HOTSPOT_ALLOWED_OPS = _HOTSPOT_DEFAULT_OPS | frozenset({"dsa_prefill_attn"})
 _HOTSPOT_OP_ALIASES = {
     "flashmla_sparse_decode": "dsa_decode_attn",
     "flashmla_kv": "dsa_decode_attn",
+    "flashmla_kv_prefill": "dsa_prefill_attn",
+    "flashmla_sparse_prefill": "dsa_prefill_attn",
     "moe_w13": "moe_gate_proj",
     "moe_gate_up": "moe_gate_proj",
     "moe_w2": "moe_down_proj",
@@ -197,7 +204,7 @@ def hotspot_candidate_ops() -> frozenset[str]:
     if allow is None:
         return _HOTSPOT_DEFAULT_OPS
     normalized = {_HOTSPOT_OP_ALIASES.get(op, op) for op in allow}
-    unknown = normalized - _HOTSPOT_DEFAULT_OPS
+    unknown = normalized - _HOTSPOT_ALLOWED_OPS
     if unknown:
         raise ValueError(
             "Unsupported SGLANG_GLM52_OPT_OPS for hotspot_candidates: "
@@ -225,6 +232,7 @@ _GRAPH_ONLY_ENV_BY_OP = {
     "moe_down_proj": "SGLANG_GLM52_W2_GRAPH_ONLY",
     "o_proj": "SGLANG_GLM52_O_PROJ_GRAPH_ONLY",
     "fused_qkv_a_proj": "SGLANG_GLM52_FUSED_QKV_A_GRAPH_ONLY",
+    "dsa_prefill_attn": "SGLANG_GLM52_DSA_PREFILL_GRAPH_ONLY",
 }
 
 

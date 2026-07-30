@@ -2009,6 +2009,13 @@ class DeepseekSparseAttnBackend(
         elif dsa_impl == "flashmla_kv":
             if q_rope is not None:
                 q_all = concat_mla_absorb_q_general(q_nope, q_rope)
+            from sglang.srt.layers.glm52_opt import config as glm52_config
+
+            _use_glm52_prefill_hotspot = (
+                glm52_config.is_enabled()
+                and glm52_config.profile_name() == "hotspot_candidates"
+                and "dsa_prefill_attn" in glm52_config.hotspot_candidate_ops()
+            )
             return self._forward_flashmla_kv(
                 q_all=q_all,
                 kv_cache=kv_cache,
@@ -2018,6 +2025,7 @@ class DeepseekSparseAttnBackend(
                 layer=layer,
                 metadata=metadata,
                 page_table_1=page_table_1,
+                use_glm52_hotspot_prefill=_use_glm52_prefill_hotspot,
             )
         elif dsa_impl == "fa3":
             return self._forward_fa3(
@@ -2364,6 +2372,7 @@ class DeepseekSparseAttnBackend(
         metadata: DSAMetadata,
         page_table_1,
         use_glm52_hotspot: bool = False,
+        use_glm52_hotspot_prefill: bool = False,
     ) -> torch.Tensor:
         from sgl_kernel.flash_mla import flash_mla_with_kvcache
 
@@ -2403,7 +2412,24 @@ class DeepseekSparseAttnBackend(
             (q_all.shape[0], 0), dtype=torch.int32, device=q_all.device
         )
         o = None
-        if use_glm52_hotspot:
+        if use_glm52_hotspot_prefill:
+            from sglang.srt.layers.glm52_opt.dispatch import (
+                try_dispatch_flashmla_sparse_prefill,
+            )
+
+            o = try_dispatch_flashmla_sparse_prefill(
+                q=q_input,
+                k_cache=kv_cache,
+                cache_seqlens=cache_seqlens,
+                head_dim_v=v_head_dim,
+                tile_scheduler_metadata=metadata.flashmla_metadata.flashmla_metadata,
+                num_splits=metadata.flashmla_metadata.num_splits,
+                softmax_scale=sm_scale,
+                indices=indices,
+                block_table=block_table,
+                is_fp8_kvcache=True,
+            )
+        if o is None and use_glm52_hotspot:
             from sglang.srt.layers.glm52_opt.dispatch import (
                 try_dispatch_flashmla_sparse_decode,
             )
