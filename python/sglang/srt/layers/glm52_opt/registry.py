@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Callable, Literal, Optional
 
 from sglang.srt.layers.glm52_opt.config import (
+    combined_winner_ops,
     e2e_candidate_ops,
     hotspot_candidate_ops,
     opt_m_buckets,
@@ -230,6 +231,7 @@ _HOTSPOT_DECODE: dict[str, KernelSpec] = {
         v_dim=512,
         page_size=64,
         kv_dim=656,
+        graph_only=True,
     ),
     # SGLang executes gate+up as one fused W13 grouped GEMM.
     "moe_gate_proj": KernelSpec(
@@ -303,11 +305,41 @@ def _hotspot_prefill_table() -> dict[str, KernelSpec]:
     }
 
 
+def _combined_winners_decode_table() -> dict[str, KernelSpec]:
+    """Union of FlashMLA hotspot + fixed-N/K GEMMs + stock MoE masked (align).
+
+    MoE deliberately uses ``_DECODE`` (implementation=auto → ``run_moe_masked``)
+    rather than hotspot_plugin, so ``infini_mk_alignment`` is on the serving path.
+    """
+    ops = combined_winner_ops()
+    table: dict[str, KernelSpec] = {}
+    if "dsa_decode_attn" in ops:
+        table["dsa_decode_attn"] = _HOTSPOT_DECODE["dsa_decode_attn"]
+    for gemm_op in ("o_proj", "fused_qkv_a_proj", "index_q_upproj"):
+        if gemm_op in ops and gemm_op in _E2E_DECODE:
+            table[gemm_op] = _E2E_DECODE[gemm_op]
+    for moe_op in ("moe_gate_proj", "moe_up_proj", "moe_down_proj"):
+        if moe_op in ops and moe_op in _DECODE:
+            table[moe_op] = _DECODE[moe_op]
+    return table
+
+
+def _combined_winners_prefill_table() -> dict[str, KernelSpec]:
+    ops = combined_winner_ops()
+    table: dict[str, KernelSpec] = {}
+    if "dsa_prefill_attn" in ops:
+        table["dsa_prefill_attn"] = _HOTSPOT_PREFILL["dsa_prefill_attn"]
+    if "fused_qkv_a_proj" in ops and "fused_qkv_a_proj" in _E2E_PREFILL:
+        table["fused_qkv_a_proj"] = _E2E_PREFILL["fused_qkv_a_proj"]
+    return table
+
+
 def _decode_table() -> dict[str, KernelSpec]:
     """Profile / allowlist gated decode registry.
 
     - serving_safe (default): no implicit swap; OPT_OPS selects explicit trials
     - e2e_candidates: archived leaf winners for explicit e2e (default o_proj)
+    - combined_winners: FlashMLA + fixed-N/K GEMMs + MoE M-tile align
     - decode_max / full: all legacy decode swaps (optionally filtered by OPT_OPS)
     - q_b_only: only q_b_proj
     - SGLANG_GLM52_OPT_OPS=a,b: intersect with active table (ablation)
@@ -334,12 +366,19 @@ def _decode_table() -> dict[str, KernelSpec]:
             for op in sorted(e2e_candidate_ops())
             if op in _E2E_DECODE
         }
+    elif name == "combined_winners":
+        table = _combined_winners_decode_table()
     elif name in ("decode_max", "full"):
         table = dict(_DECODE)
     else:
         table = {}
 
-    if allow is not None and name not in ("serving_safe", "e2e_candidates"):
+    if allow is not None and name not in (
+        "serving_safe",
+        "e2e_candidates",
+        "combined_winners",
+        "hotspot_candidates",
+    ):
         table = {k: v for k, v in table.items() if k in allow}
     return table
 
@@ -376,13 +415,16 @@ def lookup(
         return None
     name = profile_name()
     if phase == "decode":
-        spec = (
-            _hotspot_decode_table().get(op_name)
-            if name == "hotspot_candidates"
-            else _decode_table().get(op_name)
-        )
+        if name == "hotspot_candidates":
+            spec = _hotspot_decode_table().get(op_name)
+        elif name == "combined_winners":
+            spec = _combined_winners_decode_table().get(op_name)
+        else:
+            spec = _decode_table().get(op_name)
     elif name == "hotspot_candidates":
         spec = _hotspot_prefill_table().get(op_name)
+    elif name == "combined_winners":
+        spec = _combined_winners_prefill_table().get(op_name)
     elif name == "full":
         spec = _active_prefill().get(op_name)
     elif name == "e2e_candidates":
@@ -401,12 +443,19 @@ def lookup(
 
 
 def list_enabled(phase: str) -> list[KernelSpec]:
+    name = profile_name()
     if phase == "decode":
-        if profile_name() == "hotspot_candidates":
+        if name == "hotspot_candidates":
             return [s for s in _hotspot_decode_table().values() if s.enabled]
+        if name == "combined_winners":
+            return [s for s in _combined_winners_decode_table().values() if s.enabled]
         return [s for s in _decode_table().values() if s.enabled]
-    if profile_name() == "full":
+    if name == "hotspot_candidates":
+        return [s for s in _hotspot_prefill_table().values() if s.enabled]
+    if name == "combined_winners":
+        return [s for s in _combined_winners_prefill_table().values() if s.enabled]
+    if name == "full":
         return [s for s in _active_prefill().values() if s.enabled]
-    if profile_name() == "e2e_candidates":
+    if name == "e2e_candidates":
         return [s for s in _e2e_prefill_table().values() if s.enabled]
     return []

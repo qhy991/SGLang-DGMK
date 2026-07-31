@@ -918,6 +918,12 @@ class DecodeCudaGraphRunner(BaseCudaGraphRunner):
         # DeepEP adapter, …) so they must run inside the same ForwardContext
         # that wraps the warmup/capture forward.
         with forward_context(ForwardContext(attn_backend=attn_backend)):
+            # GLM-5.2 opt dispatch reads a ContextVar set in ModelRunner.forward.
+            # Capture calls the raw model forward, so pin DECODE + local M here.
+            from sglang.srt.layers.glm52_opt.context import set_forward_mode
+
+            set_forward_mode(self.capture_forward_mode, int(num_tokens))
+
             self.tbo_plugin.capture_one_batch_size(forward_batch, num_tokens=num_tokens)
 
             if forward_batch.lora_ids is not None:

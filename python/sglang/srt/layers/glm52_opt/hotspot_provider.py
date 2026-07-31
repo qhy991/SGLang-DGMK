@@ -84,11 +84,11 @@ def initialize_hotspot_provider(gpu_id: int | None = None) -> bool:
     """
 
     global _STATE
-    if not config.is_enabled() or config.profile_name() != "hotspot_candidates":
+    if not config.needs_hotspot_provider():
         _STATE = _ProviderState(False, "profile_inactive")
         return False
 
-    selected_ops = config.hotspot_candidate_ops()
+    selected_ops = config.hotspot_provider_ops()
     if not selected_ops:
         _STATE = _ProviderState(False, "no_selected_ops")
         return False
@@ -101,7 +101,9 @@ def initialize_hotspot_provider(gpu_id: int | None = None) -> bool:
             gpu_id=gpu_id,
             selected_ops=selected_ops,
         )
-        raise RuntimeError("hotspot_candidates requires SGLANG_GLM52_HOTSPOT_MODULE")
+        raise RuntimeError(
+            f"{config.profile_name()} requires SGLANG_GLM52_HOTSPOT_MODULE"
+        )
 
     with _LOCK:
         if _STATE.ready:

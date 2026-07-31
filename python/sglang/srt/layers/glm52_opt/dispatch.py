@@ -340,16 +340,33 @@ def _flashmla_hotspot_abi_matches(
         return False
     from sglang.srt.model_executor.forward_batch_info import ForwardMode
 
-    if get_forward_mode() is not ForwardMode.DECODE:
+    # Capture often skips set_forward_mode; treat None as decode when other ABI matches.
+    mode = get_forward_mode()
+    if mode is not None and mode != ForwardMode.DECODE:
         return False
     m = int(q.shape[0]) if q.ndim == 4 else -1
     device = q.device
+    # Serving graph views may have nonzero storage_offset; leaf fixtures use 0.
+    strict = os.environ.get(
+        "SGLANG_GLM52_FLASHMLA_STRICT_KV_PAGES", "0"
+    ).strip().lower() in ("1", "true", "yes", "on")
+
+    def _ok(t, *, shape, stride, dtype, device=None):
+        return bool(
+            t.is_cuda
+            and t.dtype == dtype
+            and tuple(t.shape) == shape
+            and tuple(t.stride()) == stride
+            and ((not strict) or t.storage_offset() == 0)
+            and (device is None or t.device == device)
+        )
+
     return bool(
         m in (16, 32)
         and head_dim_v == spec.v_dim
         and is_fp8_kvcache is True
         and float(softmax_scale) == 0.0625
-        and _tensor_contract(
+        and _ok(
             q,
             shape=(m, 1, int(spec.q_heads), int(spec.qk_dim)),
             stride=(
@@ -362,32 +379,34 @@ def _flashmla_hotspot_abi_matches(
         )
         and k_cache.is_cuda
         and k_cache.dtype == torch.float8_e4m3fn
+        and k_cache.ndim == 4
+        and int(k_cache.shape[0]) >= 1
         and tuple(k_cache.shape[1:]) == (int(spec.page_size), 1, int(spec.kv_dim))
         and k_cache.is_contiguous()
-        and k_cache.storage_offset() == 0
+        and ((not strict) or k_cache.storage_offset() == 0)
         and k_cache.device == device
-        and _tensor_contract(
+        and _ok(
             cache_seqlens,
             shape=(m,),
             stride=(1,),
             dtype=torch.int32,
             device=device,
         )
-        and _tensor_contract(
+        and _ok(
             tile_scheduler_metadata,
             shape=(148, 8),
             stride=(8, 1),
             dtype=torch.int32,
             device=device,
         )
-        and _tensor_contract(
+        and _ok(
             num_splits,
             shape=(m + 1,),
             stride=(1,),
             dtype=torch.int32,
             device=device,
         )
-        and _tensor_contract(
+        and _ok(
             indices,
             shape=(m, 1, int(spec.topk)),
             stride=(int(spec.topk), int(spec.topk), 1),

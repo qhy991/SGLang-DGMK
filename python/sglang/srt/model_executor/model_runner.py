@@ -599,10 +599,7 @@ class ModelRunner(ModelRunnerKVCacheMixin):
         # stock while reporting an experimental profile.
         from sglang.srt.layers.glm52_opt import config as glm52_opt_config
 
-        if (
-            glm52_opt_config.is_enabled()
-            and glm52_opt_config.profile_name() == "hotspot_candidates"
-        ):
+        if glm52_opt_config.needs_hotspot_provider():
             from sglang.srt.layers.glm52_opt.hotspot_provider import (
                 initialize_hotspot_provider,
             )

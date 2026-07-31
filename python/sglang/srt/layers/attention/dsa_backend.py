@@ -2013,8 +2013,8 @@ class DeepseekSparseAttnBackend(
 
             _use_glm52_prefill_hotspot = (
                 glm52_config.is_enabled()
-                and glm52_config.profile_name() == "hotspot_candidates"
-                and "dsa_prefill_attn" in glm52_config.hotspot_candidate_ops()
+                and glm52_config.needs_hotspot_provider()
+                and "dsa_prefill_attn" in glm52_config.hotspot_provider_ops()
             )
             return self._forward_flashmla_kv(
                 q_all=q_all,
@@ -2173,8 +2173,8 @@ class DeepseekSparseAttnBackend(
             )
         _use_glm52_hotspot = (
             _glm52_enabled
-            and glm52_config.profile_name() == "hotspot_candidates"
-            and "dsa_decode_attn" in glm52_config.hotspot_candidate_ops()
+            and glm52_config.needs_hotspot_provider()
+            and "dsa_decode_attn" in glm52_config.hotspot_provider_ops()
             and self.dsa_decode_impl == "flashmla_kv"
         )
 

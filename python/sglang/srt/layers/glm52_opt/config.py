@@ -31,12 +31,17 @@ _GLM52_ENV_KEYS = frozenset(
         "SGLANG_GLM52_NSYS_SECONDS",
         "SGLANG_GLM52_INFINI_KERNEL_NVTX",
         "SGLANG_GLM52_HOTSPOT_MODULE",
+        # 1 (default): pick the MoE masked-grouped M tile from expected_m.
+        # 0: always use DeepGEMM stock 128. See infini_moe_align.py.
+        "SGLANG_GLM52_INFINI_MOE_ALIGN",
         # 1 (default for graph_only specs): only select under graph capture.
         # 0: allow eager selection for diagnostic leaf timing.
         "SGLANG_GLM52_W2_GRAPH_ONLY",
         "SGLANG_GLM52_O_PROJ_GRAPH_ONLY",
         "SGLANG_GLM52_FUSED_QKV_A_GRAPH_ONLY",
         "SGLANG_GLM52_INDEX_Q_UPPROJ_GRAPH_ONLY",
+        "SGLANG_GLM52_FLASHMLA_GRAPH_ONLY",
+        "SGLANG_GLM52_DSA_PREFILL_GRAPH_ONLY",
     }
 )
 
@@ -166,6 +171,26 @@ _HOTSPOT_OP_ALIASES = {
     "moe_w2": "moe_down_proj",
 }
 
+# Joint serving swap: FlashMLA r2a+c2 + prefill b3_b5 + fixed-N/K GEMMs + MoE align.
+# MoE uses stock ``moe_masked`` (not hotspot_plugin) so ``infini_mk_alignment`` applies.
+# MoE BM16 hotspot providers stay off (region historically < 1.03).
+_COMBINED_DEFAULT_OPS = frozenset(
+    {
+        "dsa_decode_attn",
+        "dsa_prefill_attn",
+        "o_proj",
+        "fused_qkv_a_proj",
+        "index_q_upproj",
+        "moe_gate_proj",
+        "moe_up_proj",
+        "moe_down_proj",
+    }
+)
+_COMBINED_OP_ALIASES = {
+    **_HOTSPOT_OP_ALIASES,
+}
+_COMBINED_HOTSPOT_OPS = frozenset({"dsa_decode_attn", "dsa_prefill_attn"})
+
 
 def opt_ops_allowlist() -> frozenset[str] | None:
     """Optional comma-separated decode op allowlist (SGLANG_GLM52_OPT_OPS).
@@ -220,6 +245,47 @@ def hotspot_module_ref() -> str:
     return os.environ.get("SGLANG_GLM52_HOTSPOT_MODULE", "").strip()
 
 
+def combined_winner_ops() -> frozenset[str]:
+    """Ops active under ``SGLANG_GLM52_OPT_PROFILE=combined_winners``."""
+    allow = opt_ops_allowlist()
+    if allow is None:
+        return _COMBINED_DEFAULT_OPS
+    normalized = {_COMBINED_OP_ALIASES.get(op, op) for op in allow}
+    unknown = normalized - _COMBINED_DEFAULT_OPS
+    if unknown:
+        raise ValueError(
+            "Unsupported SGLANG_GLM52_OPT_OPS for combined_winners: "
+            + ", ".join(sorted(unknown))
+        )
+    return frozenset(normalized)
+
+
+def needs_hotspot_provider() -> bool:
+    """Whether this profile must load ``SGLANG_GLM52_HOTSPOT_MODULE``."""
+    if not is_enabled():
+        return False
+    name = profile_name()
+    if name == "hotspot_candidates":
+        return True
+    if name == "combined_winners":
+        return bool(combined_winner_ops() & _COMBINED_HOTSPOT_OPS)
+    return False
+
+
+def hotspot_provider_ops() -> frozenset[str]:
+    """Ops that the hotspot provider must register for the active profile.
+
+    ``combined_winners`` only wires FlashMLA decode/prefill; MoE stays on stock
+    ``moe_masked`` so ``infini_mk_alignment`` can apply.
+    """
+    name = profile_name()
+    if name == "hotspot_candidates":
+        return hotspot_candidate_ops()
+    if name == "combined_winners":
+        return combined_winner_ops() & _COMBINED_HOTSPOT_OPS
+    return frozenset()
+
+
 @lru_cache(maxsize=1)
 def emit_infini_kernel_nvtx() -> bool:
     """Whether selected kernels get profiler-only ``infini_kernel`` ranges."""
@@ -234,6 +300,7 @@ _GRAPH_ONLY_ENV_BY_OP = {
     "o_proj": "SGLANG_GLM52_O_PROJ_GRAPH_ONLY",
     "fused_qkv_a_proj": "SGLANG_GLM52_FUSED_QKV_A_GRAPH_ONLY",
     "index_q_upproj": "SGLANG_GLM52_INDEX_Q_UPPROJ_GRAPH_ONLY",
+    "dsa_decode_attn": "SGLANG_GLM52_FLASHMLA_GRAPH_ONLY",
     "dsa_prefill_attn": "SGLANG_GLM52_DSA_PREFILL_GRAPH_ONLY",
 }
 

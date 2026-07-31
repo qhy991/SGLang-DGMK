@@ -11,9 +11,13 @@
       "main_variant": "p1_consumer_scale",
       "module_name": "infini_kernel_glm52_flashmla_sparse_decode_combine_c2_bucket_stages_ea8c72aac9631a91",
       "so_file": "prebuilt/infini_kernel_glm52_flashmla_sparse_decode_combine_c2_bucket_stages_ea8c72aac9631a91.so",
-      "sha256": "e509dff9cfb2ecf19febf4ba979608608588b173e8d14e71a448e74cd324180f",
+      "sha256": "a1aa0301287589aa629f5215373ca15a2e2e3aafb5c08916d373b96b38db0dbd",
       "local_disposition": "external-acceptance-candidate",
-      "graph_vs_stock": {"M16": "1.2705-1.2753", "M32": "1.1376-1.1426"}
+      "graph_vs_stock": {
+        "M16": "1.2705-1.2753",
+        "M32": "1.1376-1.1426"
+      },
+      "note": "serving ABI: relaxed KV page capacity (stash patch)"
     },
     {
       "role": "decode_main_only",
@@ -23,7 +27,10 @@
       "so_file": "prebuilt/infini_kernel_glm52_flashmla_sparse_decode_p1_consumer_scale_a39236323dc57a97.so",
       "sha256": "a368b1451733140d9801d4519ba265e5d85252d83ab7ac25e8f570059b68e4e1",
       "local_disposition": "external-acceptance-candidate",
-      "graph_vs_stock": {"M16": "1.0694-1.0728", "M32": "1.0636-1.0669"}
+      "graph_vs_stock": {
+        "M16": "1.0694-1.0728",
+        "M32": "1.0636-1.0669"
+      }
     },
     {
       "role": "prefill_winner",
