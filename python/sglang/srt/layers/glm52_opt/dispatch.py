@@ -2,23 +2,27 @@
 
 from __future__ import annotations
 
+import atexit
 import json
 import logging
 import os
+import subprocess
 import threading
 from contextlib import contextmanager
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 import torch
 from sglang.srt.layers.glm52_opt import config
 from sglang.srt.layers.glm52_opt.context import (
     get_forward_m,
     get_forward_mode,
+    get_layer_id,
     get_op_name,
 )
 from sglang.srt.layers.glm52_opt.fp8_gemm import run_fp8_gemm
 from sglang.srt.layers.glm52_opt.hotspot_provider import (
+    provider_state,
     run_flashmla_sparse_decode,
     run_flashmla_sparse_prefill,
 )
@@ -34,11 +38,267 @@ logger = logging.getLogger(__name__)
 _HIT_LOCK = threading.Lock()
 _HIT_COUNTS: dict[str, int] = {}
 _MISS_COUNTS: dict[str, int] = {}
+_SELECTED_SCOPE_COUNTS: dict[tuple[str, str, str, str, str], int] = {}
+_MISS_SCOPE_COUNTS: dict[tuple[str, str, str, str, str], int] = {}
 _HIT_FILE_RAW = os.environ.get(
     "SGLANG_GLM52_OPT_HIT_FILE",
     "/home/ubuntu/wwxq/cache/sglang/glm52_opt_hits.json",
 ).strip()
-_HIT_FILE = Path(_HIT_FILE_RAW) if _HIT_FILE_RAW else None
+_STATIC_ARTIFACT_METADATA: dict[str, Any] | None = None
+
+
+def _rank_from_env(*names: str) -> int | str | None:
+    for name in names:
+        value = os.environ.get(name, "").strip()
+        if value:
+            try:
+                return int(value)
+            except ValueError:
+                return value
+    return None
+
+
+def _gpu_uuid_from_env(local_rank: int | str | None) -> str | None:
+    """Read a UUID from launcher/container env without touching CUDA."""
+    direct_names = (
+        "SGLANG_GPU_UUID",
+        "GPU_UUID",
+        "GPU_DEVICE_UUID",
+        "NVIDIA_GPU_UUID",
+    )
+    for name in direct_names:
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+
+    for name in ("NVIDIA_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES"):
+        values = [
+            item.strip() for item in os.environ.get(name, "").split(",") if item.strip()
+        ]
+        uuid_values = [item for item in values if item.startswith(("GPU-", "MIG-"))]
+        if not uuid_values:
+            continue
+        try:
+            local_index = int(local_rank)
+        except (TypeError, ValueError):
+            local_index = 0
+        if 0 <= local_index < len(uuid_values):
+            return uuid_values[local_index]
+        return uuid_values[0]
+    return None
+
+
+def _process_identity() -> dict[str, Any]:
+    global_rank = _rank_from_env(
+        "RANK",
+        "WORLD_RANK",
+        "SLURM_PROCID",
+        "OMPI_COMM_WORLD_RANK",
+    )
+    local_rank = _rank_from_env(
+        "LOCAL_RANK",
+        "SLURM_LOCALID",
+        "OMPI_COMM_WORLD_LOCAL_RANK",
+    )
+    return {
+        "pid": os.getpid(),
+        "global_rank": global_rank,
+        "local_rank": local_rank,
+        "gpu_uuid": _gpu_uuid_from_env(local_rank),
+    }
+
+
+def _path_token(value: object) -> str:
+    text = str(value)
+    return "".join(char if char.isalnum() or char in "._-" else "_" for char in text)
+
+
+def _resolve_hit_file(raw_path: str, identity: dict[str, Any]) -> Path | None:
+    """Expand a rank-aware path and guarantee a process-unique target."""
+    if not raw_path:
+        return None
+    global_rank = identity["global_rank"]
+    local_rank = identity["local_rank"]
+    values = {
+        "pid": _path_token(identity["pid"]),
+        "rank": _path_token(global_rank if global_rank is not None else "unknown"),
+        "global_rank": _path_token(
+            global_rank if global_rank is not None else "unknown"
+        ),
+        "local_rank": _path_token(local_rank if local_rank is not None else "unknown"),
+        "gpu_uuid": _path_token(identity["gpu_uuid"] or "unknown"),
+    }
+    expanded = raw_path
+    used: set[str] = set()
+    for name, value in values.items():
+        marker = "{" + name + "}"
+        if marker in expanded:
+            expanded = expanded.replace(marker, value)
+            used.add(name)
+
+    # A template may choose its own layout.  Missing identity dimensions are
+    # appended so a legacy fixed filename can never be shared by TP workers.
+    tags: list[str] = []
+    if not ({"rank", "global_rank"} & used):
+        tags.append(f"rank{values['global_rank']}")
+    if "local_rank" not in used:
+        tags.append(f"local{values['local_rank']}")
+    if "pid" not in used:
+        tags.append(f"pid{values['pid']}")
+    path = Path(expanded).expanduser()
+    if tags:
+        suffix = path.suffix
+        stem = path.name[: -len(suffix)] if suffix else path.name
+        path = path.with_name(f"{stem}.{'.'.join(tags)}{suffix}")
+    return path
+
+
+_PROCESS_IDENTITY = _process_identity()
+_HIT_FILE = _resolve_hit_file(_HIT_FILE_RAW, _PROCESS_IDENTITY)
+
+
+def _initialize_process_artifact() -> None:
+    """Refresh launcher identity lazily after a multiprocessing fork."""
+    global _PROCESS_IDENTITY, _HIT_FILE, _STATIC_ARTIFACT_METADATA
+    _PROCESS_IDENTITY = _process_identity()
+    _HIT_FILE = _resolve_hit_file(_HIT_FILE_RAW, _PROCESS_IDENTITY)
+    _STATIC_ARTIFACT_METADATA = None
+
+
+def _reset_artifact_after_fork() -> None:
+    """Drop parent counters, paths, and locks in a forked worker."""
+    global _HIT_FILE, _HIT_LOCK, _STATIC_ARTIFACT_METADATA
+    _HIT_FILE = None
+    _HIT_LOCK = threading.Lock()
+    _STATIC_ARTIFACT_METADATA = None
+    _HIT_COUNTS.clear()
+    _MISS_COUNTS.clear()
+    _SELECTED_SCOPE_COUNTS.clear()
+    _MISS_SCOPE_COUNTS.clear()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_reset_artifact_after_fork)
+
+
+def _find_repo_root() -> Path | None:
+    for parent in Path(__file__).resolve().parents:
+        if (parent / ".git").exists():
+            return parent
+    return None
+
+
+def _git_output(repo_root: Path, *args: str) -> str | None:
+    try:
+        result = subprocess.run(
+            ("git", "-C", str(repo_root), *args),
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
+def _sglang_source_identity() -> dict[str, Any]:
+    repo_root = _find_repo_root()
+    if repo_root is None:
+        return {
+            "repo_root": None,
+            "commit": None,
+            "branch": None,
+            "dirty": None,
+        }
+    status = _git_output(repo_root, "status", "--porcelain", "--untracked-files=normal")
+    return {
+        "repo_root": str(repo_root),
+        "commit": _git_output(repo_root, "rev-parse", "HEAD"),
+        "branch": _git_output(repo_root, "branch", "--show-current") or "DETACHED",
+        "dirty": None if status is None else bool(status),
+    }
+
+
+def _static_artifact_metadata() -> dict[str, Any]:
+    """Cache launcher and git metadata; never run git from every hit."""
+    global _STATIC_ARTIFACT_METADATA
+    if _STATIC_ARTIFACT_METADATA is None:
+        _STATIC_ARTIFACT_METADATA = {
+            "process": dict(_PROCESS_IDENTITY),
+            "sglang": _sglang_source_identity(),
+        }
+    return _STATIC_ARTIFACT_METADATA
+
+
+def _json_safe(value: Any) -> Any:
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [_json_safe(item) for item in value]
+    return repr(value)
+
+
+def _dso_identities(provider: dict[str, Any]) -> list[dict[str, Any]]:
+    """Extract convenient DSO fingerprints while retaining full provider_info."""
+    identities: list[dict[str, Any]] = []
+    fingerprint_keys = (
+        "module_name",
+        "extension_file",
+        "so_file",
+        "sha256",
+        "build_id",
+        "main_variant",
+        "combine_variant",
+        "promotion_status",
+        "scheduler_order",
+        "scheduler_mapping_location",
+        "scheduler_metadata_order",
+        "scheduler_contract_version",
+        "scheduler_permutation_sha256",
+    )
+
+    def visit(value: Any, location: str) -> None:
+        if isinstance(value, dict):
+            identity = {
+                key: _json_safe(value[key]) for key in fingerprint_keys if key in value
+            }
+            if identity and any(
+                key in identity
+                for key in ("module_name", "extension_file", "so_file", "sha256")
+            ):
+                identities.append({"location": location, **identity})
+            for key, item in value.items():
+                visit(item, f"{location}.{key}")
+        elif isinstance(value, (list, tuple)):
+            for index, item in enumerate(value):
+                visit(item, f"{location}[{index}]")
+
+    visit(provider.get("provider_info", {}), "provider_info")
+    return identities
+
+
+def _scope_rows(
+    counts: dict[tuple[str, str, str, str, str], int],
+    detail_name: str,
+) -> list[dict[str, Any]]:
+    rows = []
+    for (layer, op, phase, m, detail), count in sorted(counts.items()):
+        rows.append(
+            {
+                "layer": None if layer == "unknown" else int(layer),
+                "op": op,
+                "phase": phase,
+                "m": None if m == "unknown" else int(m),
+                detail_name: detail,
+                "count": count,
+            }
+        )
+    return rows
 
 
 def _flush_stats() -> None:
@@ -46,8 +306,32 @@ def _flush_stats() -> None:
         return
     try:
         _HIT_FILE.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"hits": dict(_HIT_COUNTS), "misses": dict(_MISS_COUNTS)}
-        _HIT_FILE.write_text(json.dumps(payload, indent=2, sort_keys=True))
+        state = _json_safe(provider_state())
+        payload = {
+            "schema_version": 2,
+            **_static_artifact_metadata(),
+            "manifest": _json_safe(config.load_manifest()),
+            "provider_state": state,
+            "provider_dso_identities": _dso_identities(state),
+            "counts": {
+                "selected": _scope_rows(_SELECTED_SCOPE_COUNTS, "kind"),
+                "misses": _scope_rows(_MISS_SCOPE_COUNTS, "reason"),
+            },
+            # Keep the original flat maps for existing one-GPU harness readers.
+            "hits": dict(_HIT_COUNTS),
+            "misses": dict(_MISS_COUNTS),
+        }
+        temporary = _HIT_FILE.with_name(
+            f".{_HIT_FILE.name}.tmp.{os.getpid()}.{threading.get_ident()}"
+        )
+        try:
+            temporary.write_text(json.dumps(payload, indent=2, sort_keys=True))
+            os.replace(temporary, _HIT_FILE)
+        finally:
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
     except Exception as exc:
         print(f"[glm52_opt] hit-file write failed: {exc}", flush=True)
 
@@ -56,13 +340,29 @@ def _record_hit(
     kind: str, op: Optional[str], phase: str, m: Optional[int] = None
 ) -> None:
     """Count successful glm52_opt dispatches; log first hit per key."""
+    if _HIT_FILE is None and _HIT_FILE_RAW:
+        _initialize_process_artifact()
+    if _HIT_FILE is None:
+        return
     key = f"{kind}:{op or 'untagged'}:{phase}"
     if m is not None:
         key += f":m{m}"
+    layer_id = get_layer_id()
+    scope_key = (
+        str(layer_id) if layer_id is not None else "unknown",
+        op or "untagged",
+        phase,
+        str(m) if m is not None else "unknown",
+        kind,
+    )
     with _HIT_LOCK:
         n = _HIT_COUNTS.get(key, 0) + 1
         _HIT_COUNTS[key] = n
-        should_flush = n in (1, 10, 100) or n % 500 == 0
+        scope_n = _SELECTED_SCOPE_COUNTS.get(scope_key, 0) + 1
+        _SELECTED_SCOPE_COUNTS[scope_key] = scope_n
+        # Flush the first observation of every layer/op/bucket so an abrupt
+        # worker exit cannot leave later CUDA-graph layers absent from G4.
+        should_flush = scope_n == 1 or n in (10, 100) or n % 500 == 0
         if should_flush:
             _flush_stats()
     if n == 1:
@@ -74,20 +374,45 @@ def _record_hit(
 def _record_miss(
     reason: str, op: Optional[str], phase: str, m: Optional[int] = None
 ) -> None:
+    if _HIT_FILE is None and _HIT_FILE_RAW:
+        _initialize_process_artifact()
+    if _HIT_FILE is None:
+        return
     key = f"{reason}:{op or 'untagged'}:{phase}"
     if m is not None:
         key += f":m{m}"
+    layer_id = get_layer_id()
+    scope_key = (
+        str(layer_id) if layer_id is not None else "unknown",
+        op or "untagged",
+        phase,
+        str(m) if m is not None else "unknown",
+        reason,
+    )
     with _HIT_LOCK:
         n = _MISS_COUNTS.get(key, 0) + 1
         _MISS_COUNTS[key] = n
+        scope_n = _MISS_SCOPE_COUNTS.get(scope_key, 0) + 1
+        _MISS_SCOPE_COUNTS[scope_key] = scope_n
         should_log = n == 1
-        should_flush = n in (1, 10, 100) or n % 500 == 0
+        should_flush = scope_n == 1 or n in (10, 100) or n % 500 == 0
         if should_flush:
             _flush_stats()
     if should_log:
         msg = f"glm52_opt MISS {key} (first)"
         logger.warning(msg)
         print(msg, flush=True)
+
+
+def _flush_stats_at_exit() -> None:
+    if _HIT_FILE is None or not (_HIT_COUNTS or _MISS_COUNTS):
+        return
+    with _HIT_LOCK:
+        _flush_stats()
+
+
+if _HIT_FILE is not None:
+    atexit.register(_flush_stats_at_exit)
 
 
 def _current_phase(token_num: int) -> str:
@@ -224,6 +549,11 @@ def _tensor_contract(
     )
 
 
+def _data_ptr_is_aligned(tensor: torch.Tensor, alignment: int = 16) -> bool:
+    """Check the caller-owned alignment required by the FlashMLA loads/TMA."""
+    return tensor.data_ptr() % alignment == 0
+
+
 def _moe_hotspot_abi_matches(
     spec: KernelSpec,
     lhs: Tuple[torch.Tensor, torch.Tensor],
@@ -343,9 +673,12 @@ def _flashmla_hotspot_abi_matches(
     if get_forward_mode() is not ForwardMode.DECODE:
         return False
     m = int(q.shape[0]) if q.ndim == 4 else -1
+    num_pages = int(k_cache.shape[0]) if k_cache.ndim == 4 else 0
+    max_tma_pages = (2**31 - 1) // int(spec.page_size)
     device = q.device
     return bool(
         m in (16, 32)
+        and 0 < num_pages <= max_tma_pages
         and head_dim_v == spec.v_dim
         and is_fp8_kvcache is True
         and float(softmax_scale) == 0.0625
@@ -360,12 +693,25 @@ def _flashmla_hotspot_abi_matches(
             ),
             dtype=torch.bfloat16,
         )
-        and k_cache.is_cuda
-        and k_cache.dtype == torch.float8_e4m3fn
-        and tuple(k_cache.shape[1:]) == (int(spec.page_size), 1, int(spec.kv_dim))
-        and k_cache.is_contiguous()
-        and k_cache.storage_offset() == 0
-        and k_cache.device == device
+        and _data_ptr_is_aligned(q)
+        and _tensor_contract(
+            k_cache,
+            shape=(
+                num_pages,
+                int(spec.page_size),
+                1,
+                int(spec.kv_dim),
+            ),
+            stride=(
+                int(spec.page_size) * int(spec.kv_dim),
+                int(spec.kv_dim),
+                int(spec.kv_dim),
+                1,
+            ),
+            dtype=torch.float8_e4m3fn,
+            device=device,
+        )
+        and _data_ptr_is_aligned(k_cache)
         and _tensor_contract(
             cache_seqlens,
             shape=(m,),
@@ -380,6 +726,7 @@ def _flashmla_hotspot_abi_matches(
             dtype=torch.int32,
             device=device,
         )
+        and _data_ptr_is_aligned(tile_scheduler_metadata, 32)
         and _tensor_contract(
             num_splits,
             shape=(m + 1,),
@@ -387,6 +734,7 @@ def _flashmla_hotspot_abi_matches(
             dtype=torch.int32,
             device=device,
         )
+        and _data_ptr_is_aligned(num_splits)
         and _tensor_contract(
             indices,
             shape=(m, 1, int(spec.topk)),
@@ -394,10 +742,14 @@ def _flashmla_hotspot_abi_matches(
             dtype=torch.int32,
             device=device,
         )
-        and block_table.is_cuda
-        and block_table.dtype == torch.int32
-        and tuple(block_table.shape) == (m, 0)
-        and block_table.device == device
+        and _data_ptr_is_aligned(indices)
+        and _tensor_contract(
+            block_table,
+            shape=(m, 0),
+            stride=(1, 1),
+            dtype=torch.int32,
+            device=device,
+        )
     )
 
 
@@ -422,6 +774,10 @@ def try_dispatch_flashmla_sparse_decode(
     spec = lookup("dsa_decode_attn", phase, m=m)
     if spec is None or spec.kind != "dsa":
         _record_miss("flashmla_no_spec", "dsa_decode_attn", phase, m=m)
+        return None
+    # The provider is production-graph-bound.  Decline before the ABI guard
+    # and launch so eager decode falls through to the stock FlashMLA path.
+    if _graph_only_declines(spec):
         return None
     if not _flashmla_hotspot_abi_matches(
         spec,
@@ -456,7 +812,7 @@ def try_dispatch_flashmla_sparse_decode(
         raise RuntimeError(
             "FlashMLA hotspot provider must return the stock (output, lse) pair"
         )
-    candidate_out = result[0]
+    candidate_out, candidate_lse = result
     if not isinstance(candidate_out, torch.Tensor) or not _tensor_contract(
         candidate_out,
         shape=(m, 1, int(spec.q_heads), int(spec.v_dim)),
@@ -470,6 +826,14 @@ def try_dispatch_flashmla_sparse_decode(
         device=q.device,
     ):
         raise RuntimeError("FlashMLA hotspot provider returned an invalid output")
+    if not isinstance(candidate_lse, torch.Tensor) or not _tensor_contract(
+        candidate_lse,
+        shape=(m, int(spec.q_heads), 1),
+        stride=(int(spec.q_heads), 1, int(spec.q_heads)),
+        dtype=torch.float32,
+        device=q.device,
+    ):
+        raise RuntimeError("FlashMLA hotspot provider returned an invalid LSE")
     _record_hit("hotspot_plugin/flashmla_sparse_decode", spec.op, phase, m=m)
     return candidate_out
 

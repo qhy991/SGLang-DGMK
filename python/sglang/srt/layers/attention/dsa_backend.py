@@ -2413,39 +2413,47 @@ class DeepseekSparseAttnBackend(
         )
         o = None
         if use_glm52_hotspot_prefill:
+            from sglang.srt.layers.glm52_opt.context import layer_context
             from sglang.srt.layers.glm52_opt.dispatch import (
                 try_dispatch_flashmla_sparse_prefill,
             )
 
-            o = try_dispatch_flashmla_sparse_prefill(
-                q=q_input,
-                k_cache=kv_cache,
-                cache_seqlens=cache_seqlens,
-                head_dim_v=v_head_dim,
-                tile_scheduler_metadata=metadata.flashmla_metadata.flashmla_metadata,
-                num_splits=metadata.flashmla_metadata.num_splits,
-                softmax_scale=sm_scale,
-                indices=indices,
-                block_table=block_table,
-                is_fp8_kvcache=True,
-            )
+            with layer_context(layer.layer_id):
+                o = try_dispatch_flashmla_sparse_prefill(
+                    q=q_input,
+                    k_cache=kv_cache,
+                    cache_seqlens=cache_seqlens,
+                    head_dim_v=v_head_dim,
+                    tile_scheduler_metadata=(
+                        metadata.flashmla_metadata.flashmla_metadata
+                    ),
+                    num_splits=metadata.flashmla_metadata.num_splits,
+                    softmax_scale=sm_scale,
+                    indices=indices,
+                    block_table=block_table,
+                    is_fp8_kvcache=True,
+                )
         if o is None and use_glm52_hotspot:
+            from sglang.srt.layers.glm52_opt.context import layer_context
             from sglang.srt.layers.glm52_opt.dispatch import (
                 try_dispatch_flashmla_sparse_decode,
             )
 
-            o = try_dispatch_flashmla_sparse_decode(
-                q=q_input,
-                k_cache=kv_cache,
-                cache_seqlens=cache_seqlens,
-                head_dim_v=v_head_dim,
-                tile_scheduler_metadata=metadata.flashmla_metadata.flashmla_metadata,
-                num_splits=metadata.flashmla_metadata.num_splits,
-                softmax_scale=sm_scale,
-                indices=indices,
-                block_table=block_table,
-                is_fp8_kvcache=True,
-            )
+            with layer_context(layer.layer_id):
+                o = try_dispatch_flashmla_sparse_decode(
+                    q=q_input,
+                    k_cache=kv_cache,
+                    cache_seqlens=cache_seqlens,
+                    head_dim_v=v_head_dim,
+                    tile_scheduler_metadata=(
+                        metadata.flashmla_metadata.flashmla_metadata
+                    ),
+                    num_splits=metadata.flashmla_metadata.num_splits,
+                    softmax_scale=sm_scale,
+                    indices=indices,
+                    block_table=block_table,
+                    is_fp8_kvcache=True,
+                )
         if o is None:
             o, _ = flash_mla_with_kvcache(
                 q=q_input,

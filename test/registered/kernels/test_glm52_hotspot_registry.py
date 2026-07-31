@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import Mock, patch
@@ -11,6 +12,7 @@ import torch
 from sglang.srt.layers.glm52_opt import config, hotspot_provider
 from sglang.srt.layers.glm52_opt.context import op_context, set_forward_mode
 from sglang.srt.layers.glm52_opt.dispatch import (
+    _flashmla_hotspot_abi_matches,
     _moe_hotspot_abi_matches,
     try_dispatch_flashmla_sparse_decode,
     try_dispatch_fp8_gemm,
@@ -219,7 +221,7 @@ def test_abi_miss_falls_back_before_any_candidate_launch():
         _restore_env(saved)
 
 
-def test_only_w2_hotspot_spec_is_graph_only():
+def test_decode_graph_only_hotspot_specs_are_registered():
     names = ("SGLANG_GLM52_OPT_PROFILE", "SGLANG_GLM52_OPT_OPS")
     saved = {name: os.environ.get(name) for name in names}
     try:
@@ -228,7 +230,7 @@ def test_only_w2_hotspot_spec_is_graph_only():
         specs = {spec.op: spec for spec in list_enabled("decode")}
         assert specs["moe_down_proj"].graph_only is True
         assert specs["moe_gate_proj"].graph_only is False
-        assert specs["dsa_decode_attn"].graph_only is False
+        assert specs["dsa_decode_attn"].graph_only is True
     finally:
         _restore_env(saved)
 
@@ -323,7 +325,9 @@ def test_w2_graph_only_can_be_disabled_for_diagnostic_eager_leaf():
         os.environ["SGLANG_GLM52_W2_GRAPH_ONLY"] = "0"
         set_forward_mode(ForwardMode.DECODE, 16)
 
-        selected, _abi, candidate, _hit, _miss = _w2_graph_only_dispatch(capturing=False)
+        selected, _abi, candidate, _hit, _miss = _w2_graph_only_dispatch(
+            capturing=False
+        )
         assert selected
         candidate.assert_called_once()
     finally:
@@ -386,34 +390,24 @@ def test_w2_expected_m_matrix_is_bound_to_forward_bucket():
         ):
             set_forward_mode(ForwardMode.DECODE, 16)
             assert all(
-                _moe_hotspot_abi_matches(
-                    spec, pair, pair, fake, fake, expected_m, 16
-                )
+                _moe_hotspot_abi_matches(spec, pair, pair, fake, fake, expected_m, 16)
                 for expected_m in (4, 5)
             )
             assert not any(
-                _moe_hotspot_abi_matches(
-                    spec, pair, pair, fake, fake, expected_m, 16
-                )
+                _moe_hotspot_abi_matches(spec, pair, pair, fake, fake, expected_m, 16)
                 for expected_m in (8, 9)
             )
             set_forward_mode(ForwardMode.DECODE, 32)
             assert all(
-                _moe_hotspot_abi_matches(
-                    spec, pair, pair, fake, fake, expected_m, 32
-                )
+                _moe_hotspot_abi_matches(spec, pair, pair, fake, fake, expected_m, 32)
                 for expected_m in (8, 9)
             )
             assert not any(
-                _moe_hotspot_abi_matches(
-                    spec, pair, pair, fake, fake, expected_m, 32
-                )
+                _moe_hotspot_abi_matches(spec, pair, pair, fake, fake, expected_m, 32)
                 for expected_m in (4, 5)
             )
             set_forward_mode(ForwardMode.EXTEND, 16)
-            assert not _moe_hotspot_abi_matches(
-                spec, pair, pair, fake, fake, 4, 16
-            )
+            assert not _moe_hotspot_abi_matches(spec, pair, pair, fake, fake, 4, 16)
     finally:
         set_forward_mode(None)
         _restore_env(saved)
@@ -424,10 +418,12 @@ def test_selected_flashmla_candidate_preserves_public_return_contract():
         "SGLANG_GLM52_OPT",
         "SGLANG_GLM52_OPT_PROFILE",
         "SGLANG_GLM52_OPT_OPS",
+        "SGLANG_GLM52_FLASHMLA_GRAPH_ONLY",
     )
     saved = {name: os.environ.get(name) for name in names}
     q = torch.empty((16, 1, 64, 576), dtype=torch.bfloat16)
     candidate_out = torch.empty((16, 1, 64, 512), dtype=torch.bfloat16)
+    candidate_lse = torch.empty_strided((16, 64, 1), (64, 1, 64), dtype=torch.float32)
     fake = torch.empty(1)
     try:
         os.environ["SGLANG_GLM52_OPT"] = "1"
@@ -435,6 +431,10 @@ def test_selected_flashmla_candidate_preserves_public_return_contract():
         os.environ["SGLANG_GLM52_OPT_OPS"] = "flashmla_sparse_decode"
         set_forward_mode(ForwardMode.DECODE, 16)
         with (
+            patch(
+                "sglang.srt.layers.glm52_opt.dispatch._is_cuda_graph_capturing",
+                return_value=True,
+            ),
             patch(
                 "sglang.srt.layers.glm52_opt.dispatch._flashmla_hotspot_abi_matches",
                 return_value=True,
@@ -445,7 +445,7 @@ def test_selected_flashmla_candidate_preserves_public_return_contract():
             ),
             patch(
                 "sglang.srt.layers.glm52_opt.dispatch.run_flashmla_sparse_decode",
-                return_value=(candidate_out, fake),
+                return_value=(candidate_out, candidate_lse),
             ) as candidate,
             patch("sglang.srt.layers.glm52_opt.dispatch._record_hit"),
         ):
@@ -468,6 +468,269 @@ def test_selected_flashmla_candidate_preserves_public_return_contract():
         _restore_env(saved)
 
 
+def _flashmla_decode_call(q: torch.Tensor, fake: torch.Tensor):
+    return try_dispatch_flashmla_sparse_decode(
+        q=q,
+        k_cache=fake,
+        cache_seqlens=fake,
+        head_dim_v=512,
+        tile_scheduler_metadata=fake,
+        num_splits=fake,
+        softmax_scale=0.0625,
+        indices=fake,
+        block_table=fake,
+        is_fp8_kvcache=True,
+    )
+
+
+@contextmanager
+def _mock_flashmla_candidate(*, capturing: bool, provider_result, contract=None):
+    if contract is None:
+        contract = lambda *_args, **_kwargs: True
+    with (
+        patch(
+            "sglang.srt.layers.glm52_opt.dispatch._is_cuda_graph_capturing",
+            return_value=capturing,
+        ),
+        patch(
+            "sglang.srt.layers.glm52_opt.dispatch._flashmla_hotspot_abi_matches",
+            return_value=True,
+        ) as abi,
+        patch(
+            "sglang.srt.layers.glm52_opt.dispatch._tensor_contract",
+            side_effect=contract,
+        ),
+        patch(
+            "sglang.srt.layers.glm52_opt.dispatch.run_flashmla_sparse_decode",
+            return_value=provider_result,
+        ) as provider,
+        patch("sglang.srt.layers.glm52_opt.dispatch._record_hit") as record_hit,
+        patch("sglang.srt.layers.glm52_opt.dispatch._record_miss") as record_miss,
+    ):
+        yield SimpleNamespace(
+            abi=abi,
+            provider=provider,
+            record_hit=record_hit,
+            record_miss=record_miss,
+        )
+
+
+def test_flashmla_graph_only_eager_decline_and_diagnostic_override():
+    names = (
+        "SGLANG_GLM52_OPT",
+        "SGLANG_GLM52_OPT_PROFILE",
+        "SGLANG_GLM52_OPT_OPS",
+        "SGLANG_GLM52_FLASHMLA_GRAPH_ONLY",
+    )
+    saved = {name: os.environ.get(name) for name in names}
+    q = torch.empty((16, 1, 64, 576), dtype=torch.bfloat16)
+    candidate_out = torch.empty((16, 1, 64, 512), dtype=torch.bfloat16)
+    candidate_lse = torch.empty_strided((16, 64, 1), (64, 1, 64), dtype=torch.float32)
+    fake = torch.empty(1)
+    try:
+        os.environ["SGLANG_GLM52_OPT"] = "1"
+        os.environ["SGLANG_GLM52_OPT_PROFILE"] = "hotspot_candidates"
+        os.environ["SGLANG_GLM52_OPT_OPS"] = "flashmla_sparse_decode"
+        os.environ.pop("SGLANG_GLM52_FLASHMLA_GRAPH_ONLY", None)
+        set_forward_mode(ForwardMode.DECODE, 16)
+        with _mock_flashmla_candidate(
+            capturing=False, provider_result=(candidate_out, candidate_lse)
+        ) as mocks:
+            assert _flashmla_decode_call(q, fake) is None
+        mocks.abi.assert_not_called()
+        mocks.provider.assert_not_called()
+        mocks.record_hit.assert_not_called()
+        mocks.record_miss.assert_not_called()
+
+        os.environ["SGLANG_GLM52_FLASHMLA_GRAPH_ONLY"] = "0"
+        with _mock_flashmla_candidate(
+            capturing=False, provider_result=(candidate_out, candidate_lse)
+        ) as mocks:
+            assert _flashmla_decode_call(q, fake) is candidate_out
+        mocks.abi.assert_called_once()
+        mocks.provider.assert_called_once()
+        mocks.record_hit.assert_called_once()
+    finally:
+        set_forward_mode(None)
+        _restore_env(saved)
+
+
+def test_flashmla_dynamic_page_and_alignment_abi_gate():
+    names = ("SGLANG_GLM52_OPT_PROFILE", "SGLANG_GLM52_OPT_OPS")
+    saved = {name: os.environ.get(name) for name in names}
+    device = torch.device("cuda:0")
+
+    def tensor(
+        shape,
+        *,
+        dtype=torch.int32,
+        ptr=0x1000,
+        contiguous=True,
+        stride=None,
+    ):
+        if stride is None:
+            running = 1
+            inferred = []
+            for extent in reversed(shape):
+                inferred.append(running)
+                running *= max(int(extent), 1)
+            stride = tuple(reversed(inferred))
+        return SimpleNamespace(
+            ndim=len(shape),
+            shape=shape,
+            device=device,
+            is_cuda=True,
+            dtype=dtype,
+            is_contiguous=lambda: contiguous,
+            storage_offset=lambda: 0,
+            data_ptr=lambda: ptr,
+            stride=lambda: stride,
+        )
+
+    try:
+        os.environ["SGLANG_GLM52_OPT_PROFILE"] = "hotspot_candidates"
+        os.environ["SGLANG_GLM52_OPT_OPS"] = "flashmla_sparse_decode"
+        spec = lookup("dsa_decode_attn", "decode", m=16)
+        assert spec is not None
+        set_forward_mode(ForwardMode.DECODE, 16)
+        q = tensor((16, 1, 64, 576), dtype=torch.bfloat16)
+        common = {
+            "q": q,
+            "cache_seqlens": tensor((16,)),
+            "head_dim_v": 512,
+            "tile_scheduler_metadata": tensor((148, 8)),
+            "num_splits": tensor((17,)),
+            "softmax_scale": 0.0625,
+            "indices": tensor((16, 1, 2048)),
+            "block_table": tensor((16, 0)),
+            "is_fp8_kvcache": True,
+        }
+        with patch(
+            "sglang.srt.layers.glm52_opt.dispatch._tensor_contract",
+            return_value=True,
+        ):
+            for pages in (33, 2049, 4097):
+                kv = tensor(
+                    (pages, 64, 1, 656),
+                    dtype=torch.float8_e4m3fn,
+                )
+                assert _flashmla_hotspot_abi_matches(spec, k_cache=kv, **common)
+
+            for pages in (0, (2**31 - 1) // 64 + 1):
+                kv = tensor(
+                    (pages, 64, 1, 656),
+                    dtype=torch.float8_e4m3fn,
+                )
+                assert not _flashmla_hotspot_abi_matches(spec, k_cache=kv, **common)
+
+            misaligned = tensor(
+                (33, 64, 1, 656),
+                dtype=torch.float8_e4m3fn,
+                ptr=0x1001,
+            )
+            assert not _flashmla_hotspot_abi_matches(spec, k_cache=misaligned, **common)
+
+        def exact_fake_contract(value, *, shape, stride, dtype, device=None):
+            return bool(
+                value.is_cuda
+                and value.dtype == dtype
+                and tuple(value.shape) == shape
+                and tuple(value.stride()) == stride
+                and value.storage_offset() == 0
+                and (device is None or value.device == device)
+            )
+
+        with patch(
+            "sglang.srt.layers.glm52_opt.dispatch._tensor_contract",
+            side_effect=exact_fake_contract,
+        ):
+            wrong_size_one_stride = tensor(
+                (33, 64, 1, 656),
+                dtype=torch.float8_e4m3fn,
+                stride=(64 * 656, 656, 1, 1),
+            )
+            assert not _flashmla_hotspot_abi_matches(
+                spec, k_cache=wrong_size_one_stride, **common
+            )
+
+            valid_kv = tensor(
+                (33, 64, 1, 656),
+                dtype=torch.float8_e4m3fn,
+            )
+            bad_block_table = tensor((16, 0), stride=(0, 1))
+            assert not _flashmla_hotspot_abi_matches(
+                spec,
+                k_cache=valid_kv,
+                **{**common, "block_table": bad_block_table},
+            )
+    finally:
+        set_forward_mode(None)
+        _restore_env(saved)
+
+
+def test_flashmla_provider_validates_exact_output_and_lse_contract_on_cpu_meta():
+    names = (
+        "SGLANG_GLM52_OPT",
+        "SGLANG_GLM52_OPT_PROFILE",
+        "SGLANG_GLM52_OPT_OPS",
+        "SGLANG_GLM52_FLASHMLA_GRAPH_ONLY",
+    )
+    saved = {name: os.environ.get(name) for name in names}
+    q = torch.empty((16, 1, 64, 576), dtype=torch.bfloat16)
+    candidate_out = torch.empty((16, 1, 64, 512), dtype=torch.bfloat16)
+    correct_lse = torch.empty_strided((16, 64, 1), (64, 1, 64), dtype=torch.float32)
+    fake = torch.empty(1)
+
+    def cpu_meta_contract(tensor, *, shape, stride, dtype, device=None):
+        return bool(
+            tensor.dtype == dtype
+            and tuple(tensor.shape) == shape
+            and tuple(tensor.stride()) == stride
+            and tensor.storage_offset() == 0
+            and (device is None or tensor.device == device)
+        )
+
+    try:
+        os.environ["SGLANG_GLM52_OPT"] = "1"
+        os.environ["SGLANG_GLM52_OPT_PROFILE"] = "hotspot_candidates"
+        os.environ["SGLANG_GLM52_OPT_OPS"] = "flashmla_sparse_decode"
+        set_forward_mode(ForwardMode.DECODE, 16)
+
+        with _mock_flashmla_candidate(
+            capturing=True,
+            provider_result=(candidate_out, correct_lse),
+            contract=cpu_meta_contract,
+        ):
+            assert _flashmla_decode_call(q, fake) is candidate_out
+
+        invalid_lses = (
+            object(),
+            torch.empty_strided((16, 1, 64), (64, 64, 1), dtype=torch.float32),
+            torch.empty((16, 64, 1), dtype=torch.float32),
+            torch.empty_strided((16, 64, 1), (64, 1, 64), dtype=torch.bfloat16),
+            torch.empty_strided(
+                (16, 64, 1),
+                (64, 1, 64),
+                dtype=torch.float32,
+                device="meta",
+            ),
+        )
+        for invalid_lse in invalid_lses:
+            with (
+                _mock_flashmla_candidate(
+                    capturing=True,
+                    provider_result=(candidate_out, invalid_lse),
+                    contract=cpu_meta_contract,
+                ) as mocks,
+                TestCase().assertRaisesRegex(RuntimeError, "invalid LSE"),
+            ):
+                _flashmla_decode_call(q, fake)
+            mocks.record_hit.assert_not_called()
+    finally:
+        set_forward_mode(None)
+        _restore_env(saved)
+
+
 def test_o_proj_e2e_spec_is_graph_only():
     """Decode o_proj (fixed-N/K) is graph_only; the other E2E fp8_gemm is not."""
     names = ("SGLANG_GLM52_OPT", "SGLANG_GLM52_OPT_PROFILE", "SGLANG_GLM52_OPT_OPS")
@@ -481,12 +744,12 @@ def test_o_proj_e2e_spec_is_graph_only():
         assert o_proj.kind == "fp8_gemm"
         assert o_proj.implementation == "fixed_nk"
         assert o_proj.graph_only is True
-        # index_q_upproj is an explicit-only fixed-N/K candidate, not graph_only.
+        # Existing index_q_upproj graph-only behavior must remain unchanged.
         os.environ["SGLANG_GLM52_OPT_OPS"] = "index_q_upproj"
         idx = lookup("index_q_upproj", "decode", m=16)
         assert idx is not None
         assert idx.implementation == "fixed_nk"
-        assert idx.graph_only is False
+        assert idx.graph_only is True
     finally:
         _restore_env(saved)
 
@@ -566,7 +829,9 @@ def test_o_proj_graph_only_declines_eager_before_abi_and_run():
         miss.assert_not_called()
 
         # Under graph capture the candidate is selected and the GEMM runs once.
-        result, _abi, candidate, hit, _miss = _o_proj_graph_only_dispatch(capturing=True)
+        result, _abi, candidate, hit, _miss = _o_proj_graph_only_dispatch(
+            capturing=True
+        )
         assert result is not None
         candidate.assert_called_once()
         hit.assert_called_once()
@@ -590,7 +855,9 @@ def test_o_proj_graph_only_can_be_disabled_for_diagnostic_eager_leaf():
         os.environ["SGLANG_GLM52_O_PROJ_GRAPH_ONLY"] = "0"
         set_forward_mode(ForwardMode.DECODE, 16)
 
-        result, _abi, candidate, _hit, _miss = _o_proj_graph_only_dispatch(capturing=False)
+        result, _abi, candidate, _hit, _miss = _o_proj_graph_only_dispatch(
+            capturing=False
+        )
         assert result is not None
         candidate.assert_called_once()
     finally:

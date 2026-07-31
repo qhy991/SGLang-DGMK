@@ -14,6 +14,7 @@ _forward_mode: ContextVar[Optional["ForwardMode"]] = ContextVar(
     "glm52_forward_mode", default=None
 )
 _forward_m: ContextVar[Optional[int]] = ContextVar("glm52_forward_m", default=None)
+_layer_id: ContextVar[Optional[int]] = ContextVar("glm52_layer_id", default=None)
 
 
 def get_op_name() -> Optional[str]:
@@ -29,6 +30,11 @@ def get_forward_m() -> Optional[int]:
     return _forward_m.get()
 
 
+def get_layer_id() -> Optional[int]:
+    """Return the model layer currently entering a GLM-5.2 dispatch hook."""
+    return _layer_id.get()
+
+
 def set_forward_mode(mode: Optional["ForwardMode"], m: Optional[int] = None) -> None:
     _forward_mode.set(mode)
     _forward_m.set(None if m is None else int(m))
@@ -41,6 +47,16 @@ def op_context(op_name: Optional[str]) -> Iterator[None]:
         yield
     finally:
         _op_name.reset(token)
+
+
+@contextmanager
+def layer_context(layer_id: Optional[int]) -> Iterator[None]:
+    """Attach a layer id to hit/miss evidence without changing kernel ABIs."""
+    token = _layer_id.set(None if layer_id is None else int(layer_id))
+    try:
+        yield
+    finally:
+        _layer_id.reset(token)
 
 
 def prefix_to_op_name(prefix: Optional[str]) -> Optional[str]:

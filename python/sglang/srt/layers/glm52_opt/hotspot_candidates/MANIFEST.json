@@ -5,6 +5,83 @@
   "note": "CUDA 13.1 ptxas rejects cvt.rn.bf16x2.e4m3x2; prefer these prebuilts over JIT.",
   "binaries": [
     {
+      "role": "decode_stack_dynamic_pages_m16",
+      "phase": "decode",
+      "bucket_m": 16,
+      "variant": "r2a_c2_dynamic",
+      "main_variant": "r2a_prologue_overlap",
+      "combine_variant": "combine_c2_bucket_stages",
+      "module_name": "glm52_mla_sparse_combine_r2a_c2_dynamic_86b3787ea5a1c410",
+      "so_file": "prebuilt/glm52_mla_sparse_combine_r2a_c2_dynamic_86b3787ea5a1c410.so",
+      "sha256": "32c162fcc027f5c4b233e9f6707b22bf7b70578fc4307991d0fef3e59c175de6",
+      "build_id": "86b3787ea5a1c41096befe7cbceba8bdd645a9eaffa9c190852570e5e44bdebd",
+      "flashmla_commit": "5f2c3febd2727fd2e8ed0914e8662429873942df",
+      "toolchain": "CUDA 13.2; compute_100f/sm_100f only",
+      "dynamic_kv_pages": true,
+      "validated_pages": [33, 2049, 4097],
+      "correctness": "bitwise output and LSE in eager and CUDA Graph replay",
+      "promotion_status": "explicit_experimental_profile_only",
+      "scheduler_order": "request_major",
+      "scheduler_mapping_location": "canonical_metadata",
+      "scheduler_metadata_order": "request_major",
+      "scheduler_contract_version": "glm52-flashmla-inline-row-map-v1",
+      "scheduler_permutation_sha256": "366f38341b4e61ed927426c7de48a12d28a7d4b1ff07f88f5c31bc05352031dc"
+    },
+    {
+      "role": "decode_stack_dynamic_pages_m32_rr_inline",
+      "phase": "decode",
+      "bucket_m": 32,
+      "variant": "p1_c2_m32_rr_inline_dynamic",
+      "main_variant": "p1_consumer_scale_m32_rr_inline",
+      "combine_variant": "combine_c2_bucket_stages",
+      "module_name": "glm52_mla_sparse_combine_p1_c2_m32_rr_inline_dynamic_958c0de27a9b6629",
+      "so_file": "prebuilt/glm52_mla_sparse_combine_p1_c2_m32_rr_inline_dynamic_958c0de27a9b6629.so",
+      "sha256": "7333f302aff1615064dd301a81a2308eeaececdae631ac9933d4ec509da20751",
+      "build_id": "958c0de27a9b6629e9da8f0d70bbf5da29a926adf5e7d75ff86d757df0e6f79b",
+      "flashmla_base_commit": "1dd22a5f9b0002130312b3c7452fcf8e4239a1cc",
+      "flashmla_source_state": "base commit plus audited uncommitted inline scheduler sources; source hashes below are authoritative",
+      "toolchain": "CUDA 13.2; compute_100f/sm_100f only",
+      "dynamic_kv_pages": true,
+      "validated_pages": [33, 2049, 4097],
+      "correctness": "formal arbitrary cache-seqlens 9/9 and invalid-index prefix/holes/OOB 12/12 matrices are output/LSE bitwise exact; canonical scheduler pointer/content remain unchanged; every graph is 2 nodes/1 programmatic edge",
+      "promotion_status": "explicit_experimental_profile_only_pending_checkpoint_full_layer_whole_forward_tpot",
+      "performance_status": "containing-region paired gate passed; checkpoint, full-layer, whole-forward, and TPOT validation remain pending",
+      "scheduler_order": "split_major_round_robin_inline",
+      "scheduler_mapping_location": "main_kernel_physical_to_canonical_row",
+      "scheduler_metadata_order": "request_major",
+      "scheduler_contract_version": "glm52-flashmla-inline-row-map-v1",
+      "scheduler_permutation_sha256": "9841c5ae3a0c3d532b1aa1e8da8f8142ce4d4aabdcab639741a89eabcbd82c60",
+      "external_evidence": {
+        "build": {
+          "path": "/home/qinhaiyan/glm52-hotspot-goal-runs/worktrees/mla-sparse-combine/kernel-harness/profile/glm52-mla-sparse-combine-20260731/evidence/build_m32_p1_c2_rr_inline_dynamic.json",
+          "sha256": "9d1f03333fd0888f0d26be783cab1d354ab0eb2c72135a9c3d7b6bfeeebf1561",
+          "summary": "CUDA 13.2 sm_100f-only build 958c0de27a9b6629; DSO sha256 7333f302aff1615064dd301a81a2308eeaececdae631ac9933d4ec509da20751"
+        },
+        "cache_and_tail_correctness": {
+          "path": "/home/qinhaiyan/glm52-hotspot-goal-runs/worktrees/mla-sparse-combine/kernel-harness/profile/glm52-mla-sparse-combine-20260731/evidence/containing_region_inline_correctness_m32_pages4097.json",
+          "sha256": "9372b6d5ea7b3fbabc9e96332e9575a1aa3446e5871db903cd9dcf501f9fdf7a",
+          "summary": "9/9 arbitrary cache-seqlens fixtures bitwise exact; stable canonical scheduler pointer/content; every graph 2 nodes/1 programmatic edge"
+        },
+        "invalid_indices_correctness": {
+          "path": "/home/qinhaiyan/glm52-hotspot-goal-runs/worktrees/mla-sparse-combine/kernel-harness/profile/glm52-mla-sparse-combine-20260731/evidence/containing_region_inline_invalid_indices_m32_pages4097_v2.json",
+          "sha256": "9e2c19b6129924333f8e1044eec80272cb5fb361abf37c6723d3ce00e6f2b359",
+          "summary": "12/12 valid-prefix counts, non-contiguous -1 holes, and out-of-range sentinel patterns bitwise exact; canonical scheduler pointer/content unchanged and no framework-side metadata permutation"
+        },
+        "containing_region_paired": {
+          "path": "/home/qinhaiyan/glm52-hotspot-goal-runs/worktrees/mla-sparse-combine/kernel-harness/profile/glm52-mla-sparse-combine-20260731/evidence/containing_region_inline_paired_m32_pages4097.json",
+          "sha256": "3813f54440951ced13fe83a46d7e8b1b482bfdbd7e731e18d823529502de118f",
+          "summary": "formal installed-stock/candidate paired gate passed: minimum containing-region estimator 1.032129224 exceeds 1.03, maximum region null drift 0.0000251734, minimum leaf estimator 1.070866590, output/LSE exact, and every leaf graph is 2 nodes/1 programmatic edge"
+        },
+        "containing_region_paired_audit": {
+          "path": "/home/qinhaiyan/glm52-hotspot-goal-runs/worktrees/mla-sparse-combine/kernel-harness/profile/glm52-mla-sparse-combine-20260731/evidence/containing_region_inline_paired_m32_pages4097.audit_hardened_v2.json",
+          "sha256": "8c9683fd52c75e5bb8b0b804e581c93f3c5f501a326d1f9b47de909149a9bee2",
+          "summary": "hardened offline audit decision_pass=true with no structural failures; independently recomputed timing estimators, AB/BA series structure, null controls, and external-reorder tax raw-series contracts all match and pass"
+        }
+      },
+      "main_translation_unit_sha256": "732ee32eab8a66c3be46126710c7497f76e7224968244be107be6087bbb2e1da",
+      "scheduler_kernel_header_sha256": "aa482542b844e4d060a676f72ed72d33d0e40a2877dbd49b7f8b8786ab45c230"
+    },
+    {
       "role": "decode_stack_winner",
       "phase": "decode",
       "variant": "combine_c2_bucket_stages",

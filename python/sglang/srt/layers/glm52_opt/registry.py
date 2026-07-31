@@ -211,6 +211,10 @@ _HOTSPOT_DECODE: dict[str, KernelSpec] = {
         v_dim=512,
         page_size=64,
         kv_dim=656,
+        # The API-v1 Python provider has a fixed eager-call tax, while this
+        # hotspot is used by production CUDA-graph replay.  Keep eager decode
+        # on stock unless explicitly overridden for diagnostic leaf timing.
+        graph_only=True,
     ),
     # SGLang executes gate+up as one fused W13 grouped GEMM.
     "moe_gate_proj": KernelSpec(
