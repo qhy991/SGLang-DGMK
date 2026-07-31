@@ -9,7 +9,7 @@
       "variant": "split_kv_grid",
       "module_name": "glm52_mla_split_kv",
       "so_file": "prebuilt/glm52_mla_split_kv.so",
-      "sha256": "67f7622bef53857463167a148b5c0b09f6f246f2609bcc1846856ea5f7a04bc3",
+      "sha256": "4f74274d4c5ee007d8260e525224395282edc10d13ed3788e885e294b6afaeed",
       "size_bytes": 593296,
       "flashmla_git_commit": "a168813371a5f0652d8148fc8d23eddc921927df",
       "splits_per_m": {
@@ -35,7 +35,8 @@
           "geomean": "0.91"
         }
       },
-      "note": "pybind init symbol is PyInit_<name>, so the .so is BUILT under the name it is imported as (MLA_EXT_NAME); renaming the file would break it"
+      "note": "pybind init symbol is PyInit_<name>, so the .so is BUILT under the name it is imported as (MLA_EXT_NAME); renaming the file would break it",
+      "built_from": "src/ in this directory; see BUILD.md"
     }
   ]
 }
