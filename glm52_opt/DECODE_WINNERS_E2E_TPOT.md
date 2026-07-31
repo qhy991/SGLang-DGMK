@@ -41,7 +41,7 @@ Profile：`SGLANG_GLM52_OPT_PROFILE=combined_winners`。
 | 统计 | 看 **median**（3 次中位）；脚本也会打 mean/stdev/p10/p90 |
 | 对比 | `opt0`（`SGLANG_GLM52_OPT=0`）vs `winners`（上表算子） |
 
-> 作者侧偶尔会用 `N_RUNS=100` 压噪声；**伙伴复现不需要**，默认 **3 次**即可。
+> 作者侧本轮正式 A/B：**BS=128 用 N=100**，**BS=256 用 N=30**。伙伴复现默认 **3 次**即可。
 
 ### 重要：local_M vs global BS
 
@@ -121,10 +121,15 @@ cat $ROOT/bench_results/decode_tpot_n*_s32768_*/TPOT_SUMMARY.md
 2. 每个 global BS：flush + 预热 S=32k cache，再跑 **N** 次 decode（默认 3）
 3. 写出 `decode_{opt0|winners}_bs{128|256}.jsonl` 与 `TPOT_SUMMARY.md`
 
-### 可选：更严统计（作者侧）
+### 可选：作者侧更严统计
 
 ```bash
-N_RUNS=100 GLOBAL_BS_LIST="128 256" \
+# BS=128：N=100
+N_RUNS=100 GLOBAL_BS_LIST="128" LABELS="opt0 winners" \
+  bash glm52_opt/scripts/run_decode_tpot_n100_ab.sh
+
+# BS=256：只需 N=30
+N_RUNS=30 GLOBAL_BS_LIST="256" LABELS="opt0 winners" \
   bash glm52_opt/scripts/run_decode_tpot_n100_ab.sh
 ```
 
@@ -188,6 +193,6 @@ bash $ROOT/run_glm52_dgmk.sh
 2. 8 卡空闲，模型与 venv 就绪
 3. `N_RUNS=3 GLOBAL_BS_LIST="128" bash glm52_opt/scripts/run_decode_tpot_n100_ab.sh`
 4. 打开 `TPOT_SUMMARY.md`，对比 **BS=128 median**（opt0 vs winners）
-5. （可选）再跑 `GLOBAL_BS_LIST="256"` 或 `N_RUNS=100` 做更严确认
+5. （可选）作者口径：`GLOBAL_BS_LIST="256" N_RUNS=30`
 
 问题可对照本文件 §2 场景表与 §5 HIT 列表。
