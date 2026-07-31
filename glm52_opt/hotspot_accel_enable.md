@@ -6,7 +6,7 @@ Default **off**. Local graph wins registered on branch
 > **E2E decode TPOT（OPT0 vs winners）**：见
 > [`DECODE_WINNERS_E2E_TPOT.md`](DECODE_WINNERS_E2E_TPOT.md)
 > （分支 `docs/glm52-decode-winners-e2e-tpot`：只用有 e2e 收益的算子；
-> global BS=128/256，N=100，median ITL）。
+> global BS=128（可选 256），**N=3** 复现，看 median ITL）。
 
 ## Fixed-N/K decode GEMMs (`e2e_candidates`)
 

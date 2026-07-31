@@ -3,8 +3,9 @@
 #   Include: FlashMLA P1+c2 + o_proj + index_q_upproj fixed_nk + MoE M-tile align
 #   Exclude: fused_qkv_a (e2e historically flat/noisy), dsa_prefill, r2a, q_b/index_k/score
 #
-# Workload: S=32k KV, global BS ∈ {128,256} (local_M=16/32, DP=8), N=100 decode runs
-#           each (label × BS); report mean/median/p10/p90 vs OPT0.
+# Workload: S=32k KV, global BS ∈ {128,256} (local_M=16/32, DP=8).
+# Partner repro default: N=3 decode runs per (label × BS); set N_RUNS=100 for
+# tighter stats. Report mean/median/p10/p90 vs OPT0.
 set -euo pipefail
 
 # ROOT = workspace containing venv_wwxq/, run_glm52_dgmk.sh, bench_results/
@@ -21,8 +22,8 @@ PORT=${PORT:-30002}
 DP=${DP:-8}
 S=${S:-32768}
 OUT_LEN=${OUT_LEN:-48}
-N_RUNS=${N_RUNS:-100}
-GLOBAL_BS_LIST=${GLOBAL_BS_LIST:-"128 256"}
+N_RUNS=${N_RUNS:-3}
+GLOBAL_BS_LIST=${GLOBAL_BS_LIST:-"128"}
 LABELS=${LABELS:-"opt0 winners"}
 MEM_FRACTION_STATIC=${MEM_FRACTION_STATIC:-0.83}
 # Need 32 for global BS=256 (local_M=32).

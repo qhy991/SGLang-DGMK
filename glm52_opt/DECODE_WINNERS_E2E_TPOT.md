@@ -28,18 +28,20 @@ Profile：`SGLANG_GLM52_OPT_PROFILE=combined_winners`。
 
 ---
 
-## 2. 测试场景（当前正在跑 / 已跑口径）
+## 2. 测试场景（伙伴复现口径）
 
 | 项 | 值 |
 |---|---|
 | KV / input_len | **S = 32768** |
 | 并行 | TP8 / DP8 / EP8，`--enable-dp-attention` |
-| Global batch size | **128**（local_M=16）和 **256**（local_M=32） |
+| Global batch size | 推荐先 **128**（local_M=16）；可选再跑 **256**（local_M=32） |
 | `cuda-graph-max-bs` | **32**（才能覆盖 local_M=32 → global 256） |
 | output_len | 48 |
-| 重复次数 | 每个 `(label × global_BS)` **N=100** |
-| 统计 | mean / median / stdev / p10 / p90 / min / max |
+| 重复次数 | 每个 `(label × global_BS)` **N=3**（复现收益够用） |
+| 统计 | 看 **median**（3 次中位）；脚本也会打 mean/stdev/p10/p90 |
 | 对比 | `opt0`（`SGLANG_GLM52_OPT=0`）vs `winners`（上表算子） |
+
+> 作者侧偶尔会用 `N_RUNS=100` 压噪声；**伙伴复现不需要**，默认 **3 次**即可。
 
 ### 重要：local_M vs global BS
 
@@ -48,17 +50,17 @@ Profile：`SGLANG_GLM52_OPT_PROFILE=combined_winners`。
 | 16 | 8 | **128** |
 | 32 | 8 | **256** |
 
-历史 nsys 单次 e2e 大多是 **global BS=128**；N=100 脚本才系统覆盖 128 与 256。
+历史 nsys 单次 e2e 大多是 **global BS=128**。
 
-### 已有参考结果（勿与 N=100 混用）
+### 已有参考结果（口径不同勿直接对齐）
 
 同一仓库工作区、decode-only、global BS=128、N=2（含 fused_qkv 的旧 winners 合集）中位 ITL 约：
 
 - OPT0 ≈ **40.44 ms** → winners ≈ **38.61 ms**（约 **1.047×**）
 
-N=100、去掉 fused_qkv 的正式结果以跑完后的 `TPOT_SUMMARY.md` 为准。工作区示例目录：
+去掉 fused_qkv 后的结果以你本地 `TPOT_SUMMARY.md` 为准。工作区示例：
 
-`wwxq/bench_results/decode_tpot_n100_s32768_*`
+`wwxq/bench_results/decode_tpot_n*_s32768_*`
 
 ---
 
@@ -94,40 +96,35 @@ cd $WWXQ/SGLang-DGMK
 git fetch origin
 git checkout docs/glm52-decode-winners-e2e-tpot
 
-# 2) 环境
+# 2) 环境（伙伴复现：N=3）
 export ROOT=$WWXQ                    # 含 venv / bench_results / run_glm52_dgmk.sh
 export PYTHONPATH=$PWD/python${PYTHONPATH:+:$PYTHONPATH}
 export PATH=$ROOT/venv_wwxq/bin:$PATH
 export MODEL=/path/to/GLM-5.2-FP8
 export PORT=30002
-export N_RUNS=100                    # 可先改成 5 做冒烟
-export GLOBAL_BS_LIST="128"          # 或 "128 256"
+export N_RUNS=3
+export GLOBAL_BS_LIST="128"          # 可选再加 256："128 256"
 export LABELS="opt0 winners"
 export SGLANG_CUDA_GRAPH_MAX_BS=32
 export MEM_FRACTION_STATIC=0.83
 
-# 3) 跑（后台）
-mkdir -p $ROOT/bench_results
-nohup env RUN_ID=decode_tpot_n${N_RUNS}_s32768_$(date -u +%Y%m%dT%H%M%SZ) \
-  bash glm52_opt/scripts/run_decode_tpot_n100_ab.sh \
-  > $ROOT/bench_results/nohup_tpot.log 2>&1 &
+# 3) 跑
+bash glm52_opt/scripts/run_decode_tpot_n100_ab.sh
 
-# 4) 看进度
-tail -f $ROOT/bench_results/decode_tpot_n*_s32768_*/run.log
-# 结束后：
+# 4) 看结果
 cat $ROOT/bench_results/decode_tpot_n*_s32768_*/TPOT_SUMMARY.md
 ```
 
 脚本会：
 
 1. 每个 label 起一次 serve（`cuda_graph_max_bs=32`）
-2. 每个 global BS：flush + 预热 S=32k cache，再跑 **N** 次 decode
+2. 每个 global BS：flush + 预热 S=32k cache，再跑 **N** 次 decode（默认 3）
 3. 写出 `decode_{opt0|winners}_bs{128|256}.jsonl` 与 `TPOT_SUMMARY.md`
 
-### 冒烟（5 分钟级）
+### 可选：更严统计（作者侧）
 
 ```bash
-N_RUNS=3 GLOBAL_BS_LIST="128" LABELS="opt0 winners" \
+N_RUNS=100 GLOBAL_BS_LIST="128 256" \
   bash glm52_opt/scripts/run_decode_tpot_n100_ab.sh
 ```
 
@@ -189,8 +186,8 @@ bash $ROOT/run_glm52_dgmk.sh
 
 1. `git checkout docs/glm52-decode-winners-e2e-tpot`
 2. 8 卡空闲，模型与 venv 就绪
-3. `N_RUNS=100 GLOBAL_BS_LIST="128 256" bash glm52_opt/scripts/run_decode_tpot_n100_ab.sh`
-4. 等 `TPOT_SUMMARY.md`；先看 **BS=128 median**
-5. 若只要和作者对齐当前优先级：先 `GLOBAL_BS_LIST="128"` 跑满 winners vs 已有 OPT0
+3. `N_RUNS=3 GLOBAL_BS_LIST="128" bash glm52_opt/scripts/run_decode_tpot_n100_ab.sh`
+4. 打开 `TPOT_SUMMARY.md`，对比 **BS=128 median**（opt0 vs winners）
+5. （可选）再跑 `GLOBAL_BS_LIST="256"` 或 `N_RUNS=100` 做更严确认
 
 问题可对照本文件 §2 场景表与 §5 HIT 列表。
