@@ -85,11 +85,30 @@ _DECODE: dict[str, KernelSpec] = {
     "moe_down_proj": KernelSpec(
         "moe_down_proj", "decode", "best/moe_down_proj_decode_hbm40", "moe_masked"
     ),
+    # Split-KV FlashMLA (B300). Stock sm100::fwd::head64::sparse_attn_fwd_kernel
+    # launches <<<s_q, 384>>> -- one CTA per query token (FlashMLA
+    # phase1.cuh:669) -- so at decode it occupies 16 of 148 SMs at M=16 and
+    # measures the SAME latency at M=16 and M=32. This candidate splits the topk
+    # list across CTAs; the tcgen05 inner loop is byte-identical to upstream.
+    # Measured on the kernel-harness gate, idle B300, cold-L2 protocol:
+    #   best-splitkv-0730 (this)          M16 1.94-2.06x  M32 1.65-1.74x
+    #   best-hechenxi-0720 (flashinfer)   M16 0.96x       M32 0.87x  <- regressed
+    # It falls back to the stock call for every shape it cannot serve (non-bf16
+    # or paged KV, h_q != 64, d_qk != 576, topk not a whole multiple of
+    # splits*64), so switching the ref can only change which kernel runs.
     "dsa_decode_attn": KernelSpec(
-        "dsa_decode_attn",
-        "decode",
-        "best-hechenxi-0720/dsa_decode_attn",
-        "dsa",
+        op="dsa_decode_attn",
+        phase="decode",
+        archive_ref="best-splitkv-0730/dsa_decode_attn",
+        kind="dsa",
+        # Gate on the two shapes this is tuned and measured for. Without an
+        # m_values gate the candidate is consulted at EVERY M and merely falls
+        # back; narrowing it keeps every other shape on the untouched stock path.
+        m_values=(16, 32),
+        topk=2048,
+        q_heads=64,
+        qk_dim=576,
+        v_dim=512,
     ),
     # Fusion path (wk_weights_proj) already matches hechenxi intent; kept for docs.
     "index_weights_proj": KernelSpec(
