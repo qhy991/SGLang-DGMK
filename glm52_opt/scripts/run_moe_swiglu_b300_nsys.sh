@@ -26,9 +26,11 @@ OUT=$ROOT/bench_results/$RUN_ID
 ENV_FILE=${SGLANG_GLM52_ENV_FILE:-$ROOT/cache/sglang/glm52_opt.env}
 HIT_FILE=$ROOT/cache/sglang/glm52_opt_hits.json
 TRIGGER=$ROOT/cache/sglang/nsys_trigger_$RUN_ID
+TRIGGER_RUNNER=$REPO/glm52_opt/scripts/run_one_batch_fixedkv_nsys.py
 PROVIDER=$REPO/python/sglang/srt/layers/glm52_opt/hotspot_candidates/flashmla_accel_bundle_provider.py
 REP_BASE=$OUT/swiglu
 NSYS_PID_FILE=$OUT/nsys_pid.txt
+SERVER_PID_FILE=$OUT/server_pid.txt
 ENV_BACKUP=$OUT/original_glm52_opt.env
 ENV_ABSENT_MARKER=$OUT/original_glm52_opt.env.absent
 
@@ -36,7 +38,7 @@ if [[ "$GLOBAL_BS" -ne $((DP * 16)) ]]; then
   echo "[ERR] audited trace requires global BS=$((DP * 16)); got $GLOBAL_BS" >&2
   exit 2
 fi
-for path in "$PY" "$NSYS" "$SERVER_LAUNCHER" "$PROVIDER"; do
+for path in "$PY" "$NSYS" "$SERVER_LAUNCHER" "$TRIGGER_RUNNER" "$PROVIDER"; do
   [[ -e "$path" ]] || { echo "[ERR] missing $path" >&2; exit 2; }
 done
 
@@ -65,6 +67,34 @@ cleanup_ours() {
       done
       if kill -0 "$pid" 2>/dev/null; then
         kill -KILL -- "-$pid" 2>/dev/null || true
+      fi
+    fi
+  fi
+
+  # Nsight may put the instrumented server in a child session instead of the
+  # nsys process group.  Reap only the service that this runner recorded on its
+  # already-exclusive test port; never use a broad sglang/process-name kill.
+  local server_pid=""
+  if [[ -f "$SERVER_PID_FILE" ]]; then
+    server_pid=$(cat "$SERVER_PID_FILE")
+  else
+    server_pid=$(ss -ltnp 2>/dev/null |
+      sed -n "s/.*:${PORT} .*pid=\\([0-9][0-9]*\\).*/\\1/p" | head -1)
+  fi
+  if [[ -n "$server_pid" && -r "/proc/$server_pid/cmdline" ]]; then
+    local cmdline pgid
+    cmdline=$(tr '\0' ' ' < "/proc/$server_pid/cmdline")
+    if [[ "$cmdline" == *sglang* && "$cmdline" == *"--port $PORT"* ]]; then
+      pgid=$(ps -o pgid= -p "$server_pid" | tr -d ' ')
+      if [[ -n "$pgid" ]]; then
+        kill -TERM -- "-$pgid" 2>/dev/null || true
+        for _ in $(seq 1 20); do
+          kill -0 "$server_pid" 2>/dev/null || break
+          sleep 1
+        done
+        if kill -0 "$server_pid" 2>/dev/null; then
+          kill -KILL -- "-$pgid" 2>/dev/null || true
+        fi
       fi
     fi
   fi
@@ -174,6 +204,10 @@ for i in $(seq 1 180); do
   gates=$(grep -c "nsys gate armed" "$OUT/nsys_launch.log" 2>/dev/null || true)
   echo "$(date +%H:%M:%S) ready_wait=$i code=$code gates=$gates"
   if [[ "$code" == 200 ]]; then
+    server_pid=$(ss -ltnp 2>/dev/null |
+      sed -n "s/.*:${PORT} .*pid=\\([0-9][0-9]*\\).*/\\1/p" | head -1)
+    [[ -n "$server_pid" ]] || { echo "[ERR] cannot resolve test server PID" >&2; exit 2; }
+    echo "$server_pid" > "$SERVER_PID_FILE"
     ready=1
     break
   fi
@@ -200,12 +234,11 @@ if [[ "$selection_count" -ne 8 ]]; then
 fi
 echo "[VALID] candidate selected on all 8 ranks"
 
-echo 1 > "$TRIGGER"
-sleep 1
 rate=$($PY -c "print(($S - 64) / float($S))")
 result=$OUT/decode_swiglu_bs${GLOBAL_BS}.jsonl
 : > "$result"
-"$PY" "$ROOT/run_one_batch_server_longtimeout.py" \
+GLM52_NSYS_TRIGGER="$TRIGGER" GLM52_NSYS_ARM_DELAY=2 \
+"$PY" "$TRIGGER_RUNNER" \
   --model None \
   --base-url "http://127.0.0.1:$PORT" \
   --local-tokenizer-path "$MODEL" \
