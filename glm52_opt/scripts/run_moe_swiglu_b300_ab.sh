@@ -38,6 +38,8 @@ MODEL=${MODEL:-/mnt/b300-shared/models/GLM-5.2-FP8}
 RUN_ID=${RUN_ID:-moe_swiglu_b300_n${N_RUNS}_s${S}_$(date -u +%Y%m%dT%H%M%SZ)}
 OUT=$ROOT/bench_results/$RUN_ID
 SERVER_LAUNCHER=${SERVER_LAUNCHER:-$REPO/glm52_opt/scripts/run_b300_repo_server.sh}
+ENV_BACKUP=$OUT/original_glm52_opt.env
+ENV_ABSENT_MARKER=$OUT/original_glm52_opt.env.absent
 
 PROVIDER=$REPO/python/sglang/srt/layers/glm52_opt/hotspot_candidates/flashmla_accel_bundle_provider.py
 
@@ -50,6 +52,15 @@ export SGLANG_CUDA_GRAPH_MAX_BS
 export SGLANG_MAX_RUNNING_REQUESTS=${SGLANG_MAX_RUNNING_REQUESTS:-$((8 * SGLANG_CUDA_GRAPH_MAX_BS))}
 
 mkdir -p "$OUT" "$ROOT/cache/sglang" "$ROOT/logs" /tmp
+if ss -ltn 2>/dev/null | grep -q ":${PORT} "; then
+  echo "[ERR] test port $PORT is already in use" >&2
+  exit 2
+fi
+if [[ -f "$ENV_FILE" ]]; then
+  cp -f "$ENV_FILE" "$ENV_BACKUP"
+else
+  : > "$ENV_ABSENT_MARKER"
+fi
 LOG=$OUT/run.log
 exec > >(tee -a "$LOG") 2>&1
 
@@ -81,6 +92,7 @@ cat > "$OUT/README.md" <<MD
 
 ## Protocol
 - Per label: one serve (cuda_graph_max_bs=${SGLANG_CUDA_GRAPH_MAX_BS})
+- DeepEP mode: ${SGLANG_DEEPEP_MODE:-auto}; chunked prefill=${CHUNKED_PREFILL_SIZE}; max prefill tokens=${MAX_PREFILL_TOKENS}; mem fraction=${MEM_FRACTION_STATIC}
 - Each run flushes stale radix state, builds the same deterministic random-id prefixes, then times an S=${S} request with only the last 64 prompt tokens uncached
 - Required measured cache-hit rate: at least 0.99 (target: 0.998); multi-batch mode is disabled so TTFT/ITL remain valid
 - Runs per label and global BS: **${N_RUNS}**
@@ -136,10 +148,19 @@ cleanup_ours() {
   sleep 4
 }
 
+restore_env() {
+  if [[ -f "$ENV_BACKUP" ]]; then
+    cp -f "$ENV_BACKUP" "$ENV_FILE"
+  elif [[ -f "$ENV_ABSENT_MARKER" ]]; then
+    rm -f "$ENV_FILE"
+  fi
+}
+
 cleanup_on_exit() {
   local rc=$?
   trap - EXIT INT TERM
   cleanup_ours
+  restore_env
   exit "$rc"
 }
 

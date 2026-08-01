@@ -28,6 +28,8 @@ ENV_FILE=${SGLANG_GLM52_ENV_FILE:-$ROOT/cache/sglang/glm52_opt.env}
 HIT_FILE=$ROOT/cache/sglang/glm52_opt_hits.json
 TRIGGER=$ROOT/cache/sglang/nsys_trigger_$RUN_ID
 TRIGGER_RUNNER=$REPO/glm52_opt/scripts/run_one_batch_fixedkv_nsys.py
+REGION_ANALYZER=$REPO/glm52_opt/scripts/analyze_moe_swiglu_containing_region.py
+BOTTLENECK_ANALYZER=$REPO/glm52_opt/scripts/analyze_decode_trace_bottlenecks.py
 PROVIDER=$REPO/python/sglang/srt/layers/glm52_opt/hotspot_candidates/flashmla_accel_bundle_provider.py
 REP_BASE=$OUT/$SWIGLU_MODE
 NSYS_PID_FILE=$OUT/nsys_pid.txt
@@ -43,7 +45,8 @@ if [[ "$SWIGLU_MODE" != candidate && "$SWIGLU_MODE" != stock ]]; then
   echo "[ERR] SWIGLU_MODE must be candidate or stock; got $SWIGLU_MODE" >&2
   exit 2
 fi
-for path in "$PY" "$NSYS" "$SERVER_LAUNCHER" "$TRIGGER_RUNNER" "$PROVIDER"; do
+for path in "$PY" "$NSYS" "$SERVER_LAUNCHER" "$TRIGGER_RUNNER" \
+  "$REGION_ANALYZER" "$BOTTLENECK_ANALYZER" "$PROVIDER"; do
   [[ -e "$path" ]] || { echo "[ERR] missing $path" >&2; exit 2; }
 done
 
@@ -322,10 +325,51 @@ wait "$nsys_pid" || true
 "$NSYS" stats --force-export=true --report cuda_gpu_kern_sum --format csv \
   -o "$OUT/${SWIGLU_MODE}_kern" "$REP_BASE.nsys-rep"
 [[ -s "$REP_BASE.sqlite" ]] || { echo "[ERR] nsys sqlite export missing" >&2; exit 2; }
+"$PY" "$REGION_ANALYZER" "$REP_BASE.sqlite" \
+  --output-json "$OUT/containing_region.json" > /dev/null
+"$PY" "$BOTTLENECK_ANALYZER" "$REP_BASE.sqlite" \
+  --output-json "$OUT/decode_bottlenecks.json" > /dev/null
+"$PY" - "$OUT/containing_region.json" "$SWIGLU_MODE" \
+  "$OUT/grid_validation.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+analysis_path = Path(sys.argv[1])
+mode = sys.argv[2]
+validation_path = Path(sys.argv[3])
+trace = json.loads(analysis_path.read_text())["traces"][0]
+counts = trace["grid_counts"]["activation_grid"]
+observed = {int(grid) for grid, count in counts.items() if int(count) > 0}
+allowed = {8, 16, 32, 64, 96, 128, 256} if mode == "candidate" else {65536}
+if mode == "candidate":
+    # This fixed global-BS128 request must exercise steady M16 (grid=128).
+    # A partial/tail bucket is scheduler-dependent, so accept any audited M*topk
+    # grid in addition to 128, but never the physical-slab fallback grid.
+    grid_contract_ok = 128 in observed and observed <= allowed and 65536 not in observed
+else:
+    grid_contract_ok = observed == allowed
+valid = grid_contract_ok and sum(int(value) for value in counts.values()) == trace["triples"]
+record = {
+    "mode": mode,
+    "allowed_activation_grids": sorted(allowed),
+    "required_activation_grids": [128] if mode == "candidate" else [65536],
+    "observed_activation_grid_counts": counts,
+    "triples": trace["triples"],
+    "physical_slab_fallback_launches": int(counts.get("65536", 0)),
+    "valid": valid,
+}
+validation_path.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
+if not valid:
+    raise SystemExit(f"invalid activation grid audit: {record}")
+print("[VALID] activation grid audit", json.dumps(record, sort_keys=True))
+PY
 if [[ -f "$HIT_FILE" ]]; then
   cp -f "$HIT_FILE" "$OUT/hits_${SWIGLU_MODE}.json"
 fi
-sha256sum "$REP_BASE.nsys-rep" "$REP_BASE.sqlite" "$result" > "$OUT/SHA256SUMS"
+sha256sum "$REP_BASE.nsys-rep" "$REP_BASE.sqlite" "$result" \
+  "$OUT/containing_region.json" "$OUT/decode_bottlenecks.json" \
+  "$OUT/grid_validation.json" > "$OUT/SHA256SUMS"
 echo "[DONE] trace=$REP_BASE.nsys-rep sqlite=$REP_BASE.sqlite"
 
 cleanup_ours
