@@ -76,9 +76,10 @@ class PrefillDelayer:
         self.enable_dp_attention = server_args.enable_dp_attention
         dp_size_dim = dp_size if self.enable_dp_attention else 1
 
-        # Mirror scheduler_dp_attn_mixin's NCCL all-gather path: when the
-        # env flag is on (or overlap scheduling is disabled), ride the NCCL
-        # device group on `device` instead of gloo on CPU.
+        # Mirror scheduler_dp_attn_mixin's all-gather path. The synchronous
+        # scheduler already coordinates DP ranks on the device group, while
+        # the overlap scheduler normally uses the CPU group so this small
+        # negotiation can progress independently from CUDA work.
         use_nccl = (
             server_args.disable_overlap_schedule
             or envs.SGLANG_NCCL_ALL_GATHER_IN_OVERLAP_SCHEDULER_SYNC_BATCH.get()
@@ -106,10 +107,6 @@ class PrefillDelayer:
 
         self._curr_state: Optional[_State] = None
         self.skip_first_delayer = True
-
-        assert (
-            not server_args.disable_overlap_schedule
-        ), "To use PrefillDelayer, disable_overlap_schedule must be False."
 
     def _negotiate_should_allow_prefill(
         self,

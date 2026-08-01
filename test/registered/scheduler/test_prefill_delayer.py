@@ -128,6 +128,41 @@ def _run_negotiate_test(rank, test_cases):
                 ), f"Case {case.name} rank {rank}: wait_seconds not surfaced"
 
 
+def _run_sync_schedule_negotiate_test(rank):
+    """Exercise the device-group path used when overlap scheduling is disabled."""
+    world_size = torch.distributed.get_world_size()
+    device_group = torch.distributed.new_group(backend="gloo")
+    delayer = PrefillDelayer(
+        dp_size=world_size,
+        attn_tp_size=1,
+        cpu_group=None,
+        device_group=device_group,
+        device="cpu",
+        server_args=SimpleNamespace(
+            enable_dp_attention=True,
+            disaggregation_mode="null",
+            disable_overlap_schedule=True,
+            prefill_delayer_queue_min_ratio=None,
+            prefill_delayer_max_delay_ms=None,
+        ),
+        max_delay_passes=2,
+        token_usage_low_watermark=0.8,
+    )
+
+    first = delayer._negotiate_should_allow_prefill(
+        local_prefillable=rank == 0,
+        token_usage=0.9,
+    )
+    assert (first.output_allow, first.output_reason) == (False, "delay")
+
+    second = delayer._negotiate_should_allow_prefill(
+        local_prefillable=rank == 0,
+        token_usage=0.9,
+    )
+    assert (second.output_allow, second.output_reason) == (True, "wait_timeout")
+    assert second.wait_forward_passes == 1
+
+
 _NEGOTIATE_TEST_CASES = [
     NegotiateTestCase(
         name="all_prefillable",
@@ -381,6 +416,13 @@ class TestPrefillDelayerNegotiate(unittest.TestCase):
             world_size=4,
             backend="gloo",
             test_cases=_NEGOTIATE_TEST_CASES,
+        )
+
+    def test_negotiate_with_sync_schedule(self):
+        run_distributed_test(
+            _run_sync_schedule_negotiate_test,
+            world_size=4,
+            backend="gloo",
         )
 
 
