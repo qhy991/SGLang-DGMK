@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Capture one fixed-KV B300 decode trace with the valid-CTA SwiGLU candidate.
+# Capture one fixed-KV B300 decode trace with stock or valid-CTA SwiGLU.
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -21,14 +21,15 @@ MEM_FRACTION_STATIC=${MEM_FRACTION_STATIC:-0.83}
 SGLANG_CUDA_GRAPH_MAX_BS=${SGLANG_CUDA_GRAPH_MAX_BS:-16}
 CHUNKED_PREFILL_SIZE=${CHUNKED_PREFILL_SIZE:-2048}
 MAX_PREFILL_TOKENS=${MAX_PREFILL_TOKENS:-16384}
-RUN_ID=${RUN_ID:-nsys_moe_swiglu_valid_cta_$(date -u +%Y%m%dT%H%M%SZ)}
+SWIGLU_MODE=${SWIGLU_MODE:-candidate}
+RUN_ID=${RUN_ID:-nsys_moe_swiglu_${SWIGLU_MODE}_$(date -u +%Y%m%dT%H%M%SZ)}
 OUT=$ROOT/bench_results/$RUN_ID
 ENV_FILE=${SGLANG_GLM52_ENV_FILE:-$ROOT/cache/sglang/glm52_opt.env}
 HIT_FILE=$ROOT/cache/sglang/glm52_opt_hits.json
 TRIGGER=$ROOT/cache/sglang/nsys_trigger_$RUN_ID
 TRIGGER_RUNNER=$REPO/glm52_opt/scripts/run_one_batch_fixedkv_nsys.py
 PROVIDER=$REPO/python/sglang/srt/layers/glm52_opt/hotspot_candidates/flashmla_accel_bundle_provider.py
-REP_BASE=$OUT/swiglu
+REP_BASE=$OUT/$SWIGLU_MODE
 NSYS_PID_FILE=$OUT/nsys_pid.txt
 SERVER_PID_FILE=$OUT/server_pid.txt
 ENV_BACKUP=$OUT/original_glm52_opt.env
@@ -36,6 +37,10 @@ ENV_ABSENT_MARKER=$OUT/original_glm52_opt.env.absent
 
 if [[ "$GLOBAL_BS" -ne $((DP * 16)) ]]; then
   echo "[ERR] audited trace requires global BS=$((DP * 16)); got $GLOBAL_BS" >&2
+  exit 2
+fi
+if [[ "$SWIGLU_MODE" != candidate && "$SWIGLU_MODE" != stock ]]; then
+  echo "[ERR] SWIGLU_MODE must be candidate or stock; got $SWIGLU_MODE" >&2
   exit 2
 fi
 for path in "$PY" "$NSYS" "$SERVER_LAUNCHER" "$TRIGGER_RUNNER" "$PROVIDER"; do
@@ -127,6 +132,11 @@ if [[ "$apps" -ne 0 || "$max_used" -ge 2048 ]]; then
   exit 2
 fi
 
+ops=flashmla_sparse_decode,o_proj,index_q_upproj,moe_gate_proj,moe_up_proj,moe_down_proj
+if [[ "$SWIGLU_MODE" == candidate ]]; then
+  ops=$ops,moe_swiglu_quant
+fi
+
 cat > "$ENV_FILE" <<EOF
 SGLANG_GLM52_ALLOW_ABI_ADAPTER=0
 SGLANG_GLM52_INFINI_KERNEL_NVTX=1
@@ -141,32 +151,38 @@ SGLANG_OPT_GLM52_FUSED_QKV_A_PREFILL_DIRECT_NK=0
 SGLANG_OPT_GLM52_FUSED_QKV_A_DECODE_DIRECT_NK=0
 SGLANG_GLM52_OPT=1
 SGLANG_GLM52_OPT_PROFILE=combined_winners
-SGLANG_GLM52_OPT_OPS=flashmla_sparse_decode,o_proj,index_q_upproj,moe_gate_proj,moe_up_proj,moe_down_proj,moe_swiglu_quant
+SGLANG_GLM52_OPT_OPS=$ops
 SGLANG_GLM52_OPT_M_BUCKETS=dsa_decode_attn:16|32,o_proj:16|32,index_q_upproj:16|32
 SGLANG_GLM52_HOTSPOT_MODULE=$PROVIDER
 SGLANG_GLM52_FLASHMLA_GRAPH_ONLY=1
 SGLANG_GLM52_O_PROJ_GRAPH_ONLY=1
 SGLANG_GLM52_INDEX_Q_UPPROJ_GRAPH_ONLY=1
 SGLANG_GLM52_INFINI_MOE_ALIGN=1
-SGLANG_OPT_MOE_SWIGLU_QUANT_VARIANT=cuda_valid_cta
 GLM52_FLASHMLA_USE_PREBUILT=1
 GLM52_FLASHMLA_DECODE_STACK=p1_c2
 EOF
+if [[ "$SWIGLU_MODE" == candidate ]]; then
+  echo "SGLANG_OPT_MOE_SWIGLU_QUANT_VARIANT=cuda_valid_cta" >> "$ENV_FILE"
+fi
 
 {
-  echo "# B300 valid-CTA SwiGLU containing-region nsys"
+  echo "# B300 $SWIGLU_MODE SwiGLU containing-region nsys"
   echo
   echo "- commit: $(git -C "$REPO" rev-parse HEAD)"
   echo "- workload: S=$S, global BS=$GLOBAL_BS, local M=16, output=$OUT_LEN"
   echo "- cache target: only the last 64 prompt tokens uncached (99.8% hit)"
   echo "- topology: TP8/DP8/EP8; CUDA graph max BS=$SGLANG_CUDA_GRAPH_MAX_BS"
   echo "- capture: cuda,nvtx; cudaProfilerApi; ${NSYS_DURATION}s"
-  echo "- candidate: cuda_valid_cta; stock body; grid=128 rather than 65,536"
+  if [[ "$SWIGLU_MODE" == candidate ]]; then
+    echo "- SwiGLU: cuda_valid_cta; stock body; grid=128 rather than 65,536"
+  else
+    echo "- SwiGLU: stock production denominator; grid=65,536"
+  fi
 } > "$OUT/README.md"
 git -C "$REPO" status --short > "$OUT/git_status.txt"
 git -C "$REPO" log -1 --oneline > "$OUT/git_rev.txt"
 "$NSYS" --version > "$OUT/nsys_version.txt"
-cp -f "$ENV_FILE" "$OUT/candidate.env"
+cp -f "$ENV_FILE" "$OUT/${SWIGLU_MODE}.env"
 rm -f "$HIT_FILE" "$TRIGGER" "$REP_BASE.nsys-rep" "$REP_BASE.sqlite"
 
 echo "[INFO] launching nsys at $(date -Is); OUT=$OUT"
@@ -228,14 +244,20 @@ done
 
 selection_pattern="GLM-5.2 masked SwiGLU quant selected: variant=cuda_valid_cta capability=(10, 3) shape=(32, 8192, 4096)"
 selection_count=$(grep -c "$selection_pattern" "$OUT/nsys_launch.log" || true)
-if [[ "$selection_count" -ne 8 ]]; then
-  echo "[ERR] expected candidate selection on 8 ranks, observed $selection_count" >&2
+if [[ "$SWIGLU_MODE" == candidate ]]; then
+  if [[ "$selection_count" -ne 8 ]]; then
+    echo "[ERR] expected candidate selection on 8 ranks, observed $selection_count" >&2
+    exit 2
+  fi
+  echo "[VALID] candidate selected on all 8 ranks"
+elif [[ "$selection_count" -ne 0 ]]; then
+  echo "[ERR] stock denominator selected candidate on $selection_count ranks" >&2
   exit 2
 fi
-echo "[VALID] candidate selected on all 8 ranks"
+echo "[VALID] SwiGLU mode=$SWIGLU_MODE selection_count=$selection_count"
 
 rate=$($PY -c "print(($S - 64) / float($S))")
-result=$OUT/decode_swiglu_bs${GLOBAL_BS}.jsonl
+result=$OUT/decode_${SWIGLU_MODE}_bs${GLOBAL_BS}.jsonl
 : > "$result"
 GLM52_NSYS_TRIGGER="$TRIGGER" GLM52_NSYS_ARM_DELAY=2 \
 "$PY" "$TRIGGER_RUNNER" \
@@ -248,7 +270,7 @@ GLM52_NSYS_TRIGGER="$TRIGGER" GLM52_NSYS_ARM_DELAY=2 \
   --cache-hit-rate "$rate" \
   --dataset-name random-ids \
   --result-filename "$result" \
-  --run-name swiglu_nsys_decode_bs${GLOBAL_BS} \
+  --run-name ${SWIGLU_MODE}_nsys_decode_bs${GLOBAL_BS} \
   --show-report \
   --no-append-to-github-summary \
   --skip-warmup
@@ -285,10 +307,10 @@ wait "$nsys_pid" || true
   exit 2
 }
 "$NSYS" stats --force-export=true --report cuda_gpu_kern_sum --format csv \
-  -o "$OUT/swiglu_kern" "$REP_BASE.nsys-rep"
+  -o "$OUT/${SWIGLU_MODE}_kern" "$REP_BASE.nsys-rep"
 [[ -s "$REP_BASE.sqlite" ]] || { echo "[ERR] nsys sqlite export missing" >&2; exit 2; }
 if [[ -f "$HIT_FILE" ]]; then
-  cp -f "$HIT_FILE" "$OUT/hits_swiglu.json"
+  cp -f "$HIT_FILE" "$OUT/hits_${SWIGLU_MODE}.json"
 fi
 sha256sum "$REP_BASE.nsys-rep" "$REP_BASE.sqlite" "$result" > "$OUT/SHA256SUMS"
 echo "[DONE] trace=$REP_BASE.nsys-rep sqlite=$REP_BASE.sqlite"
