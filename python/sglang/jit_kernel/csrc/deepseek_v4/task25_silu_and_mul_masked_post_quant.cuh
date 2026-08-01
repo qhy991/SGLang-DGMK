@@ -52,8 +52,10 @@ struct Task25SiluAndMulMaskedPostQuantKernel {
     RuntimeCheck(G4.unwrap() == 4, "Task-25 candidate requires four packed scale words");
     RuntimeCheck(topk == 8, "Task-25 candidate requires topk=8");
     RuntimeCheck(
-        num_real_tokens == 16 || num_real_tokens == 32,
-        "Task-25 candidate requires a host-known M16 or M32 bucket");
+        num_real_tokens == 1 || num_real_tokens == 2 || num_real_tokens == 4 ||
+            num_real_tokens == 8 || num_real_tokens == 12 || num_real_tokens == 16 ||
+            num_real_tokens == 32,
+        "Task-25 candidate requires an audited M1/M2/M4/M8/M12/M16/M32 bucket");
 
     const auto params = SiluMulQuantVarlenParams{
         .input = static_cast<const bf16_t*>(input.data_ptr()),

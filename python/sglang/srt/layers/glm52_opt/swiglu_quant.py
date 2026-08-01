@@ -32,6 +32,7 @@ _GATE_UP: Final = 4096
 _HIDDEN: Final = 2048
 _GROUP_SIZE: Final = 128
 _TOPK: Final = 8
+_DECODE_BUCKETS: Final = (1, 2, 4, 8, 12, 16, 32)
 _PACKED_GROUPS: Final = _HIDDEN // (_GROUP_SIZE * 4)
 _TRITON_BUILD: Final = "3.6.0"
 
@@ -233,8 +234,11 @@ def _eligibility_error(
         return "Task-25 candidate does not support swizzled gate/up storage"
     if gemm1_alpha is not None or gemm1_clamp_limit is not None:
         return "Task-25 candidate supports ordinary SiLU, not gemm1_alpha mode"
-    if num_real_tokens not in (16, 32):
-        return "Task-25 candidate requires a host-known M16 or M32 decode bucket"
+    if num_real_tokens not in _DECODE_BUCKETS:
+        return (
+            "Task-25 candidate requires a host-known audited decode bucket in "
+            f"{_DECODE_BUCKETS}"
+        )
     return None
 
 

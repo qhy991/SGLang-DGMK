@@ -245,11 +245,24 @@ done
 selection_pattern="GLM-5.2 masked SwiGLU quant selected: variant=cuda_valid_cta capability=(10, 3) shape=(32, 8192, 4096)"
 selection_count=$(grep -c "$selection_pattern" "$OUT/nsys_launch.log" || true)
 if [[ "$SWIGLU_MODE" == candidate ]]; then
-  if [[ "$selection_count" -ne 8 ]]; then
-    echo "[ERR] expected candidate selection on 8 ranks, observed $selection_count" >&2
+  graph_buckets=(1 2 4 8 12 16)
+  if [[ "$SGLANG_CUDA_GRAPH_MAX_BS" -ge 32 ]]; then
+    graph_buckets+=(32)
+  fi
+  for bucket in "${graph_buckets[@]}"; do
+    bucket_count=$(grep -F -c \
+      "shape=(32, 8192, 4096) stride=(33554432, 4096, 1) routed_m=$bucket topk=8" \
+      "$OUT/nsys_launch.log" || true)
+    if [[ "$bucket_count" -ne "$DP" ]]; then
+      echo "[ERR] expected M=$bucket candidate selection on $DP ranks, observed $bucket_count" >&2
+      exit 2
+    fi
+  done
+  expected_selection_count=$((DP * ${#graph_buckets[@]}))
+  if [[ "$selection_count" -ne "$expected_selection_count" ]]; then
+    echo "[ERR] expected $expected_selection_count total selections, observed $selection_count" >&2
     exit 2
   fi
-  echo "[VALID] candidate selected on all 8 ranks"
 elif [[ "$selection_count" -ne 0 ]]; then
   echo "[ERR] stock denominator selected candidate on $selection_count ranks" >&2
   exit 2

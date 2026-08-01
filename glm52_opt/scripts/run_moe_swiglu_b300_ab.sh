@@ -272,16 +272,22 @@ run_label() {
   launch_serve "$label"
   wait_ready "$label"
   if [[ "$label" == "swiglu" ]]; then
-    local selection_count
-    selection_count=$(grep -c \
-      "GLM-5.2 masked SwiGLU quant selected: variant=cuda_valid_cta capability=(10, 3) shape=(32, 8192, 4096)" \
-      "$OUT/serve_${label}.log" || true)
-    if [[ "$selection_count" -ne "$DP" ]]; then
-      echo "[ERR] expected the B300/T=8192 SwiGLU candidate on all $DP ranks; observed $selection_count selections"
-      tail -120 "$OUT/serve_${label}.log"
-      return 1
+    local graph_buckets=(1 2 4 8 12 16)
+    if [[ "$SGLANG_CUDA_GRAPH_MAX_BS" -ge 32 ]]; then
+      graph_buckets+=(32)
     fi
-    echo "[VALID] B300/T=8192 SwiGLU candidate selected on all $selection_count ranks"
+    local bucket selection_count
+    for bucket in "${graph_buckets[@]}"; do
+      selection_count=$(grep -F -c \
+        "shape=(32, 8192, 4096) stride=(33554432, 4096, 1) routed_m=$bucket topk=8" \
+        "$OUT/serve_${label}.log" || true)
+      if [[ "$selection_count" -ne "$DP" ]]; then
+        echo "[ERR] expected B300/T=8192 M=$bucket selection on all $DP ranks; observed $selection_count"
+        tail -160 "$OUT/serve_${label}.log"
+        return 1
+      fi
+      echo "[VALID] B300/T=8192 SwiGLU candidate selected for M=$bucket on all $selection_count ranks"
+    done
   fi
 
   for gbs in $GLOBAL_BS_LIST; do

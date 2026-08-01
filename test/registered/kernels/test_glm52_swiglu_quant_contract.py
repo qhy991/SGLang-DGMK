@@ -51,16 +51,20 @@ def _eligibility_kwargs(**overrides):
 
 
 class SwigluQuantContractTest(unittest.TestCase):
-    def test_exact_b300_contract_is_eligible(self):
+    def test_exact_b300_graph_buckets_are_eligible(self):
         capability, gateup, masked_m = _fake_inputs()
         with patch.object(
             swiglu_quant, "_device_capability", return_value=capability
         ):
-            self.assertIsNone(
-                swiglu_quant._eligibility_error(
-                    gateup, masked_m, **_eligibility_kwargs()
-                )
-            )
+            for decode_m in (1, 2, 4, 8, 12, 16, 32):
+                with self.subTest(decode_m=decode_m):
+                    self.assertIsNone(
+                        swiglu_quant._eligibility_error(
+                            gateup,
+                            masked_m,
+                            **_eligibility_kwargs(num_real_tokens=decode_m),
+                        )
+                    )
 
     def test_hardware_slab_pair_is_not_interchangeable(self):
         capability, gateup, masked_m = _fake_inputs(
@@ -100,7 +104,7 @@ class SwigluQuantContractTest(unittest.TestCase):
                 masked_m,
                 **_eligibility_kwargs(num_real_tokens=64),
             )
-        self.assertIn("M16 or M32", error)
+        self.assertIn("audited decode bucket", error)
 
 
 if __name__ == "__main__":
