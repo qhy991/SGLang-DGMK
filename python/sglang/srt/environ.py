@@ -1038,6 +1038,11 @@ class Envs:
     SGLANG_GLM52_MANIFEST = EnvStr("")
     SGLANG_GLM52_DEEPGEMM_VARIANT = EnvStr("")
     SGLANG_GLM52_ENV_FILE = EnvStr("")
+    # infini fused residual-add + RMSNorm + per-token-group UE8M0 FP8 quant (sm100).
+    # Supplies the NVIDIA backend for the fused-norm-quant seam communicator.py
+    # already dispatches for ROCm gfx95. Default off.
+    SGLANG_INFINI_FUSED_NORM_QUANT = EnvBool(False)
+    SGLANG_INFINI_FUSED_NQ_ROWS = EnvInt(2)
 
     # Plugin system
     SGLANG_PLATFORM = EnvStr("")

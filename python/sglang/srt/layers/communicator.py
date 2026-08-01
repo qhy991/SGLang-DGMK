@@ -110,6 +110,28 @@ elif _is_npu:
     from sglang.srt.hardware_backend.npu.cmo import prepare_weight_cache
 
 
+from sglang.srt.layers.glm52_opt import (
+    infini_fused_norm_quant as _infini_fused_norm_quant,
+)
+
+
+def _infini_fused_nq_ready(hidden_states, residual, weight, quant_format) -> bool:
+    """Admission check for the infini sm100 fused norm+quant branch.
+
+    Kept next to the branch it guards so the two cannot drift. Fails closed:
+    any unrecognised shape, dtype, arch or the DSA case returns False and the
+    caller keeps the stock two-kernel path.
+    """
+    if quant_format != "fp8":
+        return False
+    return _infini_fused_norm_quant.is_available(
+        hidden_states,
+        residual,
+        weight,
+        needs_unquantized_bf16=get_attn_tp_context().is_dsa,
+    )
+
+
 def _fused_rmsnorm_fp8_per_token_quant(
     hidden_states: torch.Tensor,
     weight: torch.Tensor,
@@ -642,6 +664,29 @@ class LayerCommunicator:
                             None,
                             None,
                             residual,
+                        )
+                    elif _infini_fused_nq_ready(
+                        hidden_states,
+                        residual,
+                        self.input_layernorm.weight,
+                        quant_format,
+                    ):
+                        # infini (NVIDIA sm100) fused residual-add + RMSNorm +
+                        # per-token-group UE8M0 FP8 quant — the sm100 sibling of
+                        # the gfx95 branch below. Bit-exact with the stock pair.
+                        # Default off; _infini_fused_nq_ready() fails closed on
+                        # anything unrecognised, including the DSA case (that
+                        # kernel does not emit the unquantized bf16 the indexer
+                        # needs, so DSA models keep the stock path).
+                        if post_residual_addition is not None:
+                            residual = residual + post_residual_addition
+                        hidden_states, residual = (
+                            _infini_fused_norm_quant.infini_fused_add_rmsnorm_quant(
+                                hidden_states,
+                                residual,
+                                self.input_layernorm.weight,
+                                self.input_layernorm.variance_epsilon,
+                            )
                         )
                     elif _use_aiter and _is_gfx95_supported and (quant_format == "fp8"):
                         # aiter (ROCm gfx95) fused RMSNorm + FP8 group quant
