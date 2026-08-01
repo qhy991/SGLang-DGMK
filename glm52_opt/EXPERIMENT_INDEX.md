@@ -92,6 +92,7 @@
 | `e2e_gpu_kern_categories.md` | 短 decode nsys：NCCL~31% + DeepEP~21% ≈ 通信 ~52% |
 | `default_path_one_batch_SUMMARY.md` | 默认路径 one_batch 冒烟数字 |
 | `llm_flops_e2e_alignment.md` / candidates 相关 | 官方形状对齐与 e2e_candidates 范围 |
+| `MOE_SWIGLU_B300_VALID_CTA.md` | B300 T=8192 物理 slab / M=16 有效 CTA 优化；Harness eager+graph 与 32K 固定 KV、global BS=128 端到端验证 |
 | `history/e2e_candidates_20260723/INDEX.md` | 叶级候选正/负结果归档 |
 
 ### 3.2 一句话结论汇总

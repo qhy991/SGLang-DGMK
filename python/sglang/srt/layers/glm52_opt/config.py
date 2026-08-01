@@ -31,6 +31,7 @@ _GLM52_ENV_KEYS = frozenset(
         "SGLANG_GLM52_NSYS_SECONDS",
         "SGLANG_GLM52_INFINI_KERNEL_NVTX",
         "SGLANG_GLM52_HOTSPOT_MODULE",
+        "SGLANG_OPT_MOE_SWIGLU_QUANT_VARIANT",
         # 1 (default): pick the MoE masked-grouped M tile from expected_m.
         # 0: always use DeepGEMM stock 128. See infini_moe_align.py.
         "SGLANG_GLM52_INFINI_MOE_ALIGN",
@@ -190,6 +191,7 @@ _COMBINED_OP_ALIASES = {
     **_HOTSPOT_OP_ALIASES,
 }
 _COMBINED_HOTSPOT_OPS = frozenset({"dsa_decode_attn", "dsa_prefill_attn"})
+_COMBINED_ALLOWED_OPS = _COMBINED_DEFAULT_OPS | frozenset({"moe_swiglu_quant"})
 
 
 def opt_ops_allowlist() -> frozenset[str] | None:
@@ -251,7 +253,7 @@ def combined_winner_ops() -> frozenset[str]:
     if allow is None:
         return _COMBINED_DEFAULT_OPS
     normalized = {_COMBINED_OP_ALIASES.get(op, op) for op in allow}
-    unknown = normalized - _COMBINED_DEFAULT_OPS
+    unknown = normalized - _COMBINED_ALLOWED_OPS
     if unknown:
         raise ValueError(
             "Unsupported SGLANG_GLM52_OPT_OPS for combined_winners: "
@@ -392,6 +394,40 @@ def allow_abi_adapter() -> bool:
     """
     ensure_glm52_env()
     return _truthy("SGLANG_GLM52_ALLOW_ABI_ADAPTER")
+
+
+@lru_cache(maxsize=1)
+def swiglu_quant_variant() -> str | None:
+    """Return the explicitly armed B300 masked-MoE activation variant.
+
+    The candidate is absent from every default op set. It is reachable only
+    when an allowed campaign profile, the exact op allowlist, and the bounded
+    implementation are all selected before worker startup.
+    """
+
+    from sglang.srt.environ import envs
+
+    ensure_glm52_env()
+    if not is_enabled() or profile_name() not in {
+        "b300_moe_swiglu_quant",
+        "combined_winners",
+    }:
+        return None
+    allow = opt_ops_allowlist()
+    if allow is None or "moe_swiglu_quant" not in allow:
+        return None
+    variant = envs.SGLANG_OPT_MOE_SWIGLU_QUANT_VARIANT.get()
+    if variant is None:
+        return None
+    variant = variant.strip()
+    if not variant:
+        return None
+    if variant != "cuda_valid_cta":
+        raise ValueError(
+            "SGLANG_OPT_MOE_SWIGLU_QUANT_VARIANT must be "
+            f"'cuda_valid_cta', got {variant!r}"
+        )
+    return variant
 
 
 def deepgemm_variant() -> str | None:

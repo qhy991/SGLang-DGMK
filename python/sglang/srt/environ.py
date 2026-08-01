@@ -975,6 +975,10 @@ class Envs:
     SGLANG_OPT_FP8_WO_A_GEMM = EnvBool(True)
     SGLANG_OPT_BF16_FP32_GEMM_ALGO = EnvStr("cublas")
     SGLANG_OPT_USE_JIT_EP_ACTIVATION = EnvBool(True)
+    # Exact-ABI GLM-5.2 masked MoE SwiGLU+FP8-quant experiment. Unset keeps
+    # the production JIT activation unchanged; currently only
+    # "cuda_valid_cta" is accepted by the GLM-5.2 campaign dispatcher.
+    SGLANG_OPT_MOE_SWIGLU_QUANT_VARIANT = EnvStr(None)
     SGLANG_OPT_FUSE_WQA_WKV = EnvBool(True)
     SGLANG_OPT_SWIGLU_CLAMP_FUSION = EnvBool(True)
 
