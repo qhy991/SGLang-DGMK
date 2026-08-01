@@ -751,9 +751,9 @@ def try_dispatch_moe_masked(
 ) -> bool:
     """Run one exact MoE grouped-masked replacement or leave stock selected.
 
-    The MoE W2 hotspot spec is ``graph_only``: outside CUDA graph capture the
-    call returns ``False`` immediately so eager decode uses stock and avoids the
-    API-v1 Python provider tax on the containing region.
+    Graph-only MoE specs return ``False`` immediately outside CUDA graph
+    capture, so eager/tail decode uses the untouched stock path. This applies
+    both to hotspot providers and to the combined-winner M-tile policy.
     """
     if not config.is_enabled():
         return False
@@ -777,11 +777,11 @@ def try_dispatch_moe_masked(
     if phase == "prefill" and op == "moe_gate_proj":
         _record_miss("moe_prefill_skip", op, phase, m=forward_m)
         return False
+    if _graph_only_declines(spec):
+        return False
     x_fp8, x_scale = lhs
     w_fp8, w_scale = rhs
     if spec.implementation == "hotspot_plugin":
-        if _graph_only_declines(spec):
-            return False
         if not _moe_hotspot_abi_matches(
             spec,
             lhs,

@@ -37,6 +37,7 @@ _GLM52_ENV_KEYS = frozenset(
         "SGLANG_GLM52_INFINI_MOE_ALIGN",
         # 1 (default for graph_only specs): only select under graph capture.
         # 0: allow eager selection for diagnostic leaf timing.
+        "SGLANG_GLM52_W13_GRAPH_ONLY",
         "SGLANG_GLM52_W2_GRAPH_ONLY",
         "SGLANG_GLM52_O_PROJ_GRAPH_ONLY",
         "SGLANG_GLM52_FUSED_QKV_A_GRAPH_ONLY",
@@ -298,6 +299,8 @@ def emit_infini_kernel_nvtx() -> bool:
 # Per-op override for ``KernelSpec.graph_only``.  Each entry names the env var
 # that can disable graph-only selection for diagnostic eager timing.
 _GRAPH_ONLY_ENV_BY_OP = {
+    "moe_gate_proj": "SGLANG_GLM52_W13_GRAPH_ONLY",
+    "moe_up_proj": "SGLANG_GLM52_W13_GRAPH_ONLY",
     "moe_down_proj": "SGLANG_GLM52_W2_GRAPH_ONLY",
     "o_proj": "SGLANG_GLM52_O_PROJ_GRAPH_ONLY",
     "fused_qkv_a_proj": "SGLANG_GLM52_FUSED_QKV_A_GRAPH_ONLY",
@@ -310,11 +313,10 @@ _GRAPH_ONLY_ENV_BY_OP = {
 def graph_only_enabled(op_name: str) -> bool:
     """Whether a ``graph_only`` spec keeps its capture-only restriction.
 
-    MoE W2 decode is production-graph-bound.  The Python API-v1 provider path
-    adds a fixed host tax per call that makes the eager containing-region gate
-    unreachable even for a zero-cost guard, so a ``graph_only`` spec defaults
-    to selecting under CUDA-graph capture only.  Set the op's env to ``0`` to
-    force eager selection for a diagnostic leaf measurement.
+    MoE W13/W2 decode and several fixed-N/K replacements are
+    production-graph-bound. A ``graph_only`` spec defaults to selecting under
+    CUDA-graph capture only. Set the op's env to ``0`` to force eager selection
+    for a diagnostic leaf measurement.
     """
     ensure_glm52_env()
     key = _GRAPH_ONLY_ENV_BY_OP.get(op_name)

@@ -30,6 +30,22 @@ and 0.75x at expected_m=65. The bucket table below encodes exactly the measured
 crossovers and falls back to stock (128) above them. Do not widen a bucket without
 re-measuring -- the failure mode is a silent throughput loss at high concurrency.
 
+EXACT B300 PHYSICAL-SLAB GRAPH GATE (2026-08-02)
+The serving-native follow-up preserves the traced ``[E=32,T=8192]`` expert slab
+instead of compacting it to the live rows.  With alignment 16, every production
+capture bucket M={1,2,4,8,12,16} passed graph correctness on an unseen seed and
+the adjacent paired p10 >= 1.03 gate:
+
+    W13 graph: geomean 1.0808x, minimum p10 1.0549x
+    W2  graph: geomean 1.0947x, minimum p10 1.0316x
+
+Execution mode matters.  At M16 the same scoped alignment measured W13 eager
+p10=1.0263x (below gate) and W2 eager p10=0.9474x (regression), while graph p10
+was 1.0619x and 1.0753x respectively.  Therefore ``combined_winners`` marks both
+MoE specs graph-only: capture bakes the selected kernel into every audited graph;
+eager/tail calls decline before this context manager and execute stock alignment
+128.  Do not remove that execution-mode boundary based on graph results alone.
+
 PREFILL MUST NEVER SEE A SMALL ALIGNMENT. The knob is process-global and also governs
 contiguous-layout m-grouped GEMMs:
 
@@ -46,10 +62,13 @@ COST AND CUDA GRAPHS
 no GPU work, so it is graph-capture safe: during capture it selects which kernel gets
 baked into the graph, and during replay the host code does not run at all. The
 get+set+restore triple costs ~2 us of host time (a set+restore pair measured at
-1.7 us), which for graph-captured decode is paid only at capture. In eager decode it
-is paid per call; set ``SGLANG_GLM52_INFINI_MOE_ALIGN=0`` to disable if that matters.
+1.7 us), which for graph-captured decode is paid only at capture. The production
+``combined_winners`` profile declines eager W13/W2 by default; the per-op
+``SGLANG_GLM52_W13_GRAPH_ONLY=0`` and ``SGLANG_GLM52_W2_GRAPH_ONLY=0`` switches
+exist only for diagnostic eager replay. ``SGLANG_GLM52_INFINI_MOE_ALIGN=0``
+disables the policy entirely.
 
-Full analysis: wwxq/MOE_DECODE_BLOCKM_WIN.md
+Exact raw results: ``bench_results/b300_moe_alignment16_graph_bucket_sweep_20260802w``
 Earlier independent B200 result (same 16 < 32 < 64 < 128 ordering, shelved because the
 selector is process-global): glm52_opt/history/e2e_candidates_20260723/07_moe_w2_decode_bm16
 """

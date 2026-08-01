@@ -5,7 +5,7 @@ Aligned with Kernel-Harness ``llm_flops_style/_common.py`` DECODE/PREFILL_SWAPS.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Callable, Literal, Optional
 
 from sglang.srt.layers.glm52_opt.config import (
@@ -320,7 +320,12 @@ def _combined_winners_decode_table() -> dict[str, KernelSpec]:
             table[gemm_op] = _E2E_DECODE[gemm_op]
     for moe_op in ("moe_gate_proj", "moe_up_proj", "moe_down_proj"):
         if moe_op in ops and moe_op in _DECODE:
-            table[moe_op] = _DECODE[moe_op]
+            # Exact B300 physical-slab gates separate graph replay from eager:
+            # alignment=16 wins both W13 and W2 under CUDA graph, while the
+            # same choice misses/regresses their eager conservative gates.
+            # Keep the historical specs unchanged for other profiles and make
+            # only the production combined profile capture-only.
+            table[moe_op] = replace(_DECODE[moe_op], graph_only=True)
     return table
 
 

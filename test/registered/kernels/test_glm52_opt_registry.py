@@ -18,6 +18,7 @@ from sglang.srt.layers.deep_gemm_wrapper.entrypoint import (
 )
 from sglang.srt.layers.glm52_opt.context import (
     get_forward_m,
+    op_context,
     prefix_to_op_name,
     set_forward_mode,
 )
@@ -25,6 +26,7 @@ from sglang.srt.layers.glm52_opt.dispatch import (
     _fixed_nk_forward_mode_matches,
     _nvtx_range,
     _profiler_range_name,
+    try_dispatch_moe_masked,
 )
 from sglang.srt.layers.glm52_opt.fp8_gemm import run_fp8_gemm
 from sglang.srt.layers.glm52_opt.phase import infer_glm52_phase
@@ -341,6 +343,75 @@ def test_moe_swap_preserves_production_overlap_contract():
     assert not _glm52_moe_dispatch_compatible(object(), None, None)
     assert not _glm52_moe_dispatch_compatible(None, (1, 128), None)
     assert not _glm52_moe_dispatch_compatible(None, None, (1, 128))
+
+
+def test_combined_winner_moe_alignment_declines_eager():
+    old_profile = os.environ.get("SGLANG_GLM52_OPT_PROFILE")
+    old_ops = os.environ.get("SGLANG_GLM52_OPT_OPS")
+    old_opt = os.environ.get("SGLANG_GLM52_OPT")
+    try:
+        os.environ["SGLANG_GLM52_OPT"] = "1"
+        os.environ["SGLANG_GLM52_OPT_PROFILE"] = "combined_winners"
+        os.environ["SGLANG_GLM52_OPT_OPS"] = "moe_gate_proj,moe_down_proj"
+
+        for op in ("moe_gate_proj", "moe_down_proj"):
+            spec = lookup(op, "decode", m=16)
+            assert spec is not None and spec.graph_only is True
+
+        set_forward_mode(ForwardMode.DECODE, 16)
+        lhs = (
+            torch.empty((32, 8192, 8)),
+            torch.empty((32, 8192, 1), dtype=torch.int32),
+        )
+        rhs = (
+            torch.empty((32, 4, 8)),
+            torch.empty((32, 4, 1), dtype=torch.int32),
+        )
+        out = torch.empty((32, 8192, 4), dtype=torch.bfloat16)
+        masked_m = torch.ones((32,), dtype=torch.int32)
+        with (
+            op_context("moe_gate_proj"),
+            patch(
+                "sglang.srt.layers.glm52_opt.dispatch."
+                "_is_cuda_graph_capturing",
+                return_value=False,
+            ),
+            patch(
+                "sglang.srt.layers.glm52_opt.dispatch.run_moe_masked"
+            ) as replacement,
+        ):
+            assert not try_dispatch_moe_masked(
+                lhs, rhs, out, masked_m, expected_m=4
+            )
+        replacement.assert_not_called()
+
+        with (
+            op_context("moe_gate_proj"),
+            patch(
+                "sglang.srt.layers.glm52_opt.dispatch."
+                "_is_cuda_graph_capturing",
+                return_value=True,
+            ),
+            patch(
+                "sglang.srt.layers.glm52_opt.dispatch.run_moe_masked"
+            ) as replacement,
+            patch("sglang.srt.layers.glm52_opt.dispatch._record_hit"),
+        ):
+            assert try_dispatch_moe_masked(
+                lhs, rhs, out, masked_m, expected_m=4
+            )
+        replacement.assert_called_once()
+    finally:
+        set_forward_mode(None)
+        for key, old_value in (
+            ("SGLANG_GLM52_OPT_PROFILE", old_profile),
+            ("SGLANG_GLM52_OPT_OPS", old_ops),
+            ("SGLANG_GLM52_OPT", old_opt),
+        ):
+            if old_value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = old_value
 
 
 def test_contiguous_grouped_gemm_forwards_opt_in_controls_only_when_requested():
