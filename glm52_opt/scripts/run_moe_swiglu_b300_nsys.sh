@@ -141,6 +141,7 @@ rm -f "$HIT_FILE" "$TRIGGER" "$REP_BASE.nsys-rep" "$REP_BASE.sqlite"
 
 echo "[INFO] launching nsys at $(date -Is); OUT=$OUT"
 setsid env \
+  PATH="$VENV/bin:$PATH" \
   ROOT="$ROOT" REPO="$REPO" MODEL="$MODEL" PORT="$PORT" \
   SGLANG_GLM52_ENV_FILE="$ENV_FILE" \
   SGLANG_CUDA_GRAPH_MAX_BS="$SGLANG_CUDA_GRAPH_MAX_BS" \
