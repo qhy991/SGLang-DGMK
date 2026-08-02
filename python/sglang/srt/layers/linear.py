@@ -55,6 +55,111 @@ _disable_hip_linear_quant = _is_hip and get_bool_env_var(
 
 logger = logging.getLogger(__name__)
 
+# Experimental Qwen3-4B PP4 BF16 shape dispatch.  Keep this default-off: the
+# selected cuBLASLt tactic is only validated for this exact SM100 QKV shape.
+_enable_pp4_bf16_gemm_shape_dispatch = get_bool_env_var(
+    "SGLANG_ENABLE_PP4_BF16_GEMM_SHAPE_DISPATCH"
+)
+_pp4_bf16_cublaslt_runner = None
+_pp4_bf16_cublaslt_workspace = None
+
+
+def _get_pp4_bf16_cublaslt_state(device: torch.device):
+    global _pp4_bf16_cublaslt_runner, _pp4_bf16_cublaslt_workspace
+    if _pp4_bf16_cublaslt_runner is None:
+        from flashinfer.gemm.gemm_base import (
+            DEFAULT_WORKSPACE_SIZE,
+            _get_cache_buf,
+            get_mm_bf16_cublaslt_module,
+        )
+
+        _pp4_bf16_cublaslt_runner = (
+            get_mm_bf16_cublaslt_module().cublaslt_bf16_gemm_runner()
+        )
+        _pp4_bf16_cublaslt_workspace = _get_cache_buf(
+            "sglang_pp4_bf16_cublaslt_workspace",
+            DEFAULT_WORKSPACE_SIZE,
+            device,
+        )
+    return _pp4_bf16_cublaslt_runner, _pp4_bf16_cublaslt_workspace
+
+
+class _PP4Bf16ShapeDispatchLinearMethod:
+    """Default-off exact-shape wrapper around the unquantized linear method."""
+
+    _QKV_WEIGHT_SHAPE = (6144, 2560)
+    _QKV_M = 4096
+    _QKV_CUBLASLT_TACTIC = 4
+
+    def __init__(self, fallback):
+        self.fallback = fallback
+
+    def __getattr__(self, name):
+        return getattr(self.fallback, name)
+
+    @classmethod
+    def _matches(cls, layer, x, bias) -> bool:
+        return (
+            bias is None
+            and x.is_cuda
+            and x.dtype == torch.bfloat16
+            and layer.weight.dtype == torch.bfloat16
+            and tuple(layer.weight.shape) == cls._QKV_WEIGHT_SHAPE
+            and x.numel() // x.shape[-1] == cls._QKV_M
+            and x.shape[-1] == cls._QKV_WEIGHT_SHAPE[1]
+        )
+
+    def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
+        self.fallback.process_weights_after_loading(layer)
+        if (
+            layer.weight.is_cuda
+            and layer.weight.dtype == torch.bfloat16
+            and tuple(layer.weight.shape) == self._QKV_WEIGHT_SHAPE
+        ):
+            # Resolve the extension, workspace, and cuBLASLt algorithm cache
+            # before CUDA-graph capture.  One warmup is enough because every
+            # Qwen3-4B layer has the same exact QKV shape.
+            runner, workspace = _get_pp4_bf16_cublaslt_state(layer.weight.device)
+            if not runner._algo_cache:
+                x = torch.empty(
+                    (self._QKV_M, self._QKV_WEIGHT_SHAPE[1]),
+                    dtype=torch.bfloat16,
+                    device=layer.weight.device,
+                )
+                out = torch.empty(
+                    (self._QKV_M, self._QKV_WEIGHT_SHAPE[0]),
+                    dtype=torch.bfloat16,
+                    device=layer.weight.device,
+                )
+                runner(
+                    inputs=[x, layer.weight.t(), None, False, out, workspace],
+                    tactic=self._QKV_CUBLASLT_TACTIC,
+                )
+                torch.cuda.current_stream(layer.weight.device).synchronize()
+
+    def apply(
+        self,
+        layer: torch.nn.Module,
+        x: torch.Tensor,
+        bias: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        if not self._matches(layer, x, bias):
+            return self.fallback.apply(layer, x, bias)
+
+        x_shape = x.shape
+        x_2d = x.view(-1, x_shape[-1])
+        out = torch.empty(
+            (x_2d.shape[0], layer.weight.shape[0]),
+            dtype=torch.bfloat16,
+            device=x.device,
+        )
+        runner, workspace = _get_pp4_bf16_cublaslt_state(x.device)
+        runner(
+            inputs=[x_2d, layer.weight.t(), None, False, out, workspace],
+            tactic=self._QKV_CUBLASLT_TACTIC,
+        )
+        return out.view(*x_shape[:-1], layer.weight.shape[0])
+
 WEIGHT_LOADER_V2_SUPPORTED = [
     "CompressedTensorsLinearMethod",
     "AWQLinearMethod",
@@ -177,6 +282,10 @@ class LinearBase(torch.nn.Module):
             from sglang.srt.layers.quantization.unquant import UnquantizedLinearMethod
 
             self.quant_method: Optional[QuantizeMethodBase] = UnquantizedLinearMethod()
+            if _enable_pp4_bf16_gemm_shape_dispatch:
+                self.quant_method = _PP4Bf16ShapeDispatchLinearMethod(
+                    self.quant_method
+                )
         else:
             self.quant_method = quant_config.get_quant_method(self, prefix=prefix)
 
