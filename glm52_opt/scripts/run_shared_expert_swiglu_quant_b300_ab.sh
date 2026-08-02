@@ -27,6 +27,7 @@ OUT_LEN=${OUT_LEN:-240}
 N_RUNS=${N_RUNS:-3}
 GLOBAL_BS_LIST=${GLOBAL_BS_LIST:-"128"}
 LABELS=${LABELS:-"shared_stock shared_fused"}
+VALIDATE_ONLY=${VALIDATE_ONLY:-0}
 MEM_FRACTION_STATIC=${MEM_FRACTION_STATIC:-0.78}
 # Need 32 for global BS=256 (local_M=32).
 SGLANG_CUDA_GRAPH_MAX_BS=${SGLANG_CUDA_GRAPH_MAX_BS:-16}
@@ -66,7 +67,7 @@ LOG=$OUT/run.log
 exec > >(tee -a "$LOG") 2>&1
 
 echo "======== decode TPOT N=$N_RUNS S=$S BS={$GLOBAL_BS_LIST} $(date -Is) ========"
-echo "OUT=$OUT LABELS=$LABELS graph_max_bs=$SGLANG_CUDA_GRAPH_MAX_BS mem=$MEM_FRACTION_STATIC"
+echo "OUT=$OUT LABELS=$LABELS validate_only=$VALIDATE_ONLY graph_max_bs=$SGLANG_CUDA_GRAPH_MAX_BS mem=$MEM_FRACTION_STATIC"
 cd "$REPO"
 git rev-parse --short HEAD | tee "$OUT/git_rev.txt"
 git branch --show-current | tee -a "$OUT/git_rev.txt"
@@ -399,6 +400,12 @@ run_label() {
     fi
   fi
 
+  if [[ "$VALIDATE_ONLY" == "1" ]]; then
+    echo "[VALID] launch and all-rank selection checks completed for label=$label"
+    cleanup_ours
+    return 0
+  fi
+
   for gbs in $GLOBAL_BS_LIST; do
     local lm=$((gbs / DP))
     echo "---- $label global_bs=$gbs local_M=$lm N=$N_RUNS ----"
@@ -437,9 +444,13 @@ boundary = (
     "shared-expert activation+quant boundary"
     if candidate_label == "shared_fused"
     else (
-        "router padded-ID mask boundary"
-        if candidate_label == "router_fused"
-        else "router padded-ID mask plus DeepEP int64-ID boundary"
+        "post-MoE scaled shared+routed add, input RMSNorm, and packed FP8 quant boundary"
+        if candidate_label == "shared_nq_fused"
+        else (
+            "router padded-ID mask boundary"
+            if candidate_label == "router_fused"
+            else "router padded-ID mask plus DeepEP int64-ID boundary"
+        )
     )
 )
 
@@ -554,6 +565,11 @@ PY
 for label in $LABELS; do
   run_label "$label"
 done
+
+if [[ "$VALIDATE_ONLY" == "1" ]]; then
+  echo "======== VALIDATION ONLY DONE $(date -Is) OUT=$OUT ========"
+  exit 0
+fi
 
 summarize
 echo "======== ALL DONE $(date -Is) OUT=$OUT ========"

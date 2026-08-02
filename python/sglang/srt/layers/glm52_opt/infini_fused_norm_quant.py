@@ -47,6 +47,7 @@ measured independently; the two-input numbers above do not apply to it.
 from __future__ import annotations
 
 import logging
+import math
 import os
 from pathlib import Path
 from typing import Optional, Tuple
@@ -207,6 +208,7 @@ def infini_fused_add_rmsnorm_quant(
 def infini_fused_shared_add_rmsnorm_quant(
     shared: torch.Tensor,
     routed: torch.Tensor,
+    routed_scale: float,
     residual: torch.Tensor,
     weight: torch.Tensor,
     eps: float,
@@ -215,7 +217,7 @@ def infini_fused_shared_add_rmsnorm_quant(
 
     This computes the production order exactly::
 
-        combined = bf16(shared + routed)
+        combined = bf16(shared + routed_scale * routed)
         residual_out = combined + residual
         normed = RMSNorm(residual_out) * weight
         x_fp8, packed_scale = group_quant(normed)
@@ -255,6 +257,7 @@ def infini_fused_shared_add_rmsnorm_quant(
     mod.infini_fused_shared_add_rmsnorm_quant_ue8m0(
         shared,
         routed,
+        routed_scale,
         residual,
         weight,
         normed,
@@ -269,11 +272,14 @@ def infini_fused_shared_add_rmsnorm_quant(
 def is_shared_add_available(
     shared: torch.Tensor,
     routed: torch.Tensor,
+    routed_scale: float,
     residual: Optional[torch.Tensor],
     weight: torch.Tensor,
 ) -> bool:
     """Fail-closed admission for the DSA-capable three-input sibling."""
     if not shared_add_enabled() or residual is None:
+        return False
+    if not isinstance(routed_scale, (int, float)) or not math.isfinite(routed_scale):
         return False
     tensors = (shared, routed, residual)
     if not all(

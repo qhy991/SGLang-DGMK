@@ -135,7 +135,8 @@ __global__ __launch_bounds__(ROWS * THREADS_PER_ROW) void infini_glm52_fused_add
     const int M,
     const int scale_hidden_stride,   // xs.stride(1), in int32 elements
     const float eps,
-    const float weight_bias) {
+    const float weight_bias,
+    const float pre_add_scale) {
   static_assert(!(SMEM_STAGE && HAS_PRE_ADD),
                 "the three-input path deliberately uses the register-staged kernel");
   extern __shared__ __align__(16) char smem_raw[];
@@ -192,11 +193,11 @@ __global__ __launch_bounds__(ROWS * THREADS_PER_ROW) void infini_glm52_fused_add
       for (int j = 0; j < VEC; ++j) {
         float hidden_value = __bfloat162float(hb[j]);
         if constexpr (HAS_PRE_ADD) {
-          // Production materializes shared.add_(routed) in BF16 before the
-          // next residual add. Preserve that observable store/reload round;
-          // reassociating three FP32 values changes residual, norm and FP8 bytes.
-          hidden_value = __bfloat162float(
-              __float2bfloat16(hidden_value + __bfloat162float(pb[j])));
+          // Production materializes shared.add_(routed, alpha=routed_scale) in
+          // BF16 before the next residual add. Preserve both the FMA and that
+          // observable store/reload round; reassociating values changes bytes.
+          hidden_value = __bfloat162float(__float2bfloat16(__fmaf_rn(
+              __bfloat162float(pb[j]), pre_add_scale, hidden_value)));
         }
         const float v = hidden_value + __bfloat162float(rb[j]);
         ob[j] = __float2bfloat16(v);
@@ -330,7 +331,7 @@ void fused_add_rmsnorm_quant_ue8m0(at::Tensor hidden, at::Tensor residual,
         nullptr,                                                                        \
         reinterpret_cast<__nv_fp8_e4m3*>(xq.data_ptr()),                               \
         reinterpret_cast<uint32_t*>(xs.data_ptr()),                                    \
-        M, static_cast<int>(xs.stride(1)), static_cast<float>(eps), 0.0f);             \
+        M, static_cast<int>(xs.stride(1)), static_cast<float>(eps), 0.0f, 1.0f);       \
   } while (0)
   const bool st = (smem_stage != 0);
   switch (rows_per_block * 2 + (st ? 1 : 0)) {
@@ -347,7 +348,7 @@ void fused_add_rmsnorm_quant_ue8m0(at::Tensor hidden, at::Tensor residual,
 }
 
 void fused_shared_add_rmsnorm_quant_ue8m0(
-    at::Tensor shared, at::Tensor routed, at::Tensor residual,
+    at::Tensor shared, at::Tensor routed, double routed_scale, at::Tensor residual,
     at::Tensor weight, at::Tensor y_bf16, at::Tensor xq, at::Tensor xs,
     double eps, int64_t rows_per_block) {
   TORCH_CHECK(shared.is_cuda() && shared.is_contiguous(),
@@ -393,7 +394,8 @@ void fused_shared_add_rmsnorm_quant_ue8m0(
         reinterpret_cast<__nv_bfloat16*>(y_bf16.data_ptr()),                          \
         reinterpret_cast<__nv_fp8_e4m3*>(xq.data_ptr()),                              \
         reinterpret_cast<uint32_t*>(xs.data_ptr()),                                   \
-        M, static_cast<int>(xs.stride(1)), static_cast<float>(eps), 0.0f);             \
+        M, static_cast<int>(xs.stride(1)), static_cast<float>(eps), 0.0f,              \
+        static_cast<float>(routed_scale));                                             \
   } while (0)
   switch (rows_per_block) {
     case 1: LAUNCH_SHARED_ROWS(1); break;

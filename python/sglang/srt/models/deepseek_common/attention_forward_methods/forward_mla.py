@@ -18,7 +18,10 @@ from sglang.srt.layers.attention.dsa.utils import (
     dsa_use_prefill_cp,
     is_graph_dsa_split_op_surface,
 )
-from sglang.srt.layers.communicator import get_attn_tp_context
+from sglang.srt.layers.communicator import (
+    get_attn_tp_context,
+    select_unquantized_bf16_input,
+)
 from sglang.srt.layers.dcp import (
     all_gather_kv_cache_for_mla_extend,
     all_gather_q_for_mla_decode,
@@ -362,9 +365,13 @@ class DeepseekMLAForwardMixin:
                         k_nope = self.kv_a_layernorm(k_nope)
 
             # q_lora needed by indexer
+            indexer_hidden_states = hidden_states
             if self.use_dsa:
                 if q_lora is None:
                     q_lora = q
+                # q_b_proj consumes the prequantized tuple, while the DSA indexer
+                # branches from the same activation and requires exact BF16.
+                indexer_hidden_states = select_unquantized_bf16_input(hidden_states)
 
             # overlap q_b_proj and indexer during decode
             if (
@@ -382,7 +389,7 @@ class DeepseekMLAForwardMixin:
                     )
                 if self.should_run_indexer(prev_topk_indices):
                     topk_indices = self.indexer(
-                        x=hidden_states,
+                        x=indexer_hidden_states,
                         q_lora=q_lora,
                         positions=positions,
                         forward_batch=forward_batch,
@@ -408,7 +415,7 @@ class DeepseekMLAForwardMixin:
                 if q_lora is not None:
                     if self.should_run_indexer(prev_topk_indices):
                         topk_indices = self.indexer(
-                            x=hidden_states,
+                            x=indexer_hidden_states,
                             q_lora=q_lora,
                             positions=positions,
                             forward_batch=forward_batch,

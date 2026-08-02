@@ -18,6 +18,7 @@ S=${S:-32768}
 GLOBAL_BS=${GLOBAL_BS:-128}
 OUT_LEN=${OUT_LEN:-48}
 REPLAY_SAMPLES=${REPLAY_SAMPLES:-40}
+POST_MOE_SHARED_ADD_NORM_QUANT=${POST_MOE_SHARED_ADD_NORM_QUANT:-0}
 RUN_ID=${RUN_ID:-decode_graph_replay_host_b300_$(date -u +%Y%m%dT%H%M%SZ)}
 OUT=$ROOT/bench_results/$RUN_ID
 TRACE_DIR=$OUT/replay_trace
@@ -32,6 +33,10 @@ PROVIDER=$REPO/python/sglang/srt/layers/glm52_opt/hotspot_candidates/flashmla_ac
 
 if [[ "$GLOBAL_BS" -ne 128 || "$S" -ne 32768 ]]; then
   echo "[ERR] audited replay trace requires S=32768 and global BS=128" >&2
+  exit 2
+fi
+if [[ "$POST_MOE_SHARED_ADD_NORM_QUANT" != 0 && "$POST_MOE_SHARED_ADD_NORM_QUANT" != 1 ]]; then
+  echo "[ERR] POST_MOE_SHARED_ADD_NORM_QUANT must be 0 or 1; got $POST_MOE_SHARED_ADD_NORM_QUANT" >&2
   exit 2
 fi
 for path in "$PY" "$SERVER_LAUNCHER" "$TRIGGER_RUNNER" "$ANALYZER" \
@@ -126,6 +131,8 @@ SGLANG_GLM52_O_PROJ_GRAPH_ONLY=1
 SGLANG_GLM52_INDEX_Q_UPPROJ_GRAPH_ONLY=1
 SGLANG_GLM52_INFINI_MOE_ALIGN=1
 SGLANG_OPT_MOE_SWIGLU_QUANT_VARIANT=cuda_valid_cta
+SGLANG_INFINI_FUSED_SHARED_ADD_NORM_QUANT=$POST_MOE_SHARED_ADD_NORM_QUANT
+SGLANG_INFINI_FUSED_SHARED_NQ_ROWS=1
 GLM52_FLASHMLA_USE_PREBUILT=1
 GLM52_FLASHMLA_DECODE_STACK=p1_c2
 SGLANG_DECODE_GRAPH_REPLAY_TRACE_DIR=$TRACE_DIR
@@ -141,6 +148,7 @@ cat > "$OUT/README.md" <<EOF
 - decode: KV=32768/request, global BS=128, local M=16, output=$OUT_LEN
 - prefill allocation: chunked=8192, max prefill tokens=8192, mem fraction=0.78
 - trace: $REPLAY_SAMPLES asynchronous host replay calls/rank, armed after KV warmup
+- post-MoE shared-add+RMSNorm+quant fusion: $POST_MOE_SHARED_ADD_NORM_QUANT
 - clock: time.perf_counter_ns on one host; no CUDA synchronization and no nsys
 - purpose: test whether nsys's every-fourth-replay millisecond tail exists in production
 EOF
@@ -204,6 +212,20 @@ for bucket in 1 2 4 8 12 16; do
     exit 2
   }
 done
+
+post_moe_selection_count=$(grep -F -c \
+  "GLM-5.2 post-MoE shared-add+RMSNorm+quant selected" \
+  "$OUT/server.log" || true)
+if [[ "$POST_MOE_SHARED_ADD_NORM_QUANT" == 1 ]]; then
+  [[ "$post_moe_selection_count" -eq 8 ]] || {
+    echo "[ERR] expected post-MoE fusion on 8 ranks; got $post_moe_selection_count" >&2
+    exit 2
+  }
+elif [[ "$post_moe_selection_count" -ne 0 ]]; then
+  echo "[ERR] post-MoE stock denominator selected fusion on $post_moe_selection_count ranks" >&2
+  exit 2
+fi
+echo "[VALID] post-MoE fusion=$POST_MOE_SHARED_ADD_NORM_QUANT selection_count=$post_moe_selection_count"
 
 rate=$($PY -c "print(($S - 64) / float($S))")
 result=$OUT/decode_candidate_bs${GLOBAL_BS}.jsonl

@@ -1440,14 +1440,19 @@ class DeepseekV2MoE(nn.Module):
                 and forward_batch.forward_mode.is_decode()
                 and 0 < shared_output.shape[0] <= 16
                 and not is_tbo_enabled()
-                and not torch.compiler.is_compiling()
-                and self.experts.should_fuse_routed_scaling_factor_in_topk
             ):
                 # Keep the two BF16 inputs separate only until the decoder proves
                 # that its SCATTERED layer-output seam is identity. The next
                 # input LayerCommunicator either consumes the exact pair with the
                 # three-input megakernel or materializes stock shared.add_(routed).
-                return defer_moe_output_add(shared_output, final_hidden_states)
+                routed_scale = (
+                    1.0
+                    if self.experts.should_fuse_routed_scaling_factor_in_topk
+                    else self.routed_scaling_factor
+                )
+                return defer_moe_output_add(
+                    shared_output, final_hidden_states, routed_scale
+                )
 
             x = shared_output
             # aiter moe call will handle routed_scaling_factor in the function
@@ -2277,7 +2282,11 @@ class DeepseekV2DecoderLayer(nn.Module):
         captured_last_layer_outputs: Optional[List[torch.Tensor]] = None,
         next_full_attention_layer_id: Optional[int] = None,
     ) -> torch.Tensor:
-        hidden_states_orig = hidden_states
+        hidden_states_orig = (
+            hidden_states.shared
+            if has_deferred_moe_output_add(hidden_states)
+            else hidden_states
+        )
         hidden_states, residual = (
             self.layer_communicator.prepare_attn_and_capture_last_layer_outputs(
                 hidden_states,
