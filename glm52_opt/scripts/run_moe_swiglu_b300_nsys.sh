@@ -26,6 +26,7 @@ SHARED_EXPERT_SWIGLU_QUANT=${SHARED_EXPERT_SWIGLU_QUANT:-0}
 ROUTER_PAD_MASK_FUSION=${ROUTER_PAD_MASK_FUSION:-0}
 ROUTER_DEEPEP_IDS_FUSION=${ROUTER_DEEPEP_IDS_FUSION:-0}
 POST_MOE_SHARED_ADD_NORM_QUANT=${POST_MOE_SHARED_ADD_NORM_QUANT:-0}
+QA_NORM_QUANT=${QA_NORM_QUANT:-0}
 RUN_ID=${RUN_ID:-nsys_moe_swiglu_${SWIGLU_MODE}_$(date -u +%Y%m%dT%H%M%SZ)}
 OUT=$ROOT/bench_results/$RUN_ID
 ENV_FILE=${SGLANG_GLM52_ENV_FILE:-$ROOT/cache/sglang/glm52_opt.env}
@@ -63,6 +64,10 @@ if [[ "$ROUTER_DEEPEP_IDS_FUSION" != 0 && "$ROUTER_DEEPEP_IDS_FUSION" != 1 ]]; t
 fi
 if [[ "$POST_MOE_SHARED_ADD_NORM_QUANT" != 0 && "$POST_MOE_SHARED_ADD_NORM_QUANT" != 1 ]]; then
   echo "[ERR] POST_MOE_SHARED_ADD_NORM_QUANT must be 0 or 1; got $POST_MOE_SHARED_ADD_NORM_QUANT" >&2
+  exit 2
+fi
+if [[ "$QA_NORM_QUANT" != 0 && "$QA_NORM_QUANT" != 1 ]]; then
+  echo "[ERR] QA_NORM_QUANT must be 0 or 1; got $QA_NORM_QUANT" >&2
   exit 2
 fi
 for path in "$PY" "$NSYS" "$SERVER_LAUNCHER" "$TRIGGER_RUNNER" \
@@ -185,6 +190,7 @@ SGLANG_GLM52_SHARED_EXPERT_SWIGLU_QUANT=$SHARED_EXPERT_SWIGLU_QUANT
 SGLANG_GLM52_ROUTER_PAD_MASK_FUSION=$ROUTER_PAD_MASK_FUSION
 SGLANG_GLM52_ROUTER_DEEPEP_IDS_FUSION=$ROUTER_DEEPEP_IDS_FUSION
 SGLANG_INFINI_FUSED_SHARED_ADD_NORM_QUANT=$POST_MOE_SHARED_ADD_NORM_QUANT
+SGLANG_INFINI_FUSED_QA_NORM_QUANT=$QA_NORM_QUANT
 SGLANG_INFINI_FUSED_SHARED_NQ_ROWS=1
 GLM52_FLASHMLA_USE_PREBUILT=1
 GLM52_FLASHMLA_DECODE_STACK=p1_c2
@@ -205,6 +211,7 @@ fi
   echo "- router padded-ID mask fusion: $ROUTER_PAD_MASK_FUSION"
   echo "- router DeepEP int64-ID fusion: $ROUTER_DEEPEP_IDS_FUSION"
   echo "- post-MoE shared-add+RMSNorm+quant fusion: $POST_MOE_SHARED_ADD_NORM_QUANT"
+  echo "- q_a RMSNorm+packed-quant producer fusion: $QA_NORM_QUANT"
   if [[ "$SWIGLU_MODE" == candidate ]]; then
     echo "- SwiGLU: cuda_valid_cta; stock body; grid=128 rather than 65,536"
   else
@@ -358,6 +365,20 @@ elif [[ "$post_moe_selection_count" -ne 0 ]]; then
   exit 2
 fi
 echo "[VALID] post-MoE fusion=$POST_MOE_SHARED_ADD_NORM_QUANT selection_count=$post_moe_selection_count"
+
+qa_nq_selection_count=$(grep -F -c \
+  "GLM-5.2 q_a RMSNorm+quant selected" \
+  "$OUT/nsys_launch.log" || true)
+if [[ "$QA_NORM_QUANT" == 1 ]]; then
+  if [[ "$qa_nq_selection_count" -ne "$DP" ]]; then
+    echo "[ERR] expected q_a RMSNorm+quant fusion on $DP ranks, observed $qa_nq_selection_count" >&2
+    exit 2
+  fi
+elif [[ "$qa_nq_selection_count" -ne 0 ]]; then
+  echo "[ERR] q_a stock denominator selected fusion on $qa_nq_selection_count ranks" >&2
+  exit 2
+fi
+echo "[VALID] q_a fusion=$QA_NORM_QUANT selection_count=$qa_nq_selection_count"
 
 rate=$($PY -c "print(($S - 64) / float($S))")
 result=$OUT/decode_${SWIGLU_MODE}_bs${GLOBAL_BS}.jsonl

@@ -76,21 +76,23 @@ test -f "$PROVIDER" || { echo "[ERR] missing $PROVIDER"; exit 1; }
 cd "$ROOT"
 
 cat > "$OUT/README.md" <<MD
-# B300 shared-expert SwiGLU+quant decode A/B (N=${N_RUNS}, S=${S})
+# B300 fixed-KV decode A/B (N=${N_RUNS}, S=${S})
 
 ## Winners (e2e-proven only)
 - FlashMLA sparse decode **P1+c2** (not r2a)
 - \`o_proj\` / \`index_q_upproj\` fixed_nk graph-only (M16|M32)
 - MoE gate/up/down via \`SGLANG_GLM52_INFINI_MOE_ALIGN=1\`
 
-## Shared-expert candidate
-- Same winners stack and workload, including the B300 valid-CTA routed-expert kernel
-- Replaces only contiguous shared-expert \`SiluAndMul -> per-token FP8 quant\`
-- One fused kernel preserves the intermediate BF16 rounding and packed UE8M0 layout
+## Selected experiment
+- Labels: \`${LABELS}\`; both use the same winners stack and workload
+- \`shared_fused\`: contiguous shared-expert \`SiluAndMul -> per-token FP8 quant\`
+- \`router_fused\` / \`router_ids_fused\`: router-to-DeepEP ID preparation
+- \`shared_nq_fused\`: scaled post-MoE add + next RMSNorm + packed quant
+- \`qa_nq_fused\`: strided q_a RMSNorm + packed quant producer; emits exact BF16 for DSA and leaves q_b DeepGEMM unchanged
 
 ## Excluded
 - \`fused_qkv_a_proj\` (leaf win, e2e historically flat/noisy)
-- \`dsa_prefill_attn\`, FlashMLA r2a, \`q_b\` / \`index_k\` / \`index_score\`
+- \`dsa_prefill_attn\`, FlashMLA r2a, and unrelated \`index_k\` / \`index_score\` candidates
 
 ## Protocol
 - Per label: one serve (cuda_graph_max_bs=${SGLANG_CUDA_GRAPH_MAX_BS})
@@ -118,7 +120,7 @@ write_env() {
         echo "SGLANG_GLM52_OPT=0"
         echo "SGLANG_GLM52_OPT_PROFILE=serving_safe"
         ;;
-      shared_stock|shared_fused|router_stock|router_fused|router_ids_stock|router_ids_fused|shared_nq_stock|shared_nq_fused)
+      shared_stock|shared_fused|router_stock|router_fused|router_ids_stock|router_ids_fused|shared_nq_stock|shared_nq_fused|qa_nq_stock|qa_nq_fused)
         echo "SGLANG_GLM52_OPT=1"
         echo "SGLANG_GLM52_OPT_PROFILE=combined_winners"
         # e2e-proven only — no fused_qkv_a, no dsa_prefill
@@ -143,6 +145,11 @@ write_env() {
           echo "SGLANG_INFINI_FUSED_SHARED_ADD_NORM_QUANT=1"
         else
           echo "SGLANG_INFINI_FUSED_SHARED_ADD_NORM_QUANT=0"
+        fi
+        if [[ "$mode" == "qa_nq_fused" ]]; then
+          echo "SGLANG_INFINI_FUSED_QA_NORM_QUANT=1"
+        else
+          echo "SGLANG_INFINI_FUSED_QA_NORM_QUANT=0"
         fi
         echo "SGLANG_INFINI_FUSED_SHARED_NQ_ROWS=1"
         echo "SGLANG_GLM52_OPT_OPS=$ops"
@@ -312,7 +319,7 @@ run_label() {
   wait_gpus_free
   launch_serve "$label"
   wait_ready "$label"
-  if [[ "$label" == "shared_stock" || "$label" == "shared_fused" || "$label" == "router_stock" || "$label" == "router_fused" || "$label" == "router_ids_stock" || "$label" == "router_ids_fused" || "$label" == "shared_nq_stock" || "$label" == "shared_nq_fused" ]]; then
+  if [[ "$label" == "shared_stock" || "$label" == "shared_fused" || "$label" == "router_stock" || "$label" == "router_fused" || "$label" == "router_ids_stock" || "$label" == "router_ids_fused" || "$label" == "shared_nq_stock" || "$label" == "shared_nq_fused" || "$label" == "qa_nq_stock" || "$label" == "qa_nq_fused" ]]; then
     local graph_buckets=(1 2 4 8 12 16)
     if [[ "$SGLANG_CUDA_GRAPH_MAX_BS" -ge 32 ]]; then
       graph_buckets+=(32)
@@ -398,6 +405,23 @@ run_label() {
       fi
       echo "[VALID] post-MoE megakernel label=$label selection_count=$shared_nq_selection_count"
     fi
+    if [[ "$label" == "qa_nq_stock" || "$label" == "qa_nq_fused" ]]; then
+      local qa_nq_selection_count
+      qa_nq_selection_count=$(grep -F -c \
+        "GLM-5.2 q_a RMSNorm+quant selected" \
+        "$OUT/serve_${label}.log" || true)
+      if [[ "$label" == "qa_nq_fused" ]]; then
+        if [[ "$qa_nq_selection_count" -ne "$DP" ]]; then
+          echo "[ERR] expected q_a RMSNorm+quant fusion on all $DP ranks; observed $qa_nq_selection_count"
+          tail -160 "$OUT/serve_${label}.log"
+          return 1
+        fi
+      elif [[ "$qa_nq_selection_count" -ne 0 ]]; then
+        echo "[ERR] stock denominator selected q_a RMSNorm+quant fusion on $qa_nq_selection_count ranks"
+        return 1
+      fi
+      echo "[VALID] q_a RMSNorm+quant label=$label selection_count=$qa_nq_selection_count"
+    fi
   fi
 
   if [[ "$VALIDATE_ONLY" == "1" ]]; then
@@ -447,9 +471,13 @@ boundary = (
         "post-MoE scaled shared+routed add, input RMSNorm, and packed FP8 quant boundary"
         if candidate_label == "shared_nq_fused"
         else (
-            "router padded-ID mask boundary"
-            if candidate_label == "router_fused"
-            else "router padded-ID mask plus DeepEP int64-ID boundary"
+            "q_a RMSNorm plus packed FP8 producer boundary"
+            if candidate_label == "qa_nq_fused"
+            else (
+                "router padded-ID mask boundary"
+                if candidate_label == "router_fused"
+                else "router padded-ID mask plus DeepEP int64-ID boundary"
+            )
         )
     )
 )
@@ -562,12 +590,20 @@ PY
 }
 
 # ---- main ----
+label_count=0
 for label in $LABELS; do
+  label_count=$((label_count + 1))
   run_label "$label"
 done
 
 if [[ "$VALIDATE_ONLY" == "1" ]]; then
   echo "======== VALIDATION ONLY DONE $(date -Is) OUT=$OUT ========"
+  exit 0
+fi
+
+if [[ "$label_count" -eq 1 ]]; then
+  echo "======== SINGLE-LABEL RUN DONE $(date -Is) OUT=$OUT ========"
+  echo "[INFO] summary intentionally skipped; compare this artifact with an explicitly pinned baseline run"
   exit 0
 fi
 

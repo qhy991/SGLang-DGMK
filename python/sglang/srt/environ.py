@@ -1062,6 +1062,9 @@ class Envs:
     # next residual-add, RMSNorm, BF16 passthrough, and UE8M0 FP8 quantization.
     SGLANG_INFINI_FUSED_SHARED_ADD_NORM_QUANT = EnvBool(False)
     SGLANG_INFINI_FUSED_SHARED_NQ_ROWS = EnvInt(1)
+    # Experimental GLM-5.2 Q-LoRA producer. Fuses the strided H=2048 q_a
+    # RMSNorm with packed UE8M0 quant while retaining exact BF16 for DSA.
+    SGLANG_INFINI_FUSED_QA_NORM_QUANT = EnvBool(False)
 
     # Plugin system
     SGLANG_PLATFORM = EnvStr("")

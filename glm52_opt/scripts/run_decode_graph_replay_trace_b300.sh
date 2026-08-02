@@ -19,6 +19,7 @@ GLOBAL_BS=${GLOBAL_BS:-128}
 OUT_LEN=${OUT_LEN:-48}
 REPLAY_SAMPLES=${REPLAY_SAMPLES:-40}
 POST_MOE_SHARED_ADD_NORM_QUANT=${POST_MOE_SHARED_ADD_NORM_QUANT:-0}
+QA_NORM_QUANT=${QA_NORM_QUANT:-0}
 RUN_ID=${RUN_ID:-decode_graph_replay_host_b300_$(date -u +%Y%m%dT%H%M%SZ)}
 OUT=$ROOT/bench_results/$RUN_ID
 TRACE_DIR=$OUT/replay_trace
@@ -37,6 +38,10 @@ if [[ "$GLOBAL_BS" -ne 128 || "$S" -ne 32768 ]]; then
 fi
 if [[ "$POST_MOE_SHARED_ADD_NORM_QUANT" != 0 && "$POST_MOE_SHARED_ADD_NORM_QUANT" != 1 ]]; then
   echo "[ERR] POST_MOE_SHARED_ADD_NORM_QUANT must be 0 or 1; got $POST_MOE_SHARED_ADD_NORM_QUANT" >&2
+  exit 2
+fi
+if [[ "$QA_NORM_QUANT" != 0 && "$QA_NORM_QUANT" != 1 ]]; then
+  echo "[ERR] QA_NORM_QUANT must be 0 or 1; got $QA_NORM_QUANT" >&2
   exit 2
 fi
 for path in "$PY" "$SERVER_LAUNCHER" "$TRIGGER_RUNNER" "$ANALYZER" \
@@ -132,6 +137,7 @@ SGLANG_GLM52_INDEX_Q_UPPROJ_GRAPH_ONLY=1
 SGLANG_GLM52_INFINI_MOE_ALIGN=1
 SGLANG_OPT_MOE_SWIGLU_QUANT_VARIANT=cuda_valid_cta
 SGLANG_INFINI_FUSED_SHARED_ADD_NORM_QUANT=$POST_MOE_SHARED_ADD_NORM_QUANT
+SGLANG_INFINI_FUSED_QA_NORM_QUANT=$QA_NORM_QUANT
 SGLANG_INFINI_FUSED_SHARED_NQ_ROWS=1
 GLM52_FLASHMLA_USE_PREBUILT=1
 GLM52_FLASHMLA_DECODE_STACK=p1_c2
@@ -149,6 +155,7 @@ cat > "$OUT/README.md" <<EOF
 - prefill allocation: chunked=8192, max prefill tokens=8192, mem fraction=0.78
 - trace: $REPLAY_SAMPLES asynchronous host replay calls/rank, armed after KV warmup
 - post-MoE shared-add+RMSNorm+quant fusion: $POST_MOE_SHARED_ADD_NORM_QUANT
+- q_a RMSNorm+packed-quant producer fusion: $QA_NORM_QUANT
 - clock: time.perf_counter_ns on one host; no CUDA synchronization and no nsys
 - purpose: test whether nsys's every-fourth-replay millisecond tail exists in production
 EOF
@@ -226,6 +233,20 @@ elif [[ "$post_moe_selection_count" -ne 0 ]]; then
   exit 2
 fi
 echo "[VALID] post-MoE fusion=$POST_MOE_SHARED_ADD_NORM_QUANT selection_count=$post_moe_selection_count"
+
+qa_nq_selection_count=$(grep -F -c \
+  "GLM-5.2 q_a RMSNorm+quant selected" \
+  "$OUT/server.log" || true)
+if [[ "$QA_NORM_QUANT" == 1 ]]; then
+  [[ "$qa_nq_selection_count" -eq 8 ]] || {
+    echo "[ERR] expected q_a RMSNorm+quant fusion on 8 ranks; got $qa_nq_selection_count" >&2
+    exit 2
+  }
+elif [[ "$qa_nq_selection_count" -ne 0 ]]; then
+  echo "[ERR] q_a stock denominator selected fusion on $qa_nq_selection_count ranks" >&2
+  exit 2
+fi
+echo "[VALID] q_a fusion=$QA_NORM_QUANT selection_count=$qa_nq_selection_count"
 
 rate=$($PY -c "print(($S - 64) / float($S))")
 result=$OUT/decode_candidate_bs${GLOBAL_BS}.jsonl

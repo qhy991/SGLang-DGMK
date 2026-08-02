@@ -76,6 +76,7 @@ from sglang.srt.utils.custom_op import register_custom_op
 
 logger = logging.getLogger(__name__)
 _SGLANG_EXPERIMENTAL_LORA_OPTI = envs.SGLANG_EXPERIMENTAL_LORA_OPTI.get()
+_infini_q_a_nq_logged = False
 
 if TYPE_CHECKING:
     from sglang.srt.models.deepseek_v2 import DeepseekV2AttentionMLA
@@ -91,6 +92,9 @@ class MlaBmmFusionPlan:
 
 if _is_cuda:
     from sgl_kernel import bmm_fp8 as _raw_bmm_fp8
+    from sglang.srt.layers.glm52_opt import (
+        infini_q_a_norm_quant as _infini_q_a_norm_quant,
+    )
 
     # TODO(yuwei): remove this wrapper after sgl-kernel registers its own fake/meta impl
     # Wrap bmm_fp8 as a custom op so torch.compile does not trace into
@@ -268,6 +272,7 @@ class DeepseekMLAForwardMixin:
         llama_4_scaling: Optional[torch.Tensor] = None,
         prev_topk_indices: Optional[torch.Tensor] = None,
     ):
+        global _infini_q_a_nq_logged
         from sglang.srt.model_executor.runner import get_is_capture_mode
 
         fuse_bmm_attention = (
@@ -280,6 +285,7 @@ class DeepseekMLAForwardMixin:
         q_pe = None
         k_pe = None
         fusion_plan: Optional[MlaBmmFusionPlan] = None
+        fused_q_a_norm_quant = False
         if self.q_lora_rank is not None:
             q, latent_cache = (
                 get_attn_tp_context()
@@ -295,7 +301,33 @@ class DeepseekMLAForwardMixin:
             if self.alt_stream is not None and get_is_capture_mode():
                 current_stream = torch.cuda.current_stream()
                 self.alt_stream.wait_stream(current_stream)
-                q = self.q_a_layernorm(q)
+                can_fuse_q_a = (
+                    forward_batch.forward_mode.is_decode_or_idle()
+                    and self.use_dsa
+                    and _infini_q_a_norm_quant.is_available(
+                        q, self.q_a_layernorm.weight, self.q_b_proj
+                    )
+                )
+                if can_fuse_q_a:
+                    q, q_lora = (
+                        _infini_q_a_norm_quant.infini_fused_q_a_rmsnorm_quant(
+                            q,
+                            self.q_a_layernorm.weight,
+                            self.q_a_layernorm.variance_epsilon,
+                        )
+                    )
+                    fused_q_a_norm_quant = True
+                    if not _infini_q_a_nq_logged:
+                        logger.info(
+                            "GLM-5.2 q_a RMSNorm+quant selected: "
+                            "M=%d K=%d stride=%s",
+                            q_lora.shape[0],
+                            q_lora.shape[1],
+                            (2624, 1),
+                        )
+                        _infini_q_a_nq_logged = True
+                else:
+                    q = self.q_a_layernorm(q)
                 with torch.cuda.stream(self.alt_stream):
                     k_nope = self.kv_a_layernorm(k_nope)
                 current_stream.wait_stream(self.alt_stream)
@@ -382,25 +414,52 @@ class DeepseekMLAForwardMixin:
             ):
                 current_stream = torch.cuda.current_stream()
                 self.alt_stream.wait_stream(current_stream)
-                with torch.cuda.stream(self.alt_stream):
-                    k_nope = k_nope.unsqueeze(1)
-                    q = self.q_b_proj(q)[0].view(
-                        -1, self.num_local_heads, self.qk_head_dim
-                    )
-                if self.should_run_indexer(prev_topk_indices):
-                    topk_indices = self.indexer(
-                        x=indexer_hidden_states,
-                        q_lora=q_lora,
-                        positions=positions,
-                        forward_batch=forward_batch,
-                        layer_id=self.layer_id,
-                    )
+                if fused_q_a_norm_quant:
+                    # Stock q_b begins with a small quant kernel.  That launch
+                    # spacer lets the independent DSA projection acquire SMs
+                    # before the large q_b DeepGEMM.  Once q_a already emits a
+                    # prequantized tuple, launching q_b first reverses the heavy
+                    # kernel order and starves DSA.  Submit DSA first only for
+                    # this exact prequantized path.  Both consumers retain their
+                    # original streams; the production trace decides how much
+                    # overlap the scheduler can actually preserve.
+                    if self.should_run_indexer(prev_topk_indices):
+                        topk_indices = self.indexer(
+                            x=indexer_hidden_states,
+                            q_lora=q_lora,
+                            positions=positions,
+                            forward_batch=forward_batch,
+                            layer_id=self.layer_id,
+                        )
+                    else:
+                        topk_indices = maybe_capture_indexer_topk(
+                            self.layer_id, prev_topk_indices
+                        )
+                    with torch.cuda.stream(self.alt_stream):
+                        k_nope = k_nope.unsqueeze(1)
+                        q = self.q_b_proj(q)[0].view(
+                            -1, self.num_local_heads, self.qk_head_dim
+                        )
                 else:
-                    # skip_topk reuses prev layer's indices; mirror into this
-                    # layer's slot so the captured buffer matches what's used.
-                    topk_indices = maybe_capture_indexer_topk(
-                        self.layer_id, prev_topk_indices
-                    )
+                    with torch.cuda.stream(self.alt_stream):
+                        k_nope = k_nope.unsqueeze(1)
+                        q = self.q_b_proj(q)[0].view(
+                            -1, self.num_local_heads, self.qk_head_dim
+                        )
+                    if self.should_run_indexer(prev_topk_indices):
+                        topk_indices = self.indexer(
+                            x=indexer_hidden_states,
+                            q_lora=q_lora,
+                            positions=positions,
+                            forward_batch=forward_batch,
+                            layer_id=self.layer_id,
+                        )
+                    else:
+                        # skip_topk reuses prev layer's indices; mirror into this
+                        # layer's slot so the captured buffer matches what's used.
+                        topk_indices = maybe_capture_indexer_topk(
+                            self.layer_id, prev_topk_indices
+                        )
                 current_stream.wait_stream(self.alt_stream)
             else:
                 k_nope = k_nope.unsqueeze(1)
