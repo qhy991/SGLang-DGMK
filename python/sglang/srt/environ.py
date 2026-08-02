@@ -941,6 +941,9 @@ class Envs:
     # this combination on the host side.
     SGLANG_OPT_DEEPGEMM_MEGA_MOE_USE_MXF4_KIND = EnvBool(False)
     SGLANG_OPT_FIX_MEGA_MOE_MEMORY = EnvBool(False)
+    # B300 experiment: fuse the shared-expert BF16 SwiGLU write with its
+    # packed-UE8M0 FP8 quantizer while preserving the intermediate BF16 round.
+    SGLANG_GLM52_SHARED_EXPERT_SWIGLU_QUANT = EnvBool(False)
 
     # TopK
     SGLANG_OPT_USE_FUSED_HASH_TOPK = EnvBool(True)

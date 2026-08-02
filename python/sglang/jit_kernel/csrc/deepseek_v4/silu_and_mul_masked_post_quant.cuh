@@ -373,7 +373,13 @@ struct SiluMulQuantContigParams {
   uint32_t scale_row_stride_int32;  // only used when kTransposed=true
 };
 
-template <bool kScaleUE8M0, bool kTransposed, bool kSwizzle, bool kUsePDL, bool kApplySwigluLimit>
+template <
+    bool kScaleUE8M0,
+    bool kTransposed,
+    bool kSwizzle,
+    bool kUsePDL,
+    bool kApplySwigluLimit,
+    bool kRoundToBF16>
 __global__ __launch_bounds__(1024, 2) void  // maximize occupancy
     silu_mul_quant_contig_kernel(const SiluMulQuantContigParams __grid_constant__ params) {
   using namespace device;
@@ -421,9 +427,18 @@ __global__ __launch_bounds__(1024, 2) void  // maximize occupancy
 #pragma unroll
   for (uint32_t i = 0; i < 4; ++i) {
     const auto [x, y] = silu_and_mul<kApplySwigluLimit>(gate_vec[i], up_vec[i], params.swiglu_limit);
-    results[2 * i + 0] = x;
-    results[2 * i + 1] = y;
-    local_max = fmaxf(local_max, fmaxf(fabsf(x), fabsf(y)));
+    if constexpr (kRoundToBF16) {
+      // Match the production two-kernel path exactly: SiluAndMul first writes
+      // BF16, then the quantizer reloads that rounded value as FP32.
+      results[2 * i + 0] = static_cast<float>(static_cast<bf16_t>(x));
+      results[2 * i + 1] = static_cast<float>(static_cast<bf16_t>(y));
+    } else {
+      results[2 * i + 0] = x;
+      results[2 * i + 1] = y;
+    }
+    local_max = fmaxf(
+        local_max,
+        fmaxf(fabsf(results[2 * i + 0]), fabsf(results[2 * i + 1])));
   }
 
   local_max = warp::reduce_max<kWorkThreads>(local_max);
@@ -459,13 +474,21 @@ __global__ __launch_bounds__(1024, 2) void  // maximize occupancy
   }
 }
 
-template <int64_t kGroupSize, bool kScaleUE8M0, bool kSwizzle, bool kUsePDL, bool kApplySwigluLimit>
+template <
+    int64_t kGroupSize,
+    bool kScaleUE8M0,
+    bool kSwizzle,
+    bool kUsePDL,
+    bool kApplySwigluLimit,
+    bool kRoundToBF16>
 struct SiluAndMulContigPostQuantKernel {
   static_assert(kGroupSize == 128);
   static constexpr auto kernel_normal =
-      silu_mul_quant_contig_kernel<kScaleUE8M0, false, kSwizzle, kUsePDL, kApplySwigluLimit>;
+      silu_mul_quant_contig_kernel<
+          kScaleUE8M0, false, kSwizzle, kUsePDL, kApplySwigluLimit, kRoundToBF16>;
   static constexpr auto kernel_transposed =
-      silu_mul_quant_contig_kernel<true, true, kSwizzle, kUsePDL, kApplySwigluLimit>;
+      silu_mul_quant_contig_kernel<
+          true, true, kSwizzle, kUsePDL, kApplySwigluLimit, kRoundToBF16>;
 
   static void
   run(const tvm::ffi::TensorView input,

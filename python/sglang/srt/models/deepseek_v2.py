@@ -230,6 +230,7 @@ else:
     pass
 
 logger = logging.getLogger(__name__)
+_glm52_shared_expert_swiglu_quant_logged = False
 
 _enable_pcg_dsv2_dual_stream = (
     _is_cuda and envs.SGLANG_ENABLE_PCG_DSV2_DUAL_STREAM.get()
@@ -298,6 +299,8 @@ class DeepseekV2MLP(nn.Module):
         forward_batch=None,
         gemm_output_zero_allocator: BumpAllocator = None,
     ):
+        global _glm52_shared_expert_swiglu_quant_logged
+
         if (self.tp_size == 1) and x.shape[0] == 0:
             return x
 
@@ -337,15 +340,35 @@ class DeepseekV2MLP(nn.Module):
             x = (x, None, y)
 
         gate_up, _ = self.gate_up_proj(x)
-        # Fast path: fused silu+clamp+fp8_quant+deepgemm when conditions met.
+        # Fast path: fused silu(+optional clamp)+fp8_quant+deepgemm when
+        # conditions are met. B300 also benefits without a clamp; preserve the
+        # intermediate BF16 rounding so that path remains byte-equivalent.
         # Only valid when down_proj does NOT need an all-reduce and its weights
-        # are fp8 (uint8 storage with weight_scale_inv).
+        # are block-FP8 (native float8 or a uint8 storage view, both paired with
+        # weight_scale_inv).
         if (
-            self.swiglu_limit is not None
+            (
+                self.swiglu_limit is not None
+                or (
+                    _device_sm == 103
+                    and envs.SGLANG_GLM52_SHARED_EXPERT_SWIGLU_QUANT.get()
+                )
+            )
             and not self.down_proj.reduce_results
-            and self.down_proj.weight.dtype == torch.uint8
+            and self.down_proj.weight.dtype
+            in (torch.uint8, torch.float8_e4m3fn)
             and hasattr(self.down_proj, "weight_scale_inv")
         ):
+            if (
+                self.swiglu_limit is None
+                and not _glm52_shared_expert_swiglu_quant_logged
+            ):
+                logger.info(
+                    "GLM-5.2 shared-expert SwiGLU quant selected: "
+                    "round_to_bf16=True weight_dtype=%s",
+                    self.down_proj.weight.dtype,
+                )
+                _glm52_shared_expert_swiglu_quant_logged = True
             M, N = gate_up.shape
             down_input_fp8 = gate_up.new_empty((M, N // 2), dtype=torch.float8_e4m3fn)
             scale_block_size = 128
@@ -364,7 +387,8 @@ class DeepseekV2MLP(nn.Module):
                 quant_group_size=scale_block_size,
                 scale_ue8m0=deep_gemm_wrapper.DEEPGEMM_SCALE_UE8M0,
                 transposed=deep_gemm_wrapper.DEEPGEMM_SCALE_UE8M0,
-                swiglu_limit=float(self.swiglu_limit),
+                swiglu_limit=self.swiglu_limit,
+                round_to_bf16=self.swiglu_limit is None,
             )
             down_output = gate_up.new_empty(
                 (M, self.down_proj.output_size), dtype=torch.bfloat16

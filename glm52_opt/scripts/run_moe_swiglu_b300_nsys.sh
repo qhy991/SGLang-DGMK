@@ -22,6 +22,7 @@ SGLANG_CUDA_GRAPH_MAX_BS=${SGLANG_CUDA_GRAPH_MAX_BS:-16}
 CHUNKED_PREFILL_SIZE=${CHUNKED_PREFILL_SIZE:-2048}
 MAX_PREFILL_TOKENS=${MAX_PREFILL_TOKENS:-16384}
 SWIGLU_MODE=${SWIGLU_MODE:-candidate}
+SHARED_EXPERT_SWIGLU_QUANT=${SHARED_EXPERT_SWIGLU_QUANT:-0}
 RUN_ID=${RUN_ID:-nsys_moe_swiglu_${SWIGLU_MODE}_$(date -u +%Y%m%dT%H%M%SZ)}
 OUT=$ROOT/bench_results/$RUN_ID
 ENV_FILE=${SGLANG_GLM52_ENV_FILE:-$ROOT/cache/sglang/glm52_opt.env}
@@ -43,6 +44,10 @@ if [[ "$GLOBAL_BS" -ne $((DP * 16)) ]]; then
 fi
 if [[ "$SWIGLU_MODE" != candidate && "$SWIGLU_MODE" != stock ]]; then
   echo "[ERR] SWIGLU_MODE must be candidate or stock; got $SWIGLU_MODE" >&2
+  exit 2
+fi
+if [[ "$SHARED_EXPERT_SWIGLU_QUANT" != 0 && "$SHARED_EXPERT_SWIGLU_QUANT" != 1 ]]; then
+  echo "[ERR] SHARED_EXPERT_SWIGLU_QUANT must be 0 or 1; got $SHARED_EXPERT_SWIGLU_QUANT" >&2
   exit 2
 fi
 for path in "$PY" "$NSYS" "$SERVER_LAUNCHER" "$TRIGGER_RUNNER" \
@@ -161,6 +166,7 @@ SGLANG_GLM52_FLASHMLA_GRAPH_ONLY=1
 SGLANG_GLM52_O_PROJ_GRAPH_ONLY=1
 SGLANG_GLM52_INDEX_Q_UPPROJ_GRAPH_ONLY=1
 SGLANG_GLM52_INFINI_MOE_ALIGN=1
+SGLANG_GLM52_SHARED_EXPERT_SWIGLU_QUANT=$SHARED_EXPERT_SWIGLU_QUANT
 GLM52_FLASHMLA_USE_PREBUILT=1
 GLM52_FLASHMLA_DECODE_STACK=p1_c2
 EOF
@@ -176,6 +182,7 @@ fi
   echo "- cache target: only the last 64 prompt tokens uncached (99.8% hit)"
   echo "- topology: TP8/DP8/EP8; CUDA graph max BS=$SGLANG_CUDA_GRAPH_MAX_BS"
   echo "- capture: cuda,nvtx; cudaProfilerApi; ${NSYS_DURATION}s"
+  echo "- shared-expert SwiGLU+quant fusion: $SHARED_EXPERT_SWIGLU_QUANT"
   if [[ "$SWIGLU_MODE" == candidate ]]; then
     echo "- SwiGLU: cuda_valid_cta; stock body; grid=128 rather than 65,536"
   else
@@ -271,6 +278,20 @@ elif [[ "$selection_count" -ne 0 ]]; then
   exit 2
 fi
 echo "[VALID] SwiGLU mode=$SWIGLU_MODE selection_count=$selection_count"
+
+shared_selection_count=$(grep -F -c \
+  "GLM-5.2 shared-expert SwiGLU quant selected: round_to_bf16=True" \
+  "$OUT/nsys_launch.log" || true)
+if [[ "$SHARED_EXPERT_SWIGLU_QUANT" == 1 ]]; then
+  if [[ "$shared_selection_count" -ne "$DP" ]]; then
+    echo "[ERR] expected shared-expert fusion on $DP ranks, observed $shared_selection_count" >&2
+    exit 2
+  fi
+elif [[ "$shared_selection_count" -ne 0 ]]; then
+  echo "[ERR] shared-expert stock denominator selected fusion on $shared_selection_count ranks" >&2
+  exit 2
+fi
+echo "[VALID] shared-expert fusion=$SHARED_EXPERT_SWIGLU_QUANT selection_count=$shared_selection_count"
 
 rate=$($PY -c "print(($S - 64) / float($S))")
 result=$OUT/decode_${SWIGLU_MODE}_bs${GLOBAL_BS}.jsonl

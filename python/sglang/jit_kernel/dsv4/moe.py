@@ -73,6 +73,7 @@ def _jit_silu_mul_quant_contig_module(
     scale_ue8m0: bool,
     swizzle: bool,
     apply_swiglu_limit: bool,
+    round_to_bf16: bool,
 ):
     args = make_cpp_args(
         quant_group_size,
@@ -80,6 +81,7 @@ def _jit_silu_mul_quant_contig_module(
         swizzle,
         is_arch_support_pdl(),
         apply_swiglu_limit,
+        round_to_bf16,
     )
     return load_jit(
         make_name("silu_mul_quant_contig"),
@@ -215,10 +217,15 @@ def silu_and_mul_contig_post_quant(
     transposed: bool = False,
     swiglu_limit: Optional[float] = None,
     swizzle: bool = False,
+    round_to_bf16: bool = False,
 ) -> None:
     apply_swiglu_limit = swiglu_limit is not None
     module = _jit_silu_mul_quant_contig_module(
-        quant_group_size, scale_ue8m0, swizzle, apply_swiglu_limit
+        quant_group_size,
+        scale_ue8m0,
+        swizzle,
+        apply_swiglu_limit,
+        round_to_bf16,
     )
     module.run(
         input,
