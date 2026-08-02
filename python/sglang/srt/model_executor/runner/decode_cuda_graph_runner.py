@@ -28,6 +28,7 @@ from __future__ import annotations
 import contextlib
 import inspect
 import logging
+import time
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Callable, Optional, Union
 
@@ -89,6 +90,9 @@ from sglang.srt.model_executor.runner_utils.capture_mode import (
 )
 from sglang.srt.model_executor.runner_utils.deepep_adapter import (
     DeepEPCudaGraphRunnerAdapter,
+)
+from sglang.srt.model_executor.runner_utils.replay_trace import (
+    DecodeGraphReplayTrace,
 )
 from sglang.srt.multiplex.pdmux_context import get_current_stream_idx, get_stream_groups
 from sglang.srt.runtime_context import get_flags, get_parallel
@@ -193,6 +197,7 @@ class DecodeCudaGraphRunner(BaseCudaGraphRunner):
         speculative_num_draft_tokens: Optional[int] = None,
     ):
         super().__init__(model_runner)
+        self._decode_graph_replay_trace = DecodeGraphReplayTrace.from_env(model_runner)
         # --- core state ------------------------------------------------
         self.enable_torch_compile = get_flags().capture.enable_torch_compile
         self.disable_padding = model_runner.server_args.disable_cuda_graph_padding
@@ -1244,7 +1249,21 @@ class DecodeCudaGraphRunner(BaseCudaGraphRunner):
                 read_done = self.device_module.Event()
                 read_done.record()
                 self.model_runner.war_fastpath_read_done_event = read_done
-            output = self.backend.replay(self._replay_graph_key, forward_batch)
+            replay_trace = self._decode_graph_replay_trace
+            if replay_trace is not None and replay_trace.should_record():
+                replay_start_ns = time.perf_counter_ns()
+                output = self.backend.replay(self._replay_graph_key, forward_batch)
+                replay_end_ns = time.perf_counter_ns()
+                replay_trace.record(
+                    call_start_ns=replay_start_ns,
+                    call_end_ns=replay_end_ns,
+                    graph_key=self._replay_graph_key,
+                    raw_bs=self.raw_bs,
+                    padded_bs=self.bs,
+                    forward_mode=forward_batch.forward_mode.name,
+                )
+            else:
+                output = self.backend.replay(self._replay_graph_key, forward_batch)
             if read_done_post_replay:
                 read_done = self.device_module.Event()
                 read_done.record()
