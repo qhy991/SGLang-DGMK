@@ -1057,6 +1057,11 @@ class Envs:
     # already dispatches for ROCm gfx95. Default off.
     SGLANG_INFINI_FUSED_NORM_QUANT = EnvBool(False)
     SGLANG_INFINI_FUSED_NQ_ROWS = EnvInt(2)
+    # Experimental GLM-5.2 post-MoE inter-layer seam. Defers the exact BF16
+    # shared+routed add across a trivial SCATTERED boundary and fuses it with the
+    # next residual-add, RMSNorm, BF16 passthrough, and UE8M0 FP8 quantization.
+    SGLANG_INFINI_FUSED_SHARED_ADD_NORM_QUANT = EnvBool(False)
+    SGLANG_INFINI_FUSED_SHARED_NQ_ROWS = EnvInt(1)
 
     # Plugin system
     SGLANG_PLATFORM = EnvStr("")

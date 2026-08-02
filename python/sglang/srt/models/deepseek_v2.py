@@ -70,8 +70,11 @@ from sglang.srt.layers.attention.dsa.utils import (
 from sglang.srt.layers.communicator import (
     LayerCommunicator,
     LayerScatterModes,
+    defer_moe_output_add,
     enable_moe_dense_fully_dp,
     get_attn_tp_context,
+    has_deferred_moe_output_add,
+    materialize_deferred_moe_output_add,
 )
 from sglang.srt.layers.communicator_dsa_cp import (
     DSACPLayerCommunicator,
@@ -1431,6 +1434,21 @@ class DeepseekV2MoE(nn.Module):
             torch.cuda.current_stream().wait_event(shared_event)
 
         if shared_output is not None:
+            if (
+                envs.SGLANG_INFINI_FUSED_SHARED_ADD_NORM_QUANT.get()
+                and get_moe_a2a_backend().is_deepep()
+                and forward_batch.forward_mode.is_decode()
+                and 0 < shared_output.shape[0] <= 16
+                and not is_tbo_enabled()
+                and not torch.compiler.is_compiling()
+                and self.experts.should_fuse_routed_scaling_factor_in_topk
+            ):
+                # Keep the two BF16 inputs separate only until the decoder proves
+                # that its SCATTERED layer-output seam is identity. The next
+                # input LayerCommunicator either consumes the exact pair with the
+                # three-input megakernel or materializes stock shared.add_(routed).
+                return defer_moe_output_add(shared_output, final_hidden_states)
+
             x = shared_output
             # aiter moe call will handle routed_scaling_factor in the function
             # so add _use_aiter condition to eliminate to use self.routed_scaling_factor in add_ call
@@ -2177,6 +2195,7 @@ class DeepseekV2DecoderLayer(nn.Module):
         )
 
         self._gfx95_quant_format = self._detect_gfx95_quant_format()
+        self._infini_quant_format = self._detect_infini_quant_format()
 
         if self.dsa_enable_prefill_cp or self.mla_enable_prefill_cp:
             # DSACPLayerCommunicator is flavor-agnostic; its internal gates
@@ -2218,6 +2237,20 @@ class DeepseekV2DecoderLayer(nn.Module):
             return "fp8"
         return ""
 
+    def _detect_infini_quant_format(self) -> str:
+        """Describe the next NVIDIA projection ABI for the opt-in DSA seam."""
+        if (
+            not _is_cuda
+            or not envs.SGLANG_INFINI_FUSED_SHARED_ADD_NORM_QUANT.get()
+        ):
+            return ""
+        weight = getattr(
+            getattr(self.self_attn, "fused_qkv_a_proj_with_mqa", None), "weight", None
+        )
+        if weight is not None and weight.dtype == getattr(torch, "float8_e4m3fn", None):
+            return "fp8"
+        return ""
+
     def _is_layer_sparse(self, layer_id: int, is_nextn: bool) -> bool:
         return is_nextn or (
             self.config.n_routed_experts is not None
@@ -2245,7 +2278,10 @@ class DeepseekV2DecoderLayer(nn.Module):
                 residual,
                 forward_batch,
                 captured_last_layer_outputs=captured_last_layer_outputs,
-                quant_format=getattr(self, "_gfx95_quant_format", ""),
+                quant_format=(
+                    getattr(self, "_gfx95_quant_format", "")
+                    or getattr(self, "_infini_quant_format", "")
+                ),
             )
         )
 
@@ -2307,6 +2343,14 @@ class DeepseekV2DecoderLayer(nn.Module):
                     forward_batch,
                     gemm_output_zero_allocator,
                 )
+
+        if has_deferred_moe_output_add(hidden_states) and (
+            fuse_mlp_allreduce
+            or not self.layer_communicator.can_defer_moe_output_add()
+        ):
+            # Last layers, non-SCATTERED layouts and collective seams must expose
+            # the exact stock BF16 tensor before any generic communication logic.
+            hidden_states = materialize_deferred_moe_output_add(hidden_states)
 
         if (
             not (self.dsa_enable_prefill_cp or self.mla_enable_prefill_cp)

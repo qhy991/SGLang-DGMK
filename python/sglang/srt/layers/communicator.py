@@ -114,6 +114,9 @@ from sglang.srt.layers.glm52_opt import (
     infini_fused_norm_quant as _infini_fused_norm_quant,
 )
 
+logger = logging.getLogger(__name__)
+_infini_shared_add_nq_logged = False
+
 
 def _infini_fused_nq_ready(hidden_states, residual, weight, quant_format) -> bool:
     """Admission check for the infini sm100 fused norm+quant branch.
@@ -129,6 +132,53 @@ def _infini_fused_nq_ready(hidden_states, residual, weight, quant_format) -> boo
         residual,
         weight,
         needs_unquantized_bf16=get_attn_tp_context().is_dsa,
+    )
+
+
+_DEFERRED_MOE_ROUTED_ATTR = "_sglang_deferred_moe_routed"
+
+
+def defer_moe_output_add(shared: torch.Tensor, routed: torch.Tensor) -> torch.Tensor:
+    """Carry one exact shared/routed pair across a proven trivial layer seam."""
+    if hasattr(shared, _DEFERRED_MOE_ROUTED_ATTR):
+        raise RuntimeError("a deferred MoE output add is already attached")
+    if shared.shape != routed.shape or shared.dtype is not routed.dtype:
+        raise ValueError("deferred shared/routed tensors must have the same ABI")
+    setattr(shared, _DEFERRED_MOE_ROUTED_ATTR, routed)
+    return shared
+
+
+def has_deferred_moe_output_add(hidden_states: torch.Tensor) -> bool:
+    return hasattr(hidden_states, _DEFERRED_MOE_ROUTED_ATTR)
+
+
+def materialize_deferred_moe_output_add(
+    hidden_states: torch.Tensor,
+) -> torch.Tensor:
+    """Restore the stock observable BF16 add when a seam cannot stay split."""
+    routed = getattr(hidden_states, _DEFERRED_MOE_ROUTED_ATTR, None)
+    if routed is not None:
+        delattr(hidden_states, _DEFERRED_MOE_ROUTED_ATTR)
+        hidden_states.add_(routed)
+    return hidden_states
+
+
+def _pop_deferred_moe_output_add(hidden_states: torch.Tensor):
+    routed = getattr(hidden_states, _DEFERRED_MOE_ROUTED_ATTR, None)
+    if routed is not None:
+        delattr(hidden_states, _DEFERRED_MOE_ROUTED_ATTR)
+    return routed
+
+
+def _infini_shared_add_nq_ready(
+    shared, routed, residual, weight, quant_format
+) -> bool:
+    return (
+        quant_format == "fp8"
+        and get_attn_tp_context().is_dsa
+        and _infini_fused_norm_quant.is_shared_add_available(
+            shared, routed, residual, weight
+        )
     )
 
 
@@ -511,6 +561,18 @@ class LayerCommunicator:
             )
         )
 
+    def can_defer_moe_output_add(self) -> bool:
+        """Whether this layer can return its split MoE output unchanged."""
+        modes = self.layer_scatter_modes
+        return (
+            not self.is_last_layer
+            and modes.mlp_mode is ScatterMode.SCATTERED
+            and modes.middle_residual_mode is ScatterMode.SCATTERED
+            and modes.layer_output_mode is ScatterMode.SCATTERED
+            and self._communicate_summable_tensor_pair_fn
+            is CommunicateSummableTensorPairFn._trivial
+        )
+
     def prepare_attn_and_capture_last_layer_outputs(
         self,
         hidden_states: torch.Tensor,
@@ -574,6 +636,58 @@ class LayerCommunicator:
         quant_format: str = "",
         post_residual_addition: Optional[torch.Tensor] = None,
     ):
+        global _infini_shared_add_nq_logged
+
+        deferred_routed = _pop_deferred_moe_output_add(hidden_states)
+        if deferred_routed is not None:
+            can_fuse_deferred = (
+                not get_attn_tp_context().input_scattered
+                and post_residual_addition is None
+                and self._communicate_simple_fn is CommunicateSimpleFn._trivial
+                and _infini_shared_add_nq_ready(
+                    hidden_states,
+                    deferred_routed,
+                    residual,
+                    self.input_layernorm.weight,
+                    quant_format,
+                )
+            )
+            if can_fuse_deferred:
+                if not _infini_shared_add_nq_logged:
+                    logger.info(
+                        "GLM-5.2 post-MoE shared-add+RMSNorm+quant selected: "
+                        "M=%d dtype=%s",
+                        hidden_states.shape[0],
+                        hidden_states.dtype,
+                    )
+                    _infini_shared_add_nq_logged = True
+                normed, residual, x_fp8, x_scale = (
+                    _infini_fused_norm_quant.infini_fused_shared_add_rmsnorm_quant(
+                        hidden_states,
+                        deferred_routed,
+                        residual,
+                        self.input_layernorm.weight,
+                        self.input_layernorm.variance_epsilon,
+                    )
+                )
+                setattr(normed, "_sglang_dsa_bf16_passthrough", True)
+                hidden_states = (x_fp8, x_scale, normed)
+                hidden_states = self._communicate_simple_fn(
+                    hidden_states=hidden_states,
+                    forward_batch=forward_batch,
+                    context=self._context,
+                )
+                if self.qkv_latent_func is not None:
+                    attn_inputs = AttentionInputs(
+                        hidden_states, forward_batch, self.qkv_latent_func
+                    )
+                    get_attn_tp_context().set_attn_inputs(attn_inputs)
+                return hidden_states, residual
+
+            # Any unsupported topology, dtype, consumer, device, build failure,
+            # or disabled flag restores stock order before entering stock code.
+            hidden_states.add_(deferred_routed)
+
         if get_attn_tp_context().input_scattered:
             hidden_states, residual = self._tp_reduce_scatter(
                 hidden_states,

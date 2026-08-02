@@ -123,17 +123,21 @@ __device__ __forceinline__ void cp_async_16(void* smem_dst, const void* gmem_src
 // SMEM_STAGE=false: plain LDG, carry h as 96 fp32 registers across the barrier.
 //                   142 registers, but no smem cap on blocks/SM and no second smem
 //                   read; measurably better once the grid exceeds one wave.
-template <int ROWS, bool SMEM_STAGE>
+template <int ROWS, bool SMEM_STAGE, bool HAS_PRE_ADD = false, bool WRITE_BF16 = false>
 __global__ __launch_bounds__(ROWS * THREADS_PER_ROW) void infini_glm52_fused_add_rmsnorm_quant_ue8m0_kernel(
     const __nv_bfloat16* __restrict__ hidden,
+    const __nv_bfloat16* __restrict__ pre_add,
     __nv_bfloat16* __restrict__ residual,
     const __nv_bfloat16* __restrict__ weight,
+    __nv_bfloat16* __restrict__ y_bf16,
     __nv_fp8_e4m3* __restrict__ xq,
     uint32_t* __restrict__ xs,
     const int M,
     const int scale_hidden_stride,   // xs.stride(1), in int32 elements
     const float eps,
     const float weight_bias) {
+  static_assert(!(SMEM_STAGE && HAS_PRE_ADD),
+                "the three-input path deliberately uses the register-staged kernel");
   extern __shared__ __align__(16) char smem_raw[];
   __nv_bfloat16* sX = reinterpret_cast<__nv_bfloat16*>(smem_raw);
   __nv_bfloat16* sR = sX + (SMEM_STAGE ? ROWS * HSIZE : 0);
@@ -176,12 +180,25 @@ __global__ __launch_bounds__(ROWS * THREADS_PER_ROW) void infini_glm52_fused_add
       const int4 rv = SMEM_STAGE
           ? *reinterpret_cast<const int4*>(sR + s_base + b * COL_STRIDE)
           : *reinterpret_cast<const int4*>(residual + g_base + b * COL_STRIDE);
+      int4 pv{};
+      if constexpr (HAS_PRE_ADD) {
+        pv = *reinterpret_cast<const int4*>(pre_add + g_base + b * COL_STRIDE);
+      }
       const __nv_bfloat16* hb = reinterpret_cast<const __nv_bfloat16*>(&hv);
       const __nv_bfloat16* rb = reinterpret_cast<const __nv_bfloat16*>(&rv);
+      const __nv_bfloat16* pb = reinterpret_cast<const __nv_bfloat16*>(&pv);
       __nv_bfloat16 ob[VEC];
 #pragma unroll
       for (int j = 0; j < VEC; ++j) {
-        const float v = __bfloat162float(hb[j]) + __bfloat162float(rb[j]);
+        float hidden_value = __bfloat162float(hb[j]);
+        if constexpr (HAS_PRE_ADD) {
+          // Production materializes shared.add_(routed) in BF16 before the
+          // next residual add. Preserve that observable store/reload round;
+          // reassociating three FP32 values changes residual, norm and FP8 bytes.
+          hidden_value = __bfloat162float(
+              __float2bfloat16(hidden_value + __bfloat162float(pb[j])));
+        }
+        const float v = hidden_value + __bfloat162float(rb[j]);
         ob[j] = __float2bfloat16(v);
         if constexpr (!SMEM_STAGE) hreg[b * VEC + j] = v;
         // Sequential over the flat fragment order v = j + 8*b, CONTRACTED to one FMA
@@ -238,6 +255,10 @@ __global__ __launch_bounds__(ROWS * THREADS_PER_ROW) void infini_glm52_fused_add
       const __nv_bfloat16 yb = __float2bfloat16(hh * rstd * (weight_bias + wf));
       y[j] = yb;
       amax = fmaxf(amax, fabsf(__bfloat162float(yb)));
+    }
+    if constexpr (WRITE_BF16) {
+      *reinterpret_cast<int4*>(y_bf16 + g_base + b * COL_STRIDE) =
+          *reinterpret_cast<const int4*>(y);
     }
 #pragma unroll
     for (int s = 1; s < LANES_PER_GROUP; s <<= 1) amax = fmaxf(amax, bfly(amax, s));
@@ -303,8 +324,10 @@ void fused_add_rmsnorm_quant_ue8m0(at::Tensor hidden, at::Tensor residual,
     const int grid = (M + (R) - 1) / (R);                                              \
     kfn<<<grid, kThreads, smem, stream>>>(                                             \
         reinterpret_cast<const __nv_bfloat16*>(hidden.data_ptr()),                     \
+        nullptr,                                                                        \
         reinterpret_cast<__nv_bfloat16*>(residual.data_ptr()),                         \
         reinterpret_cast<const __nv_bfloat16*>(weight.data_ptr()),                     \
+        nullptr,                                                                        \
         reinterpret_cast<__nv_fp8_e4m3*>(xq.data_ptr()),                               \
         reinterpret_cast<uint32_t*>(xs.data_ptr()),                                    \
         M, static_cast<int>(xs.stride(1)), static_cast<float>(eps), 0.0f);             \
@@ -323,7 +346,69 @@ void fused_add_rmsnorm_quant_ue8m0(at::Tensor hidden, at::Tensor residual,
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
+void fused_shared_add_rmsnorm_quant_ue8m0(
+    at::Tensor shared, at::Tensor routed, at::Tensor residual,
+    at::Tensor weight, at::Tensor y_bf16, at::Tensor xq, at::Tensor xs,
+    double eps, int64_t rows_per_block) {
+  TORCH_CHECK(shared.is_cuda() && shared.is_contiguous(),
+              "shared must be contiguous cuda");
+  TORCH_CHECK(routed.is_cuda() && routed.is_contiguous(),
+              "routed must be contiguous cuda");
+  TORCH_CHECK(residual.is_cuda() && residual.is_contiguous(),
+              "residual must be contiguous cuda");
+  TORCH_CHECK(shared.scalar_type() == at::kBFloat16 &&
+              routed.scalar_type() == at::kBFloat16 &&
+              residual.scalar_type() == at::kBFloat16 &&
+              weight.scalar_type() == at::kBFloat16 &&
+              y_bf16.scalar_type() == at::kBFloat16,
+              "shared/routed/residual/weight/y must be bf16");
+  TORCH_CHECK(routed.sizes() == shared.sizes() &&
+              residual.sizes() == shared.sizes() &&
+              y_bf16.sizes() == shared.sizes(),
+              "shared/routed/residual/y shape mismatch");
+  TORCH_CHECK(xq.scalar_type() == at::kFloat8_e4m3fn && xq.is_contiguous(),
+              "xq must be contiguous float8_e4m3fn");
+  TORCH_CHECK(xq.sizes() == shared.sizes(), "xq shape mismatch");
+  TORCH_CHECK(xs.scalar_type() == at::kInt && xs.stride(0) == 1,
+              "xs must be mn-major packed int32 UE8M0");
+
+  const int M = static_cast<int>(shared.size(0));
+  TORCH_CHECK(shared.dim() == 2 && shared.size(1) == HSIZE,
+              "this build is specialised for [M,6144]");
+  TORCH_CHECK(weight.numel() == HSIZE, "weight numel");
+
+  auto stream = at::cuda::getCurrentCUDAStream();
+#define LAUNCH_SHARED_ROWS(R)                                                         \
+  do {                                                                                \
+    constexpr int kThreads = (R) * THREADS_PER_ROW;                                   \
+    constexpr int smem = (R) * 2 * static_cast<int>(sizeof(float));                   \
+    auto kfn = infini_glm52_fused_add_rmsnorm_quant_ue8m0_kernel<                     \
+        R, false, true, true>;                                                         \
+    const int grid = (M + (R) - 1) / (R);                                             \
+    kfn<<<grid, kThreads, smem, stream>>>(                                             \
+        reinterpret_cast<const __nv_bfloat16*>(shared.data_ptr()),                    \
+        reinterpret_cast<const __nv_bfloat16*>(routed.data_ptr()),                    \
+        reinterpret_cast<__nv_bfloat16*>(residual.data_ptr()),                        \
+        reinterpret_cast<const __nv_bfloat16*>(weight.data_ptr()),                    \
+        reinterpret_cast<__nv_bfloat16*>(y_bf16.data_ptr()),                          \
+        reinterpret_cast<__nv_fp8_e4m3*>(xq.data_ptr()),                              \
+        reinterpret_cast<uint32_t*>(xs.data_ptr()),                                   \
+        M, static_cast<int>(xs.stride(1)), static_cast<float>(eps), 0.0f);             \
+  } while (0)
+  switch (rows_per_block) {
+    case 1: LAUNCH_SHARED_ROWS(1); break;
+    case 2: LAUNCH_SHARED_ROWS(2); break;
+    case 4: LAUNCH_SHARED_ROWS(4); break;
+    default: TORCH_CHECK(false, "rows_per_block must be 1, 2 or 4");
+  }
+#undef LAUNCH_SHARED_ROWS
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("infini_fused_add_rmsnorm_quant_ue8m0", &fused_add_rmsnorm_quant_ue8m0,
         "fused residual-add + RMSNorm + per-token-group UE8M0 fp8 quant");
+  m.def("infini_fused_shared_add_rmsnorm_quant_ue8m0",
+        &fused_shared_add_rmsnorm_quant_ue8m0,
+        "fused BF16 shared+routed round + residual-add + RMSNorm + UE8M0 quant");
 }

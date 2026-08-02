@@ -28,18 +28,20 @@ GPUs, worst of {pooled, AB-median, BA-median, order-balanced}):
 
 Default OFF. Enable with SGLANG_INFINI_FUSED_NORM_QUANT=1 (registered in srt/environ.py).
 
-KNOWN LIMITATION — why this is inert for DSA models today
+Two-input limitation and the GLM-5.2 three-input sibling
 ---------------------------------------------------------
 Both `communicator.py` call sites pack the *unquantized* bf16 activation as a
 third tuple element when `get_attn_tp_context().is_dsa` is true, because the DSA
 indexer consumes it. This kernel does not emit that bf16 (not writing it is
 precisely where the traffic saving comes from), so `is_available()` refuses the
 DSA case and the caller falls through to the stock path. GLM-5.2 IS a DSA model,
-so this provider is currently INERT for it.
+so the original two-input provider remains inert for it.
 
-Making it live for GLM-5.2 requires adding an optional bf16 output to the kernel
-and re-measuring — the saving will be smaller, because the bf16 write comes back.
-Do not assume the numbers above survive that change.
+The separately gated three-input sibling preserves the earlier observable
+`bf16(shared+routed)` round and emits normalized bf16 for DSA together with the
+residual and packed FP8 ABI. It is selected only when the model proves that the
+shared/routed pair crosses a trivial SCATTERED layer boundary. Its B300 result is
+measured independently; the two-input numbers above do not apply to it.
 """
 
 from __future__ import annotations
@@ -74,8 +76,16 @@ def enabled() -> bool:
     return envs.SGLANG_INFINI_FUSED_NORM_QUANT.get()
 
 
+def shared_add_enabled() -> bool:
+    return envs.SGLANG_INFINI_FUSED_SHARED_ADD_NORM_QUANT.get()
+
+
 def _rows_per_block() -> int:
     return envs.SGLANG_INFINI_FUSED_NQ_ROWS.get()
+
+
+def _shared_rows_per_block() -> int:
+    return envs.SGLANG_INFINI_FUSED_SHARED_NQ_ROWS.get()
 
 
 def _load():
@@ -192,3 +202,99 @@ def infini_fused_add_rmsnorm_quant(
         hidden_states, residual, weight, xq, xs, eps, _rows_per_block(), _SMEM_STAGE
     )
     return (xq, xs), residual
+
+
+def infini_fused_shared_add_rmsnorm_quant(
+    shared: torch.Tensor,
+    routed: torch.Tensor,
+    residual: torch.Tensor,
+    weight: torch.Tensor,
+    eps: float,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Fuse the source-proven post-DeepEP inter-layer boundary.
+
+    This computes the production order exactly::
+
+        combined = bf16(shared + routed)
+        residual_out = combined + residual
+        normed = RMSNorm(residual_out) * weight
+        x_fp8, packed_scale = group_quant(normed)
+
+    The explicit BF16 ``combined`` round is load-bearing. The returned tuple is
+    ``(normed_bf16, residual_out, x_fp8, packed_ue8m0_scale)`` so the DSA
+    indexer and FP8 projection consumers retain their complete ABI.
+
+    The model selects this only behind a default-off, fail-closed DeepEP /
+    SCATTERED-boundary admission check.
+    """
+    mod = _load()
+    if mod is None:
+        raise RuntimeError("[infini] fused shared-add norm+quant unavailable")
+    tensors = (shared, routed, residual)
+    if not all(
+        tensor.is_cuda
+        and tensor.dtype is torch.bfloat16
+        and tensor.is_contiguous()
+        and tensor.shape == shared.shape
+        for tensor in tensors
+    ):
+        raise ValueError("shared/routed/residual must be contiguous CUDA BF16 peers")
+    if shared.dim() != 2 or shared.shape[1] != _HIDDEN:
+        raise ValueError(f"expected [M,{_HIDDEN}] shared input, got {tuple(shared.shape)}")
+    if not (
+        weight.is_cuda
+        and weight.dtype is torch.bfloat16
+        and weight.shape == (_HIDDEN,)
+        and weight.is_contiguous()
+    ):
+        raise ValueError(f"weight must be CUDA BF16 [{_HIDDEN}]")
+
+    M, K = shared.shape
+    normed = torch.empty_like(shared)
+    xq, xs = _alloc_quant_outputs(M, K, shared.device)
+    mod.infini_fused_shared_add_rmsnorm_quant_ue8m0(
+        shared,
+        routed,
+        residual,
+        weight,
+        normed,
+        xq,
+        xs,
+        eps,
+        _shared_rows_per_block(),
+    )
+    return normed, residual, xq, xs
+
+
+def is_shared_add_available(
+    shared: torch.Tensor,
+    routed: torch.Tensor,
+    residual: Optional[torch.Tensor],
+    weight: torch.Tensor,
+) -> bool:
+    """Fail-closed admission for the DSA-capable three-input sibling."""
+    if not shared_add_enabled() or residual is None:
+        return False
+    tensors = (shared, routed, residual)
+    if not all(
+        tensor.is_cuda
+        and tensor.dtype is torch.bfloat16
+        and tensor.is_contiguous()
+        and tensor.shape == shared.shape
+        for tensor in tensors
+    ):
+        return False
+    if torch.cuda.get_device_capability(shared.device) != (10, 3):
+        return False  # measured B300 contract; B200 keeps stock until re-gated
+    if shared.dim() != 2 or shared.shape[1] != _HIDDEN:
+        return False
+    if not (
+        weight.is_cuda
+        and weight.dtype is torch.bfloat16
+        and weight.shape == (_HIDDEN,)
+        and weight.is_contiguous()
+    ):
+        return False
+    if _shared_rows_per_block() not in (1, 2, 4):
+        return False
+    return _load() is not None

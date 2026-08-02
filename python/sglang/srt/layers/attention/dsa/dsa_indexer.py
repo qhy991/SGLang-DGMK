@@ -494,10 +494,19 @@ class Indexer(MultiPlatformOp):
     def _weights_proj_bf16_in_fp32_out(
         self, x: Union[torch.Tensor, Tuple[torch.Tensor, ...]]
     ) -> torch.Tensor:
-        # aiter (ROCm gfx95): extract the passthrough bf16 tensor from the
-        # 3-tuple (fp8, scale, bf16) produced by fused_rms_fp8_group_quant,
-        # avoiding an expensive FP8-to-bf16 dequantization.
-        if _use_aiter and _is_gfx95_supported and isinstance(x, tuple) and len(x) == 3:
+        # Both aiter gfx95 and the opt-in sm100 inter-layer kernel can pass the
+        # exact unquantized activation as (fp8, scale, bf16). The sm100 tensor
+        # is explicitly marked so unrelated three-tuples retain stock behavior.
+        if (
+            isinstance(x, tuple)
+            and len(x) == 3
+            and torch.is_tensor(x[2])
+            and x[2].dtype is torch.bfloat16
+            and (
+                (_use_aiter and _is_gfx95_supported)
+                or getattr(x[2], "_sglang_dsa_bf16_passthrough", False)
+            )
+        ):
             x = x[2]
         if _is_cuda:
             from sglang.srt.layers.glm52_opt.bf16_mm import try_index_weights_proj
@@ -1906,17 +1915,20 @@ class Indexer(MultiPlatformOp):
                 # full graph split path when prefill requires it.
                 q_fp8, q_scale = act_quant(query, self.block_size, self.scale_fmt)
 
-            # aiter (ROCm gfx95): the 3-tuple (fp8, scale, bf16) from
-            # fused_rms_fp8_group_quant is passed directly to _get_logits_head_gate,
-            # which extracts the bf16 tensor via _weights_proj_bf16_in_fp32_out,
-            # completely skipping the FP8 dequantization path below.
+            # A 3-tuple may carry the exact normalized BF16 output from either
+            # gfx95 or sm100 fused norm+quant. It is the DSA head-gate input;
+            # reconstructing it from FP8 changes both numerics and latency.
             if (
-                _use_aiter
-                and _is_gfx95_supported
-                and isinstance(x, tuple)
+                isinstance(x, tuple)
                 and len(x) == 3
+                and torch.is_tensor(x[2])
+                and x[2].dtype is torch.bfloat16
+                and (
+                    (_use_aiter and _is_gfx95_supported)
+                    or getattr(x[2], "_sglang_dsa_bf16_passthrough", False)
+                )
             ):
-                x_for_gate = x
+                x_for_gate = x[2]
             elif isinstance(x, tuple):
                 assert len(x) in (
                     2,
