@@ -277,14 +277,17 @@ def moe_fused_gate(
     num_expert_group: int = 1,
     topk_group: int = 1,
     num_token_non_padded: Optional[torch.Tensor] = None,
+    output_ids_int64: bool = False,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Triton fused router: scoring + bias + topk + (optional) renorm/scale.
 
     Mirrors the semantics of :func:`moe_fused_gate_jit` (the CUDA JIT kernel).
     With ``num_expert_group > 1`` it performs DeepSeek-V3 grouped routing
     (per-group top-2-sum group scores, keep ``topk_group`` groups, then top-k
-    within). The first argument is named ``scores`` (raw GEMM logits) to match
-    the existing call sites.
+    within). ``output_ids_int64`` lets a guarded DeepEP low-latency path write
+    the dispatch ABI directly and avoid a separate int32-to-int64 copy. The
+    first argument is named ``scores`` (raw GEMM logits) to match the existing
+    call sites.
     """
     scoring_func_int = _SCORING_FUNC_MAP.get(scoring_func.lower())
     assert (
@@ -321,7 +324,11 @@ def moe_fused_gate(
     BLOCK_G = triton.next_power_of_2(num_expert_group)
 
     weights = torch.empty((M, K), dtype=torch.float32, device=scores.device)
-    indices = torch.empty((M, K), dtype=torch.int32, device=scores.device)
+    indices = torch.empty(
+        (M, K),
+        dtype=torch.int64 if output_ids_int64 else torch.int32,
+        device=scores.device,
+    )
 
     BLOCK_N = triton.next_power_of_2(N)  # 256 -> 256, 384 -> 512
     BLOCK_K = triton.next_power_of_2(K)  # 6 -> 8, 8 -> 8

@@ -117,7 +117,7 @@ write_env() {
         echo "SGLANG_GLM52_OPT=0"
         echo "SGLANG_GLM52_OPT_PROFILE=serving_safe"
         ;;
-      shared_stock|shared_fused|router_stock|router_fused)
+      shared_stock|shared_fused|router_stock|router_fused|router_ids_stock|router_ids_fused)
         echo "SGLANG_GLM52_OPT=1"
         echo "SGLANG_GLM52_OPT_PROFILE=combined_winners"
         # e2e-proven only — no fused_qkv_a, no dsa_prefill
@@ -132,6 +132,11 @@ write_env() {
           echo "SGLANG_GLM52_ROUTER_PAD_MASK_FUSION=1"
         else
           echo "SGLANG_GLM52_ROUTER_PAD_MASK_FUSION=0"
+        fi
+        if [[ "$mode" == "router_ids_fused" ]]; then
+          echo "SGLANG_GLM52_ROUTER_DEEPEP_IDS_FUSION=1"
+        else
+          echo "SGLANG_GLM52_ROUTER_DEEPEP_IDS_FUSION=0"
         fi
         echo "SGLANG_GLM52_OPT_OPS=$ops"
         echo "SGLANG_GLM52_OPT_M_BUCKETS=dsa_decode_attn:16|32,o_proj:16|32,index_q_upproj:16|32"
@@ -300,7 +305,7 @@ run_label() {
   wait_gpus_free
   launch_serve "$label"
   wait_ready "$label"
-  if [[ "$label" == "shared_stock" || "$label" == "shared_fused" || "$label" == "router_stock" || "$label" == "router_fused" ]]; then
+  if [[ "$label" == "shared_stock" || "$label" == "shared_fused" || "$label" == "router_stock" || "$label" == "router_fused" || "$label" == "router_ids_stock" || "$label" == "router_ids_fused" ]]; then
     local graph_buckets=(1 2 4 8 12 16)
     if [[ "$SGLANG_CUDA_GRAPH_MAX_BS" -ge 32 ]]; then
       graph_buckets+=(32)
@@ -352,6 +357,23 @@ run_label() {
       fi
       echo "[VALID] router mask fusion label=$label selection_count=$router_selection_count"
     fi
+    if [[ "$label" == "router_ids_stock" || "$label" == "router_ids_fused" ]]; then
+      local router_ids_selection_count
+      router_ids_selection_count=$(grep -F -c \
+        "GLM-5.2 router DeepEP-ID fusion selected" \
+        "$OUT/serve_${label}.log" || true)
+      if [[ "$label" == "router_ids_fused" ]]; then
+        if [[ "$router_ids_selection_count" -ne "$DP" ]]; then
+          echo "[ERR] expected router DeepEP-ID fusion on all $DP ranks; observed $router_ids_selection_count"
+          tail -160 "$OUT/serve_${label}.log"
+          return 1
+        fi
+      elif [[ "$router_ids_selection_count" -ne 0 ]]; then
+        echo "[ERR] stock denominator selected router DeepEP-ID fusion on $router_ids_selection_count ranks"
+        return 1
+      fi
+      echo "[VALID] router DeepEP-ID fusion label=$label selection_count=$router_ids_selection_count"
+    fi
   fi
 
   for gbs in $GLOBAL_BS_LIST; do
@@ -391,7 +413,11 @@ baseline_label, candidate_label = labels
 boundary = (
     "shared-expert activation+quant boundary"
     if candidate_label == "shared_fused"
-    else "router padded-ID mask boundary"
+    else (
+        "router padded-ID mask boundary"
+        if candidate_label == "router_fused"
+        else "router padded-ID mask plus DeepEP int64-ID boundary"
+    )
 )
 
 def pct(xs, p):

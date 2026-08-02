@@ -97,7 +97,7 @@ from sglang.srt.eplb.expert_location_dispatch import (
     topk_ids_logical_to_physical,
 )
 from sglang.srt.layers.dp_attention import is_allocation_symmetric
-from sglang.srt.layers.moe import get_moe_runner_backend
+from sglang.srt.layers.moe import get_moe_a2a_backend, get_moe_runner_backend
 from sglang.srt.layers.moe.utils import (
     has_per_rank_fused_shared_slots,
 )
@@ -124,6 +124,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 _is_cuda = is_cuda()
 _router_pad_mask_fusion_logged = False
+_router_deepep_ids_fusion_logged = False
 
 
 def _log_router_pad_mask_fusion_selected() -> None:
@@ -134,6 +135,16 @@ def _log_router_pad_mask_fusion_selected() -> None:
             "EPLB/remap=off routed-expert-capture=off"
         )
         _router_pad_mask_fusion_logged = True
+
+
+def _log_router_deepep_ids_fusion_selected() -> None:
+    global _router_deepep_ids_fusion_logged
+    if not _router_deepep_ids_fusion_logged:
+        logger.info(
+            "GLM-5.2 router DeepEP-ID fusion selected: "
+            "masked int64 IDs written by router"
+        )
+        _router_deepep_ids_fusion_logged = True
 
 
 _is_hip = is_hip()
@@ -1304,6 +1315,7 @@ def biased_grouped_topk_gpu(
     routed_scaling_factor: Optional[float] = None,
     apply_routed_scaling_factor_on_output: Optional[bool] = False,
     num_token_non_padded: Optional[torch.Tensor] = None,
+    output_ids_int64: bool = False,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     num_tokens = gating_output.shape[0]
     num_experts = gating_output.shape[1]
@@ -1495,6 +1507,7 @@ def biased_grouped_topk_gpu(
                 ),
                 apply_routed_scaling_factor_on_output=apply_routed_scaling_factor_on_output,
                 num_token_non_padded=num_token_non_padded,
+                output_ids_int64=output_ids_int64,
             )
         elif (
             _is_cuda
@@ -1519,6 +1532,7 @@ def biased_grouped_topk_gpu(
                 ),
                 apply_routed_scaling_factor_on_output=apply_routed_scaling_factor_on_output,
                 num_token_non_padded=num_token_non_padded,
+                output_ids_int64=output_ids_int64,
             )
         elif (
             _is_xpu
@@ -1897,9 +1911,8 @@ def select_experts(
     # post-router mask is only valid when the exact JIT router path is selected,
     # no later benchmark override replaces its IDs, and no observer needs the
     # historical pre-mask values.
-    router_pad_mask_fused = bool(
-        envs.SGLANG_GLM52_ROUTER_PAD_MASK_FUSION.get()
-        and _is_cuda
+    router_pad_mask_eligible = bool(
+        _is_cuda
         and num_token_non_padded is not None
         and expert_location_dispatch_info is None
         and get_global_experts_capturer() is None
@@ -1915,7 +1928,21 @@ def select_experts(
         and not envs.SGLANG_SIMULATE_UNIFORM_EXPERTS.get()
         and not envs.SGLANG_SIMULATE_ROUND_ROBIN_EXPERTS.get()
     )
-    if router_pad_mask_fused:
+    router_deepep_ids_fused = bool(
+        router_pad_mask_eligible
+        and envs.SGLANG_GLM52_ROUTER_DEEPEP_IDS_FUSION.get()
+        and get_moe_a2a_backend().is_deepep()
+    )
+    router_pad_mask_fused = bool(
+        router_pad_mask_eligible
+        and (
+            envs.SGLANG_GLM52_ROUTER_PAD_MASK_FUSION.get()
+            or router_deepep_ids_fused
+        )
+    )
+    if router_deepep_ids_fused:
+        _log_router_deepep_ids_fusion_selected()
+    elif router_pad_mask_fused:
         _log_router_pad_mask_fusion_selected()
 
     # Set by the fused-gating+pack branch below; None everywhere else.
@@ -1964,6 +1991,7 @@ def select_experts(
                 num_token_non_padded=(
                     num_token_non_padded if router_pad_mask_fused else None
                 ),
+                output_ids_int64=router_deepep_ids_fused,
             )
     elif torch_native and custom_routing_function is None:
         assert (

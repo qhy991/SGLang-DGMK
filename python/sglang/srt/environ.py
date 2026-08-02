@@ -948,6 +948,9 @@ class Envs:
     # unified Triton router's output store. Strict routing guards keep this off
     # for EPLB/remap, routed-expert capture, and non-JIT top-k paths.
     SGLANG_GLM52_ROUTER_PAD_MASK_FUSION = EnvBool(False)
+    # B300 experiment: additionally write the masked top-k IDs as int64, which
+    # is the direct DeepEP dispatch ABI, eliminating its per-layer dtype copy.
+    SGLANG_GLM52_ROUTER_DEEPEP_IDS_FUSION = EnvBool(False)
 
     # TopK
     SGLANG_OPT_USE_FUSED_HASH_TOPK = EnvBool(True)

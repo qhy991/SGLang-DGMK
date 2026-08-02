@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 import torch
 
@@ -42,6 +43,20 @@ class TestMoEFusedGatePadMask(unittest.TestCase):
                 self.assertTrue(torch.equal(fused_ids, ref_ids))
                 if num_valid < scores.shape[0]:
                     self.assertTrue(bool(torch.all(fused_ids[num_valid:] == -1)))
+
+                fused_weights_i64, fused_ids_i64 = moe_fused_gate(
+                    scores,
+                    bias,
+                    8,
+                    scoring_func="sigmoid",
+                    renormalize=True,
+                    routed_scaling_factor=2.5,
+                    num_token_non_padded=ntn,
+                    output_ids_int64=True,
+                )
+                self.assertEqual(fused_ids_i64.dtype, torch.int64)
+                self.assertTrue(torch.equal(fused_weights_i64, ref_weights))
+                self.assertTrue(torch.equal(fused_ids_i64, ref_ids.to(torch.int64)))
 
     def test_select_experts_flag_matches_stock_postprocess(self) -> None:
         from sglang.srt.environ import envs
@@ -86,6 +101,28 @@ class TestMoEFusedGatePadMask(unittest.TestCase):
         self.assertTrue(torch.equal(candidate.topk_weights, reference.topk_weights))
         self.assertTrue(torch.equal(candidate.topk_ids, reference.topk_ids))
         self.assertTrue(bool(torch.all(candidate.topk_ids[15:] == -1)))
+
+        with (
+            patch("sglang.srt.layers.moe.topk.get_moe_a2a_backend") as backend,
+            envs.SGLANG_GLM52_ROUTER_PAD_MASK_FUSION.override(False),
+            envs.SGLANG_GLM52_ROUTER_DEEPEP_IDS_FUSION.override(True),
+        ):
+            backend.return_value.is_deepep.return_value = True
+            deepep_candidate = select_experts(
+                hidden_states,
+                router_logits,
+                config,
+                layer_id=0,
+                num_token_non_padded=num_token_non_padded,
+            )
+
+        self.assertEqual(deepep_candidate.topk_ids.dtype, torch.int64)
+        self.assertTrue(
+            torch.equal(deepep_candidate.topk_weights, reference.topk_weights)
+        )
+        self.assertTrue(
+            torch.equal(deepep_candidate.topk_ids, reference.topk_ids.to(torch.int64))
+        )
 
 
 if __name__ == "__main__":
