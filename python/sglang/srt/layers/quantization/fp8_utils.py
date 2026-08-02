@@ -789,15 +789,35 @@ def deepgemm_w8a8_block_fp8_linear_with_fallback(
     input_scale: Optional[torch.Tensor] = None,
     bias: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
-    assert input_scale is None
-
-    output_dtype = input.dtype
+    prequantized = input_scale is not None
+    if prequantized:
+        if input.dtype != torch.float8_e4m3fn:
+            raise ValueError("prequantized DeepGEMM input must be float8_e4m3fn")
+        packed_scale_cols = ceil_div(input.shape[-1] // block_size[1], 4)
+        if (
+            input_scale.device != input.device
+            or input_scale.dtype != torch.int32
+            or input_scale.shape != (input.shape[0], packed_scale_cols)
+            or input_scale.stride(0) != 1
+            or input_scale.stride(1) != ceil_align(input.shape[0], 4)
+        ):
+            raise ValueError(
+                "prequantized DeepGEMM scale must use the packed MN-major "
+                "int32 UE8M0 ABI"
+            )
+        output_dtype = torch.bfloat16
+    else:
+        output_dtype = input.dtype
     dtype_supported = output_dtype == torch.bfloat16
 
     # TODO: https://github.com/sgl-project/sglang/pull/6890#issuecomment-2943395737
     shape_supported = weight.shape[0] % 64 == 0 and weight.shape[1] % 128 == 0
 
     if not (shape_supported and dtype_supported):
+        if prequantized:
+            raise ValueError(
+                "prequantized DeepGEMM input has no exact unsupported-shape fallback"
+            )
         # fall back to triton
         # If weight_scale is in UE8M0 packed format (int32), convert back to float32
         # UE8M0 format has shape (N, K//block_k//4) with dtype int32
@@ -813,7 +833,9 @@ def deepgemm_w8a8_block_fp8_linear_with_fallback(
     input_2d = input.view(-1, input.shape[-1])
     output_shape = [*input.shape[:-1], weight.shape[0]]
 
-    if not _is_musa:
+    if prequantized:
+        q_input, x_scale = input_2d, input_scale
+    elif not _is_musa:
         q_input, x_scale = sglang_per_token_group_quant_fp8(
             input_2d,
             block_size[1],

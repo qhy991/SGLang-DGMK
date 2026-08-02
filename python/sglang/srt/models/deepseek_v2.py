@@ -2247,7 +2247,13 @@ class DeepseekV2DecoderLayer(nn.Module):
         weight = getattr(
             getattr(self.self_attn, "fused_qkv_a_proj_with_mqa", None), "weight", None
         )
-        if weight is not None and weight.dtype == getattr(torch, "float8_e4m3fn", None):
+        if (
+            weight is not None
+            and weight.dtype == getattr(torch, "float8_e4m3fn", None)
+            and weight.dim() == 2
+            and weight.shape[0] % 64 == 0
+            and weight.shape[1] % 128 == 0
+        ):
             return "fp8"
         return ""
 

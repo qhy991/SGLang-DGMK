@@ -970,23 +970,39 @@ class Fp8LinearMethod(LinearMethodBase):
             op_name = prefix_to_op_name(getattr(layer, "prefix", None))
             with op_context(op_name):
                 if isinstance(x, tuple):
+                    if (
+                        len(x) == 3
+                        and getattr(
+                            x[2], "_sglang_dsa_bf16_passthrough", False
+                        )
+                        and self.w8a8_block_fp8_linear
+                        is not deepgemm_w8a8_block_fp8_linear_with_fallback
+                    ):
+                        # The NVIDIA inter-layer provider carries an exact BF16
+                        # third output for fail-closed fallback. Backends without
+                        # a prequantized DeepGEMM ABI must consume that stock value.
+                        x = x[2]
+                    else:
+                        return self.w8a8_block_fp8_linear(
+                            input=x[0],
+                            weight=layer.weight,
+                            block_size=self.weight_block_size,
+                            weight_scale=layer.weight_scale_inv,
+                            input_scale=x[1],
+                            bias=bias,
+                        )
+
+                if isinstance(x, torch.Tensor):
                     return self.w8a8_block_fp8_linear(
-                        input=x[0],
+                        input=x,
                         weight=layer.weight,
                         block_size=self.weight_block_size,
                         weight_scale=layer.weight_scale_inv,
-                        input_scale=x[1],
+                        input_scale=None,
                         bias=bias,
                     )
 
-                return self.w8a8_block_fp8_linear(
-                    input=x,
-                    weight=layer.weight,
-                    block_size=self.weight_block_size,
-                    weight_scale=layer.weight_scale_inv,
-                    input_scale=None,
-                    bias=bias,
-                )
+                raise TypeError(f"unsupported FP8 block-linear input type: {type(x)}")
 
         return apply_fp8_linear(
             input=x,
