@@ -117,7 +117,7 @@ write_env() {
         echo "SGLANG_GLM52_OPT=0"
         echo "SGLANG_GLM52_OPT_PROFILE=serving_safe"
         ;;
-      shared_stock|shared_fused)
+      shared_stock|shared_fused|router_stock|router_fused)
         echo "SGLANG_GLM52_OPT=1"
         echo "SGLANG_GLM52_OPT_PROFILE=combined_winners"
         # e2e-proven only — no fused_qkv_a, no dsa_prefill
@@ -127,6 +127,11 @@ write_env() {
           echo "SGLANG_GLM52_SHARED_EXPERT_SWIGLU_QUANT=1"
         else
           echo "SGLANG_GLM52_SHARED_EXPERT_SWIGLU_QUANT=0"
+        fi
+        if [[ "$mode" == "router_fused" ]]; then
+          echo "SGLANG_GLM52_ROUTER_PAD_MASK_FUSION=1"
+        else
+          echo "SGLANG_GLM52_ROUTER_PAD_MASK_FUSION=0"
         fi
         echo "SGLANG_GLM52_OPT_OPS=$ops"
         echo "SGLANG_GLM52_OPT_M_BUCKETS=dsa_decode_attn:16|32,o_proj:16|32,index_q_upproj:16|32"
@@ -295,7 +300,7 @@ run_label() {
   wait_gpus_free
   launch_serve "$label"
   wait_ready "$label"
-  if [[ "$label" == "shared_stock" || "$label" == "shared_fused" ]]; then
+  if [[ "$label" == "shared_stock" || "$label" == "shared_fused" || "$label" == "router_stock" || "$label" == "router_fused" ]]; then
     local graph_buckets=(1 2 4 8 12 16)
     if [[ "$SGLANG_CUDA_GRAPH_MAX_BS" -ge 32 ]]; then
       graph_buckets+=(32)
@@ -313,21 +318,40 @@ run_label() {
       echo "[VALID] B300/T=8192 routed SwiGLU winner selected for M=$bucket on all $selection_count ranks"
     done
 
-    local shared_selection_count
-    shared_selection_count=$(grep -F -c \
-      "GLM-5.2 shared-expert SwiGLU quant selected: round_to_bf16=True" \
-      "$OUT/serve_${label}.log" || true)
-    if [[ "$label" == "shared_fused" ]]; then
-      if [[ "$shared_selection_count" -ne "$DP" ]]; then
-        echo "[ERR] expected shared-expert fusion on all $DP ranks; observed $shared_selection_count"
-        tail -160 "$OUT/serve_${label}.log"
+    if [[ "$label" == "shared_stock" || "$label" == "shared_fused" ]]; then
+      local shared_selection_count
+      shared_selection_count=$(grep -F -c \
+        "GLM-5.2 shared-expert SwiGLU quant selected: round_to_bf16=True" \
+        "$OUT/serve_${label}.log" || true)
+      if [[ "$label" == "shared_fused" ]]; then
+        if [[ "$shared_selection_count" -ne "$DP" ]]; then
+          echo "[ERR] expected shared-expert fusion on all $DP ranks; observed $shared_selection_count"
+          tail -160 "$OUT/serve_${label}.log"
+          return 1
+        fi
+      elif [[ "$shared_selection_count" -ne 0 ]]; then
+        echo "[ERR] stock denominator selected shared-expert fusion on $shared_selection_count ranks"
         return 1
       fi
-    elif [[ "$shared_selection_count" -ne 0 ]]; then
-      echo "[ERR] stock denominator selected shared-expert fusion on $shared_selection_count ranks"
-      return 1
+      echo "[VALID] shared-expert fusion label=$label selection_count=$shared_selection_count"
     fi
-    echo "[VALID] shared-expert fusion label=$label selection_count=$shared_selection_count"
+    if [[ "$label" == "router_stock" || "$label" == "router_fused" ]]; then
+      local router_selection_count
+      router_selection_count=$(grep -F -c \
+        "GLM-5.2 router padded-ID mask fusion selected" \
+        "$OUT/serve_${label}.log" || true)
+      if [[ "$label" == "router_fused" ]]; then
+        if [[ "$router_selection_count" -ne "$DP" ]]; then
+          echo "[ERR] expected router mask fusion on all $DP ranks; observed $router_selection_count"
+          tail -160 "$OUT/serve_${label}.log"
+          return 1
+        fi
+      elif [[ "$router_selection_count" -ne 0 ]]; then
+        echo "[ERR] stock denominator selected router mask fusion on $router_selection_count ranks"
+        return 1
+      fi
+      echo "[VALID] router mask fusion label=$label selection_count=$router_selection_count"
+    fi
   fi
 
   for gbs in $GLOBAL_BS_LIST; do
@@ -361,6 +385,14 @@ S = int(os.environ["S"])
 out_len = int(os.environ["OUT_LEN"])
 global_bs_list = [int(value) for value in os.environ["GLOBAL_BS_LIST"].split()]
 labels = os.environ["LABELS"].split()
+if len(labels) != 2:
+    raise SystemExit(f"expected exactly two A/B labels, got {labels!r}")
+baseline_label, candidate_label = labels
+boundary = (
+    "shared-expert activation+quant boundary"
+    if candidate_label == "shared_fused"
+    else "router padded-ID mask boundary"
+)
 
 def pct(xs, p):
     if not xs:
@@ -437,7 +469,7 @@ for label in labels:
 lines = [
     f"# Decode TPOT summary (S={S}, out_len={out_len}, N≈{n_runs})",
     "",
-    "Both labels use the same winner stack; shared_fused changes only the contiguous shared-expert activation+quant boundary.",
+    f"Both labels use the same winner stack; {candidate_label} changes only the {boundary}.",
     "",
     "| label | global_BS | n | mean ITL (ms) | median ITL (ms) | stdev | p10 | p90 | min | max |",
     "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
@@ -447,10 +479,10 @@ for r in rows:
         f"| {r[0]} | {r[1]} | {r[2]} | {r[3]:.3f} | {r[4]:.3f} | {r[5]:.3f} | {r[6]:.3f} | {r[7]:.3f} | {r[8]:.3f} | {r[9]:.3f} |"
     )
 
-lines += ["", "## Shared-expert stock vs fused (median ITL)", ""]
+lines += ["", f"## {baseline_label} vs {candidate_label} (median ITL)", ""]
 for gbs in global_bs_list:
-    baseline = summary["cells"].get(f"shared_stock_bs{gbs}", {}).get("itl_ms")
-    candidate = summary["cells"].get(f"shared_fused_bs{gbs}", {}).get("itl_ms")
+    baseline = summary["cells"].get(f"{baseline_label}_bs{gbs}", {}).get("itl_ms")
+    candidate = summary["cells"].get(f"{candidate_label}_bs{gbs}", {}).get("itl_ms")
     if not baseline or not candidate:
         lines.append(f"- BS={gbs}: incomplete")
         continue

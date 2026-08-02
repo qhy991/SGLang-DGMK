@@ -944,6 +944,10 @@ class Envs:
     # B300 experiment: fuse the shared-expert BF16 SwiGLU write with its
     # packed-UE8M0 FP8 quantizer while preserving the intermediate BF16 round.
     SGLANG_GLM52_SHARED_EXPERT_SWIGLU_QUANT = EnvBool(False)
+    # B300 experiment: fold the CUDA-graph padded-row top-k ID mask into the
+    # unified Triton router's output store. Strict routing guards keep this off
+    # for EPLB/remap, routed-expert capture, and non-JIT top-k paths.
+    SGLANG_GLM52_ROUTER_PAD_MASK_FUSION = EnvBool(False)
 
     # TopK
     SGLANG_OPT_USE_FUSED_HASH_TOPK = EnvBool(True)

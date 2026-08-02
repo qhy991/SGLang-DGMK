@@ -123,6 +123,19 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 _is_cuda = is_cuda()
+_router_pad_mask_fusion_logged = False
+
+
+def _log_router_pad_mask_fusion_selected() -> None:
+    global _router_pad_mask_fusion_logged
+    if not _router_pad_mask_fusion_logged:
+        logger.info(
+            "GLM-5.2 router padded-ID mask fusion selected: "
+            "EPLB/remap=off routed-expert-capture=off"
+        )
+        _router_pad_mask_fusion_logged = True
+
+
 _is_hip = is_hip()
 _is_cpu = is_cpu()
 _is_cpu_amx_available = cpu_has_amx_support()
@@ -1290,6 +1303,7 @@ def biased_grouped_topk_gpu(
     num_fused_shared_experts: int = 0,
     routed_scaling_factor: Optional[float] = None,
     apply_routed_scaling_factor_on_output: Optional[bool] = False,
+    num_token_non_padded: Optional[torch.Tensor] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     num_tokens = gating_output.shape[0]
     num_experts = gating_output.shape[1]
@@ -1480,6 +1494,7 @@ def biased_grouped_topk_gpu(
                     routed_scaling_factor if routed_scaling_factor is not None else 1.0
                 ),
                 apply_routed_scaling_factor_on_output=apply_routed_scaling_factor_on_output,
+                num_token_non_padded=num_token_non_padded,
             )
         elif (
             _is_cuda
@@ -1503,6 +1518,7 @@ def biased_grouped_topk_gpu(
                     routed_scaling_factor if routed_scaling_factor is not None else 1.0
                 ),
                 apply_routed_scaling_factor_on_output=apply_routed_scaling_factor_on_output,
+                num_token_non_padded=num_token_non_padded,
             )
         elif (
             _is_xpu
@@ -1688,6 +1704,7 @@ def _post_process_topk_ids(
     layer_id: int,
     num_token_non_padded: Optional[torch.Tensor] = None,
     expert_location_dispatch_info: Optional[ExpertLocationDispatchInfo] = None,
+    padded_region_already_masked: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     num_fused_shared_experts = topk_config.num_fused_shared_experts
     use_per_rank_shared_slots = has_per_rank_fused_shared_slots(
@@ -1732,6 +1749,11 @@ def _post_process_topk_ids(
             # Per-rank shared-slot remap later adds shared slots to the topk ID
             # space, so keep the routed physical ids separately for statistics.
             recorder_topk_ids = routed_cols
+        elif padded_region_already_masked:
+            # The unified Triton router already wrote -1 for CUDA-graph padded
+            # rows. Selection guards require identity expert placement here, so
+            # there is no logical-to-physical remap left to perform.
+            assert expert_location_dispatch_info is None
         else:
             topk_ids = _biased_grouped_topk_postprocess(
                 topk_ids, expert_location_dispatch_info, num_token_non_padded
@@ -1871,6 +1893,31 @@ def select_experts(
 
     scoring_func = topk_config.scoring_func
 
+    # This is deliberately narrower than the kernel capability.  Skipping the
+    # post-router mask is only valid when the exact JIT router path is selected,
+    # no later benchmark override replaces its IDs, and no observer needs the
+    # historical pre-mask values.
+    router_pad_mask_fused = bool(
+        envs.SGLANG_GLM52_ROUTER_PAD_MASK_FUSION.get()
+        and _is_cuda
+        and num_token_non_padded is not None
+        and expert_location_dispatch_info is None
+        and get_global_experts_capturer() is None
+        and use_grouped_topk
+        and correction_bias is not None
+        and scoring_func == "sigmoid"
+        and num_expert_group == 1
+        and topk_group == 1
+        and num_fused_shared_experts == 0
+        and 1 < top_k <= 8
+        and router_logits.shape[1] == 256
+        and not _use_aiter
+        and not envs.SGLANG_SIMULATE_UNIFORM_EXPERTS.get()
+        and not envs.SGLANG_SIMULATE_ROUND_ROBIN_EXPERTS.get()
+    )
+    if router_pad_mask_fused:
+        _log_router_pad_mask_fusion_selected()
+
     # Set by the fused-gating+pack branch below; None everywhere else.
     packed_topk = None
 
@@ -1914,6 +1961,9 @@ def select_experts(
                 num_fused_shared_experts=num_fused_shared_experts,
                 routed_scaling_factor=routed_scaling_factor,
                 apply_routed_scaling_factor_on_output=apply_routed_scaling_factor_on_output,
+                num_token_non_padded=(
+                    num_token_non_padded if router_pad_mask_fused else None
+                ),
             )
     elif torch_native and custom_routing_function is None:
         assert (
@@ -2074,6 +2124,7 @@ def select_experts(
         num_token_non_padded=num_token_non_padded,
         layer_id=layer_id,
         expert_location_dispatch_info=expert_location_dispatch_info,
+        padded_region_already_masked=router_pad_mask_fused,
     )
 
     get_global_expert_distribution_recorder().on_select_experts(

@@ -23,6 +23,7 @@ CHUNKED_PREFILL_SIZE=${CHUNKED_PREFILL_SIZE:-2048}
 MAX_PREFILL_TOKENS=${MAX_PREFILL_TOKENS:-16384}
 SWIGLU_MODE=${SWIGLU_MODE:-candidate}
 SHARED_EXPERT_SWIGLU_QUANT=${SHARED_EXPERT_SWIGLU_QUANT:-0}
+ROUTER_PAD_MASK_FUSION=${ROUTER_PAD_MASK_FUSION:-0}
 RUN_ID=${RUN_ID:-nsys_moe_swiglu_${SWIGLU_MODE}_$(date -u +%Y%m%dT%H%M%SZ)}
 OUT=$ROOT/bench_results/$RUN_ID
 ENV_FILE=${SGLANG_GLM52_ENV_FILE:-$ROOT/cache/sglang/glm52_opt.env}
@@ -48,6 +49,10 @@ if [[ "$SWIGLU_MODE" != candidate && "$SWIGLU_MODE" != stock ]]; then
 fi
 if [[ "$SHARED_EXPERT_SWIGLU_QUANT" != 0 && "$SHARED_EXPERT_SWIGLU_QUANT" != 1 ]]; then
   echo "[ERR] SHARED_EXPERT_SWIGLU_QUANT must be 0 or 1; got $SHARED_EXPERT_SWIGLU_QUANT" >&2
+  exit 2
+fi
+if [[ "$ROUTER_PAD_MASK_FUSION" != 0 && "$ROUTER_PAD_MASK_FUSION" != 1 ]]; then
+  echo "[ERR] ROUTER_PAD_MASK_FUSION must be 0 or 1; got $ROUTER_PAD_MASK_FUSION" >&2
   exit 2
 fi
 for path in "$PY" "$NSYS" "$SERVER_LAUNCHER" "$TRIGGER_RUNNER" \
@@ -167,6 +172,7 @@ SGLANG_GLM52_O_PROJ_GRAPH_ONLY=1
 SGLANG_GLM52_INDEX_Q_UPPROJ_GRAPH_ONLY=1
 SGLANG_GLM52_INFINI_MOE_ALIGN=1
 SGLANG_GLM52_SHARED_EXPERT_SWIGLU_QUANT=$SHARED_EXPERT_SWIGLU_QUANT
+SGLANG_GLM52_ROUTER_PAD_MASK_FUSION=$ROUTER_PAD_MASK_FUSION
 GLM52_FLASHMLA_USE_PREBUILT=1
 GLM52_FLASHMLA_DECODE_STACK=p1_c2
 EOF
@@ -183,6 +189,7 @@ fi
   echo "- topology: TP8/DP8/EP8; CUDA graph max BS=$SGLANG_CUDA_GRAPH_MAX_BS"
   echo "- capture: cuda,nvtx; cudaProfilerApi; ${NSYS_DURATION}s"
   echo "- shared-expert SwiGLU+quant fusion: $SHARED_EXPERT_SWIGLU_QUANT"
+  echo "- router padded-ID mask fusion: $ROUTER_PAD_MASK_FUSION"
   if [[ "$SWIGLU_MODE" == candidate ]]; then
     echo "- SwiGLU: cuda_valid_cta; stock body; grid=128 rather than 65,536"
   else
@@ -251,6 +258,21 @@ for i in $(seq 1 180); do
   sleep 10
 done
 [[ "$ready" -eq 1 ]] || { echo "[ERR] server readiness timeout" >&2; exit 2; }
+
+router_selection_count=$(grep -F -c \
+  "GLM-5.2 router padded-ID mask fusion selected" \
+  "$OUT/nsys_launch.log" || true)
+if [[ "$ROUTER_PAD_MASK_FUSION" == 1 ]]; then
+  if [[ "$router_selection_count" -ne "$DP" ]]; then
+    echo "[ERR] expected router mask fusion on all $DP ranks; observed $router_selection_count" >&2
+    tail -160 "$OUT/nsys_launch.log"
+    exit 2
+  fi
+elif [[ "$router_selection_count" -ne 0 ]]; then
+  echo "[ERR] stock trace selected router mask fusion on $router_selection_count ranks" >&2
+  exit 2
+fi
+echo "[VALID] router mask fusion=$ROUTER_PAD_MASK_FUSION selection_count=$router_selection_count"
 
 selection_pattern="GLM-5.2 masked SwiGLU quant selected: variant=cuda_valid_cta capability=(10, 3) shape=(32, 8192, 4096)"
 selection_count=$(grep -c "$selection_pattern" "$OUT/nsys_launch.log" || true)
