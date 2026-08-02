@@ -22,6 +22,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--candidate", type=Path, required=True)
     parser.add_argument("--after", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--before-label", default="p1_before")
+    parser.add_argument("--candidate-label", default="r2a")
+    parser.add_argument("--after-label", default="p1_after")
     parser.add_argument("--expected-runs", type=int, default=50)
     parser.add_argument("--cache-hit-tolerance", type=float, default=0.001)
     parser.add_argument("--bootstrap-samples", type=int, default=20_000)
@@ -126,7 +129,10 @@ def main() -> None:
     if args.expected_runs <= 0 or args.bootstrap_samples <= 0:
         raise SystemExit("expected-runs and bootstrap-samples must be positive")
 
-    labels = ("p1_before", "r2a", "p1_after")
+    labels = (args.before_label, args.candidate_label, args.after_label)
+    if any(not label.strip() for label in labels) or len(set(labels)) != 3:
+        raise SystemExit("before/candidate/after labels must be non-empty and distinct")
+    before_label, candidate_label, after_label = labels
     paths = (args.before, args.candidate, args.after)
     rows = [
         load_rows(
@@ -169,14 +175,17 @@ def main() -> None:
 
     arm_stats = {label: describe(values) for label, values in zip(labels, series)}
     midpoint_of_baseline_medians = (
-        float(arm_stats["p1_before"]["median"])
-        + float(arm_stats["p1_after"]["median"])
+        float(arm_stats[before_label]["median"])
+        + float(arm_stats[after_label]["median"])
     ) / 2.0
-    candidate_median = float(arm_stats["r2a"]["median"])
+    candidate_median = float(arm_stats[candidate_label]["median"])
     reduction = midpoint_of_baseline_medians - candidate_median
-    baseline_median_drift = float(arm_stats["p1_after"]["median"]) - float(
-        arm_stats["p1_before"]["median"]
+    baseline_median_drift = float(arm_stats[after_label]["median"]) - float(
+        arm_stats[before_label]["median"]
     )
+    before_distribution_key = f"{before_label}_minus_candidate"
+    after_distribution_key = f"{after_label}_minus_candidate"
+    drift_distribution_key = f"{after_label}_minus_{before_label}"
 
     result: dict[str, Any] = {
         "schema_version": 1,
@@ -209,27 +218,27 @@ def main() -> None:
             "candidate_speedup": midpoint_of_baseline_medians / candidate_median,
             "candidate_lower_than_both_baseline_medians": candidate_median
             < min(
-                float(arm_stats["p1_before"]["median"]),
-                float(arm_stats["p1_after"]["median"]),
+                float(arm_stats[before_label]["median"]),
+                float(arm_stats[after_label]["median"]),
             ),
             "baseline_median_drift_itl_ms": baseline_median_drift,
             "effect_exceeds_abs_baseline_median_drift": reduction
             > abs(baseline_median_drift),
         },
         "paired_distributions_itl_ms": {
-            "p1_before_minus_candidate": describe(candidate_vs_before),
-            "p1_after_minus_candidate": describe(candidate_vs_after),
+            before_distribution_key: describe(candidate_vs_before),
+            after_distribution_key: describe(candidate_vs_after),
             "baseline_midpoint_minus_candidate": describe(bracket_effect),
-            "p1_after_minus_p1_before": describe(baseline_drift),
+            drift_distribution_key: describe(baseline_drift),
         },
         "paired_bootstrap_ci95_itl_ms": {
-            "p1_before_minus_candidate_median": bootstrap_ci(
+            f"{before_distribution_key}_median": bootstrap_ci(
                 candidate_vs_before,
                 statistics.median,
                 samples=args.bootstrap_samples,
                 seed=args.seed + 3,
             ),
-            "p1_after_minus_candidate_median": bootstrap_ci(
+            f"{after_distribution_key}_median": bootstrap_ci(
                 candidate_vs_after,
                 statistics.median,
                 samples=args.bootstrap_samples,
@@ -247,7 +256,7 @@ def main() -> None:
                 samples=args.bootstrap_samples,
                 seed=args.seed + 1,
             ),
-            "p1_after_minus_p1_before_median": bootstrap_ci(
+            f"{drift_distribution_key}_median": bootstrap_ci(
                 baseline_drift,
                 statistics.median,
                 samples=args.bootstrap_samples,
@@ -259,10 +268,10 @@ def main() -> None:
         "baseline_midpoint_minus_candidate_median"
     ]
     before_ci = result["paired_bootstrap_ci95_itl_ms"][
-        "p1_before_minus_candidate_median"
+        f"{before_distribution_key}_median"
     ]
     after_ci = result["paired_bootstrap_ci95_itl_ms"][
-        "p1_after_minus_candidate_median"
+        f"{after_distribution_key}_median"
     ]
     result["decision"] = (
         "pass"
@@ -279,9 +288,9 @@ def main() -> None:
     point = result["point_estimate"]
     print(
         f"fixed-KV A-B-A {result['decision']}: "
-        f"P1 {arm_stats['p1_before']['median']:.6f} -> "
-        f"r2a {candidate_median:.6f} -> "
-        f"P1 {arm_stats['p1_after']['median']:.6f} ms; "
+        f"{before_label} {arm_stats[before_label]['median']:.6f} -> "
+        f"{candidate_label} {candidate_median:.6f} -> "
+        f"{after_label} {arm_stats[after_label]['median']:.6f} ms; "
         f"midpoint reduction={point['candidate_reduction_itl_ms']:+.6f} ms "
         f"({point['candidate_reduction_pct']:+.4f}%), "
         f"paired-median CI95=[{median_ci['ci95_low']:+.6f}, "

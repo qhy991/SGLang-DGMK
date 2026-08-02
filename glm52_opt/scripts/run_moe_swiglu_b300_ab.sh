@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Fair decode TPOT A/B: compare one candidate inside the existing decode winners.
-# Supports valid-CTA SwiGLU and an order-bracketed FlashMLA P1/r2a/P1 run.
+# Supports valid-CTA SwiGLU plus order-bracketed FlashMLA and router/DeepEP runs.
 #
 # Workload: S=32k KV, global BS ∈ {128,256} (local_M=16/32, DP=8).
 # Each measured run asks one_batch_server to build the exact per-request KV
@@ -49,6 +49,7 @@ FIXED_KV_RUNNER=${FIXED_KV_RUNNER:-$REPO/glm52_opt/scripts/run_fixed_kv_decode_s
 FIXED_KV_ABA_ANALYZER=${FIXED_KV_ABA_ANALYZER:-$REPO/glm52_opt/scripts/analyze_fixed_kv_aba.py}
 ENV_BACKUP=$OUT/original_glm52_opt.env
 ENV_ABSENT_MARKER=$OUT/original_glm52_opt.env.absent
+ACTIVE_SERVER_PID_FILE=$OUT/active_server_pid.txt
 
 PROVIDER=$REPO/python/sglang/srt/layers/glm52_opt/hotspot_candidates/flashmla_accel_bundle_provider.py
 
@@ -77,7 +78,10 @@ if [[ "$FIXED_KV_SERIES" == 1 && ! -f "$FIXED_KV_RUNNER" ]]; then
   echo "[ERR] missing fixed-KV series runner: $FIXED_KV_RUNNER" >&2
   exit 2
 fi
-if [[ "$FIXED_KV_SERIES" == 1 && "$LABELS" == "p1_before r2a p1_after" && ! -f "$FIXED_KV_ABA_ANALYZER" ]]; then
+if [[ "$FIXED_KV_SERIES" == 1 \
+      && ( "$LABELS" == "p1_before r2a p1_after" \
+        || "$LABELS" == "router_before router_ids router_after" ) \
+      && ! -f "$FIXED_KV_ABA_ANALYZER" ]]; then
   echo "[ERR] missing fixed-KV A-B-A analyzer: $FIXED_KV_ABA_ANALYZER" >&2
   exit 2
 fi
@@ -118,6 +122,8 @@ cat > "$OUT/README.md" <<MD
   requires \`FLASHMLA_R2A_SO\`
 - \`p1_before r2a p1_after\`: brackets r2a with two independently started
   P1 servers so host/service drift is visible
+- \`router_before router_ids router_after\`: brackets direct masked-int64
+  router output with two independently started stock router/DeepEP servers
 
 ## Excluded
 - \`fused_qkv_a_proj\` (leaf win, e2e historically flat/noisy)
@@ -152,7 +158,7 @@ write_env() {
         echo "SGLANG_GLM52_OPT=0"
         echo "SGLANG_GLM52_OPT_PROFILE=serving_safe"
         ;;
-      winners|swiglu|p1_before|p1_after|r2a)
+      winners|swiglu|p1_before|p1_after|r2a|router_before|router_ids|router_after)
         echo "SGLANG_GLM52_OPT=1"
         echo "SGLANG_GLM52_OPT_PROFILE=combined_winners"
         # e2e-proven only — no fused_qkv_a, no dsa_prefill
@@ -168,6 +174,12 @@ write_env() {
         echo "SGLANG_GLM52_O_PROJ_GRAPH_ONLY=1"
         echo "SGLANG_GLM52_INDEX_Q_UPPROJ_GRAPH_ONLY=1"
         echo "SGLANG_GLM52_INFINI_MOE_ALIGN=1"
+        echo "SGLANG_GLM52_ROUTER_PAD_MASK_FUSION=0"
+        if [[ "$mode" == "router_ids" ]]; then
+          echo "SGLANG_GLM52_ROUTER_DEEPEP_IDS_FUSION=1"
+        else
+          echo "SGLANG_GLM52_ROUTER_DEEPEP_IDS_FUSION=0"
+        fi
         echo "GLM52_FLASHMLA_USE_PREBUILT=1"
         if [[ "$mode" == "r2a" ]]; then
           [[ -n "$FLASHMLA_R2A_SO" && -f "$FLASHMLA_R2A_SO" ]] || {
@@ -187,9 +199,38 @@ write_env() {
 }
 
 cleanup_ours() {
-  fuser -k "${PORT}/tcp" 2>/dev/null || true
-  sleep 4
-  fuser -k "${PORT}/tcp" 2>/dev/null || true
+  local server_pid="" recorded_pid=0
+  if [[ -f "$ACTIVE_SERVER_PID_FILE" ]]; then
+    server_pid=$(cat "$ACTIVE_SERVER_PID_FILE")
+    recorded_pid=1
+  fi
+  if [[ -z "$server_pid" || ! -r "/proc/$server_pid/cmdline" ]]; then
+    server_pid=$(ss -ltnp 2>/dev/null |
+      sed -n "s/.*:${PORT} .*pid=\\([0-9][0-9]*\\).*/\\1/p" | head -1)
+    recorded_pid=0
+  fi
+  if [[ -n "$server_pid" && -r "/proc/$server_pid/cmdline" ]]; then
+    local cmdline pgid
+    cmdline=$(tr '\0' ' ' < "/proc/$server_pid/cmdline")
+    if [[ "$recorded_pid" == 1 \
+          || ( "$cmdline" == *sglang* && "$cmdline" == *"--port $PORT"* ) ]]; then
+      pgid=$(ps -o pgid= -p "$server_pid" | tr -d ' ')
+      if [[ -n "$pgid" ]]; then
+        kill -TERM -- "-$pgid" 2>/dev/null || true
+        for _ in $(seq 1 20); do
+          kill -0 "$server_pid" 2>/dev/null || break
+          sleep 1
+        done
+        if kill -0 "$server_pid" 2>/dev/null; then
+          kill -KILL -- "-$pgid" 2>/dev/null || true
+        fi
+      fi
+    else
+      echo "[ERR] refusing to clean unowned listener on port $PORT: $cmdline" >&2
+      return 1
+    fi
+  fi
+  rm -f "$ACTIVE_SERVER_PID_FILE"
   sleep 4
 }
 
@@ -257,9 +298,10 @@ launch_serve() {
     unset GLM52_FLASHMLA_PREBUILT_SO
     mkdir -p "$SGLANG_DG_CACHE_DIR" "$TMPDIR"
     export SGLANG_EXTRA_SERVE_ARGS="--mem-fraction-static ${MEM_FRACTION_STATIC}"
-    ROOT="$ROOT" REPO="$REPO" MODEL="$MODEL" bash "$SERVER_LAUNCHER"
+    ROOT="$ROOT" REPO="$REPO" MODEL="$MODEL" exec setsid bash "$SERVER_LAUNCHER"
   ) > "$OUT/serve_${label}.log" 2>&1 &
-  echo $! > "$OUT/serve_pid_${label}.txt"
+  echo $! > "$ACTIVE_SERVER_PID_FILE"
+  cp -f "$ACTIVE_SERVER_PID_FILE" "$OUT/serve_pid_${label}.txt"
   echo "[INFO] launched serve pid=$(cat "$OUT/serve_pid_${label}.txt") label=$label"
 }
 
@@ -357,6 +399,21 @@ run_label() {
     sha256sum "$FLASHMLA_R2A_SO" > "$OUT/flashmla_r2a_so.sha256"
     echo "[VALID] r2a SO loaded_ranks=$loaded_ranks path=$r2a_real"
   fi
+  local router_ids_selection_count
+  router_ids_selection_count=$(grep -F -c \
+    "GLM-5.2 router DeepEP-ID fusion selected" \
+    "$OUT/serve_${label}.log" || true)
+  if [[ "$label" == "router_ids" ]]; then
+    if [[ "$router_ids_selection_count" -ne "$DP" ]]; then
+      echo "[ERR] expected router DeepEP-ID fusion on all $DP ranks; observed $router_ids_selection_count" >&2
+      tail -160 "$OUT/serve_${label}.log"
+      return 1
+    fi
+  elif [[ "$router_ids_selection_count" -ne 0 ]]; then
+    echo "[ERR] baseline label=$label selected router DeepEP-ID fusion on $router_ids_selection_count ranks" >&2
+    return 1
+  fi
+  echo "[VALID] router DeepEP-ID label=$label selection_count=$router_ids_selection_count"
   if [[ "$label" == "swiglu" ]]; then
     local graph_buckets=(1 2 4 8 12 16)
     if [[ "$SGLANG_CUDA_GRAPH_MAX_BS" -ge 32 ]]; then
@@ -670,14 +727,28 @@ if [[ "$VALIDATE_ONLY" == 1 ]]; then
 fi
 
 summarize
-if [[ "$FIXED_KV_SERIES" == 1 && "$LABELS" == "p1_before r2a p1_after" ]]; then
+if [[ "$FIXED_KV_SERIES" == 1 \
+      && ( "$LABELS" == "p1_before r2a p1_after" \
+        || "$LABELS" == "router_before router_ids router_after" ) ]]; then
+  if [[ "$LABELS" == "p1_before r2a p1_after" ]]; then
+    aba_before=p1_before
+    aba_candidate=r2a
+    aba_after=p1_after
+  else
+    aba_before=router_before
+    aba_candidate=router_ids
+    aba_after=router_after
+  fi
   for gbs in $GLOBAL_BS_LIST; do
     "$PY" "$FIXED_KV_ABA_ANALYZER" \
-      --before "$OUT/decode_p1_before_bs${gbs}.jsonl" \
-      --candidate "$OUT/decode_r2a_bs${gbs}.jsonl" \
-      --after "$OUT/decode_p1_after_bs${gbs}.jsonl" \
+      --before "$OUT/decode_${aba_before}_bs${gbs}.jsonl" \
+      --candidate "$OUT/decode_${aba_candidate}_bs${gbs}.jsonl" \
+      --after "$OUT/decode_${aba_after}_bs${gbs}.jsonl" \
       --output "$OUT/ABA_BOOTSTRAP_bs${gbs}.json" \
-      --expected-runs "$N_RUNS"
+      --expected-runs "$N_RUNS" \
+      --before-label "$aba_before" \
+      --candidate-label "$aba_candidate" \
+      --after-label "$aba_after"
   done
 fi
 echo "======== ALL DONE $(date -Is) OUT=$OUT ========"
