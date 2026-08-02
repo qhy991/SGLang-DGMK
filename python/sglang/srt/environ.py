@@ -1065,6 +1065,9 @@ class Envs:
     # Experimental GLM-5.2 Q-LoRA producer. Fuses the strided H=2048 q_a
     # RMSNorm with packed UE8M0 quant while retaining exact BF16 for DSA.
     SGLANG_INFINI_FUSED_QA_NORM_QUANT = EnvBool(False)
+    # Experimental GLM-5.2 V-apply producer. Fuses the FP8 BMM, BF16 layout
+    # materialization, and packed UE8M0 quant before o_proj on B300 decode.
+    SGLANG_INFINI_V_APPLY_QUANT = EnvBool(False)
 
     # Plugin system
     SGLANG_PLATFORM = EnvStr("")

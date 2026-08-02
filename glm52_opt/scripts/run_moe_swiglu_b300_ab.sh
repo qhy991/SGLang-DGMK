@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Fair decode TPOT A/B: existing decode winners vs valid-CTA SwiGLU quant.
-#   Include: FlashMLA P1+c2 + o_proj + index_q_upproj fixed_nk + MoE M-tile align
-#   Exclude: fused_qkv_a (e2e historically flat/noisy), dsa_prefill, r2a, q_b/index_k/score
+# Fair decode TPOT A/B: compare one candidate inside the existing decode winners.
+# Supports valid-CTA SwiGLU and an order-bracketed FlashMLA P1/r2a/P1 run.
 #
 # Workload: S=32k KV, global BS ∈ {128,256} (local_M=16/32, DP=8).
 # Each measured run asks one_batch_server to build the exact per-request KV
@@ -26,6 +25,14 @@ OUT_LEN=${OUT_LEN:-48}
 N_RUNS=${N_RUNS:-3}
 GLOBAL_BS_LIST=${GLOBAL_BS_LIST:-"128"}
 LABELS=${LABELS:-"winners swiglu"}
+FLASHMLA_R2A_SO=${FLASHMLA_R2A_SO:-}
+# Opt in for dense repeated measurements after one audited prefix-cache build.
+# The default preserves the historical, independently flushed protocol.
+FIXED_KV_SERIES=${FIXED_KV_SERIES:-0}
+FIXED_KV_WARMUP_RUNS=${FIXED_KV_WARMUP_RUNS:-2}
+# Start, capture and audit selection without constructing the expensive KV
+# prefix or recording latency. Useful for clean-artifact serving ABI smoke.
+VALIDATE_ONLY=${VALIDATE_ONLY:-0}
 MEM_FRACTION_STATIC=${MEM_FRACTION_STATIC:-0.83}
 # Need 32 for global BS=256 (local_M=32).
 SGLANG_CUDA_GRAPH_MAX_BS=${SGLANG_CUDA_GRAPH_MAX_BS:-32}
@@ -38,6 +45,8 @@ MODEL=${MODEL:-/mnt/b300-shared/models/GLM-5.2-FP8}
 RUN_ID=${RUN_ID:-moe_swiglu_b300_n${N_RUNS}_s${S}_$(date -u +%Y%m%dT%H%M%SZ)}
 OUT=$ROOT/bench_results/$RUN_ID
 SERVER_LAUNCHER=${SERVER_LAUNCHER:-$REPO/glm52_opt/scripts/run_b300_repo_server.sh}
+FIXED_KV_RUNNER=${FIXED_KV_RUNNER:-$REPO/glm52_opt/scripts/run_fixed_kv_decode_series.py}
+FIXED_KV_ABA_ANALYZER=${FIXED_KV_ABA_ANALYZER:-$REPO/glm52_opt/scripts/analyze_fixed_kv_aba.py}
 ENV_BACKUP=$OUT/original_glm52_opt.env
 ENV_ABSENT_MARKER=$OUT/original_glm52_opt.env.absent
 
@@ -52,6 +61,26 @@ export SGLANG_CUDA_GRAPH_MAX_BS
 export SGLANG_MAX_RUNNING_REQUESTS=${SGLANG_MAX_RUNNING_REQUESTS:-$((8 * SGLANG_CUDA_GRAPH_MAX_BS))}
 
 mkdir -p "$OUT" "$ROOT/cache/sglang" "$ROOT/logs" /tmp
+if [[ "$FIXED_KV_SERIES" != 0 && "$FIXED_KV_SERIES" != 1 ]]; then
+  echo "[ERR] FIXED_KV_SERIES must be 0 or 1; got $FIXED_KV_SERIES" >&2
+  exit 2
+fi
+if [[ "$VALIDATE_ONLY" != 0 && "$VALIDATE_ONLY" != 1 ]]; then
+  echo "[ERR] VALIDATE_ONLY must be 0 or 1; got $VALIDATE_ONLY" >&2
+  exit 2
+fi
+if [[ "$FIXED_KV_WARMUP_RUNS" -lt 0 ]]; then
+  echo "[ERR] FIXED_KV_WARMUP_RUNS must be non-negative" >&2
+  exit 2
+fi
+if [[ "$FIXED_KV_SERIES" == 1 && ! -f "$FIXED_KV_RUNNER" ]]; then
+  echo "[ERR] missing fixed-KV series runner: $FIXED_KV_RUNNER" >&2
+  exit 2
+fi
+if [[ "$FIXED_KV_SERIES" == 1 && "$LABELS" == "p1_before r2a p1_after" && ! -f "$FIXED_KV_ABA_ANALYZER" ]]; then
+  echo "[ERR] missing fixed-KV A-B-A analyzer: $FIXED_KV_ABA_ANALYZER" >&2
+  exit 2
+fi
 if ss -ltn 2>/dev/null | grep -q ":${PORT} "; then
   echo "[ERR] test port $PORT is already in use" >&2
   exit 2
@@ -66,6 +95,8 @@ exec > >(tee -a "$LOG") 2>&1
 
 echo "======== decode TPOT N=$N_RUNS S=$S BS={$GLOBAL_BS_LIST} $(date -Is) ========"
 echo "OUT=$OUT LABELS=$LABELS graph_max_bs=$SGLANG_CUDA_GRAPH_MAX_BS mem=$MEM_FRACTION_STATIC"
+echo "FIXED_KV_SERIES=$FIXED_KV_SERIES FIXED_KV_WARMUP_RUNS=$FIXED_KV_WARMUP_RUNS"
+echo "VALIDATE_ONLY=$VALIDATE_ONLY"
 cd "$REPO"
 git rev-parse --short HEAD | tee "$OUT/git_rev.txt"
 git branch --show-current | tee -a "$OUT/git_rev.txt"
@@ -81,19 +112,24 @@ cat > "$OUT/README.md" <<MD
 - \`o_proj\` / \`index_q_upproj\` fixed_nk graph-only (M16|M32)
 - MoE gate/up/down via \`SGLANG_GLM52_INFINI_MOE_ALIGN=1\`
 
-## SwiGLU candidate
-- Same winners stack and workload
-- Replaces only masked MoE \`silu_mul_quant_varlen\` at local M=16
-- Launches one stock-body CTA per routed assignment instead of 65,536 CTAs
+## Optional candidates
+- \`swiglu\`: same winners stack plus the valid-CTA masked activation
+- \`r2a\`: same winners stack with only FlashMLA P1 replaced by r2a;
+  requires \`FLASHMLA_R2A_SO\`
+- \`p1_before r2a p1_after\`: brackets r2a with two independently started
+  P1 servers so host/service drift is visible
 
 ## Excluded
 - \`fused_qkv_a_proj\` (leaf win, e2e historically flat/noisy)
-- \`dsa_prefill_attn\`, FlashMLA r2a, \`q_b\` / \`index_k\` / \`index_score\`
+- \`dsa_prefill_attn\`, \`q_b\` / \`index_k\` / \`index_score\`
 
 ## Protocol
 - Per label: one serve (cuda_graph_max_bs=${SGLANG_CUDA_GRAPH_MAX_BS})
 - DeepEP mode: ${SGLANG_DEEPEP_MODE:-auto}; chunked prefill=${CHUNKED_PREFILL_SIZE}; max prefill tokens=${MAX_PREFILL_TOKENS}; mem fraction=${MEM_FRACTION_STATIC}
-- Each run flushes stale radix state, builds the same deterministic random-id prefixes, then times an S=${S} request with only the last 64 prompt tokens uncached
+- Fixed-KV series mode: ${FIXED_KV_SERIES}; decode-shaped warmup runs excluded from statistics: ${FIXED_KV_WARMUP_RUNS}
+- Validate-only mode: ${VALIDATE_ONLY}; when enabled, stop after graph capture and all-rank module selection proof
+- When fixed-KV series mode is 0, every run independently flushes stale radix state and rebuilds the same deterministic random-id prefixes
+- When fixed-KV series mode is 1, every label/BS cell flushes once, builds the deterministic ${S}-64-token prefixes once, and then sends paired requests whose unique 64-token tails prevent measured-suffix cache reuse
 - Required measured cache-hit rate: at least 0.99 (target: 0.998); multi-batch mode is disabled so TTFT/ITL remain valid
 - Runs per label and global BS: **${N_RUNS}**
 - Metric: TPOT/ITL = (latency − last_ttft) / output_len × 1000 (ms)
@@ -116,7 +152,7 @@ write_env() {
         echo "SGLANG_GLM52_OPT=0"
         echo "SGLANG_GLM52_OPT_PROFILE=serving_safe"
         ;;
-      winners|swiglu)
+      winners|swiglu|p1_before|p1_after|r2a)
         echo "SGLANG_GLM52_OPT=1"
         echo "SGLANG_GLM52_OPT_PROFILE=combined_winners"
         # e2e-proven only — no fused_qkv_a, no dsa_prefill
@@ -133,7 +169,16 @@ write_env() {
         echo "SGLANG_GLM52_INDEX_Q_UPPROJ_GRAPH_ONLY=1"
         echo "SGLANG_GLM52_INFINI_MOE_ALIGN=1"
         echo "GLM52_FLASHMLA_USE_PREBUILT=1"
-        echo "GLM52_FLASHMLA_DECODE_STACK=p1_c2"
+        if [[ "$mode" == "r2a" ]]; then
+          [[ -n "$FLASHMLA_R2A_SO" && -f "$FLASHMLA_R2A_SO" ]] || {
+            echo "[ERR] r2a requires an existing FLASHMLA_R2A_SO" >&2
+            return 1
+          }
+          echo "GLM52_FLASHMLA_DECODE_STACK=r2a"
+          echo "GLM52_FLASHMLA_PREBUILT_SO=$FLASHMLA_R2A_SO"
+        else
+          echo "GLM52_FLASHMLA_DECODE_STACK=p1_c2"
+        fi
         ;;
       *) echo "[ERR] unknown mode=$mode"; return 1 ;;
     esac
@@ -206,8 +251,10 @@ launch_serve() {
     export SGLANG_DG_CACHE_DIR=${SGLANG_DG_CACHE_DIR:-/tmp/glm52_deep_gemm_cache}
     export TMPDIR=${TMPDIR:-/tmp/glm52_tmpdir}
     export MEM_FRACTION_STATIC
-    export GLM52_FLASHMLA_USE_PREBUILT=1
-    export GLM52_FLASHMLA_DECODE_STACK=${GLM52_FLASHMLA_DECODE_STACK:-p1_c2}
+    # The per-label env file is authoritative.  Do not let an inherited shell
+    # override leak the r2a SO into either P1 bracket (or vice versa).
+    unset GLM52_FLASHMLA_USE_PREBUILT GLM52_FLASHMLA_DECODE_STACK
+    unset GLM52_FLASHMLA_PREBUILT_SO
     mkdir -p "$SGLANG_DG_CACHE_DIR" "$TMPDIR"
     export SGLANG_EXTRA_SERVE_ARGS="--mem-fraction-static ${MEM_FRACTION_STATIC}"
     ROOT="$ROOT" REPO="$REPO" MODEL="$MODEL" bash "$SERVER_LAUNCHER"
@@ -292,6 +339,24 @@ run_label() {
   wait_gpus_free
   launch_serve "$label"
   wait_ready "$label"
+  if [[ "$label" == "r2a" ]]; then
+    local r2a_real loaded_ranks gpu_pid
+    r2a_real=$(readlink -f "$FLASHMLA_R2A_SO")
+    loaded_ranks=0
+    while read -r gpu_pid; do
+      [[ -n "$gpu_pid" && -r "/proc/$gpu_pid/maps" ]] || continue
+      if grep -F -q "$r2a_real" "/proc/$gpu_pid/maps"; then
+        loaded_ranks=$((loaded_ranks + 1))
+      fi
+    done < <(nvidia-smi --query-compute-apps=pid --format=csv,noheader,nounits | sort -u)
+    if [[ "$loaded_ranks" -ne "$DP" ]]; then
+      echo "[ERR] expected r2a SO on all $DP ranks; observed $loaded_ranks" >&2
+      tail -160 "$OUT/serve_${label}.log"
+      return 1
+    fi
+    sha256sum "$FLASHMLA_R2A_SO" > "$OUT/flashmla_r2a_so.sha256"
+    echo "[VALID] r2a SO loaded_ranks=$loaded_ranks path=$r2a_real"
+  fi
   if [[ "$label" == "swiglu" ]]; then
     local graph_buckets=(1 2 4 8 12 16)
     if [[ "$SGLANG_CUDA_GRAPH_MAX_BS" -ge 32 ]]; then
@@ -311,16 +376,67 @@ run_label() {
     done
   fi
 
+  if [[ "$VALIDATE_ONLY" == 1 ]]; then
+    if [ -f "$HIT_FILE" ]; then
+      cp -f "$HIT_FILE" "$OUT/hits_${label}_capture.json"
+    fi
+    echo "[VALID] validate-only graph capture and selection completed for label=$label"
+    cleanup_ours
+    return 0
+  fi
+
   for gbs in $GLOBAL_BS_LIST; do
     local lm=$((gbs / DP))
     echo "---- $label global_bs=$gbs local_M=$lm N=$N_RUNS ----"
     local outp="$OUT/decode_${label}_bs${gbs}.jsonl"
     : > "$outp"
-    local i
-    for i in $(seq 1 "$N_RUNS"); do
-      echo "[RUN] $label bs=$gbs i=$i/$N_RUNS $(date +%H:%M:%S)"
-      run_decode_once "$label" "$gbs" "$i" "$outp"
-    done
+    if [[ "$FIXED_KV_SERIES" == 1 ]]; then
+      "$PY" "$FIXED_KV_RUNNER" \
+        --base-url "http://127.0.0.1:$PORT" \
+        --model-path "$MODEL" \
+        --label "$label" \
+        --result-filename "$outp" \
+        --batch-size "$gbs" \
+        --input-len "$S" \
+        --prefix-len $((S - 64)) \
+        --output-len "$OUT_LEN" \
+        --runs "$N_RUNS" \
+        --warmup-runs "$FIXED_KV_WARMUP_RUNS" \
+        --seed 42
+      "$PY" - "$outp" "$label" "$gbs" "$N_RUNS" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path, label, batch_size, expected_n = Path(sys.argv[1]), sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
+rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+if len(rows) != expected_n:
+    raise SystemExit(f"expected {expected_n} fixed-KV rows in {path}, found {len(rows)}")
+target = (int(rows[0]["input_len"]) - 64) / float(rows[0]["input_len"])
+for index, row in enumerate(rows, 1):
+    expected_name = f"{label}_decode_bs{batch_size}_i{index}"
+    if row.get("run_name") != expected_name:
+        raise SystemExit(f"unexpected run_name: {row.get('run_name')!r} != {expected_name!r}")
+    if row.get("protocol") != "fixed-kv-decode-series-v1":
+        raise SystemExit(f"unexpected protocol in row {index}: {row.get('protocol')!r}")
+    if row.get("batch_size") != batch_size:
+        raise SystemExit(f"unexpected batch size in row {index}: {row.get('batch_size')}")
+    hit = row.get("cache_hit_rate")
+    if hit is None or abs(float(hit) - target) > 0.001:
+        raise SystemExit(
+            f"invalid fixed-KV row {index}: cache_hit_rate={hit!r}, target={target:.6f}"
+        )
+    if not row.get("prompt_set_id"):
+        raise SystemExit(f"missing prompt_set_id in row {index}")
+print(f"[VALID] fixed-KV series rows={len(rows)} target_cache_hit={target:.6f}")
+PY
+    else
+      local i
+      for i in $(seq 1 "$N_RUNS"); do
+        echo "[RUN] $label bs=$gbs i=$i/$N_RUNS $(date +%H:%M:%S)"
+        run_decode_once "$label" "$gbs" "$i" "$outp"
+      done
+    fi
     if [ -f "$HIT_FILE" ]; then
       cp -f "$HIT_FILE" "$OUT/hits_${label}_bs${gbs}.json"
     fi
@@ -330,7 +446,7 @@ run_label() {
 }
 
 summarize() {
-  export OUT N_RUNS S OUT_LEN
+  export OUT N_RUNS S OUT_LEN LABELS GLOBAL_BS_LIST FIXED_KV_SERIES
   "$PY" - <<'PY'
 import json, math, statistics
 from pathlib import Path
@@ -340,6 +456,9 @@ out = Path(os.environ["OUT"])
 n_runs = int(os.environ["N_RUNS"])
 S = int(os.environ["S"])
 out_len = int(os.environ["OUT_LEN"])
+labels = os.environ["LABELS"].split()
+batch_sizes = [int(x) for x in os.environ["GLOBAL_BS_LIST"].split()]
+fixed_kv_series = bool(int(os.environ["FIXED_KV_SERIES"]))
 
 def pct(xs, p):
     if not xs:
@@ -353,9 +472,9 @@ def pct(xs, p):
     return s[f] * (c - k) + s[c] * (k - f)
 
 def load_itls(path):
-    itls, lats, ttfts = [], [], []
+    itls, lats, ttfts, prompt_ids = [], [], [], []
     if not path.exists():
-        return itls, lats, ttfts
+        return itls, lats, ttfts, prompt_ids
     for line in path.read_text().splitlines():
         if not line.strip():
             continue
@@ -368,7 +487,8 @@ def load_itls(path):
         itls.append(itl)
         lats.append(float(lat))
         ttfts.append(float(ttft))
-    return itls, lats, ttfts
+        prompt_ids.append(r.get("prompt_set_id"))
+    return itls, lats, ttfts, prompt_ids
 
 def stats(xs):
     if not xs:
@@ -386,16 +506,19 @@ def stats(xs):
 
 rows = []
 summary = {"S": S, "out_len": out_len, "n_runs_target": n_runs, "cells": {}}
-for label in ("winners", "swiglu"):
-    for gbs in (128, 256):
+series = {}
+for label in labels:
+    for gbs in batch_sizes:
         p = out / f"decode_{label}_bs{gbs}.jsonl"
-        itls, lats, ttfts = load_itls(p)
+        itls, lats, ttfts, prompt_ids = load_itls(p)
+        series[f"{label}_bs{gbs}"] = {"itls": itls, "prompt_ids": prompt_ids}
         st = stats(itls)
         summary["cells"][f"{label}_bs{gbs}"] = {
             "itl_ms": st,
             "latency_s": stats(lats),
             "ttft_s": stats(ttfts),
             "path": str(p),
+            "prompt_set_ids": prompt_ids if fixed_kv_series else None,
         }
         if st:
             rows.append(
@@ -416,7 +539,7 @@ for label in ("winners", "swiglu"):
 lines = [
     f"# Decode TPOT summary (S={S}, out_len={out_len}, N≈{n_runs})",
     "",
-    "SwiGLU = the same winners stack plus the B300 valid-CTA masked activation.",
+    f"Measured labels, in server-start order: {' -> '.join(labels)}.",
     "",
     "| label | global_BS | n | mean ITL (ms) | median ITL (ms) | stdev | p10 | p90 | min | max |",
     "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
@@ -426,21 +549,108 @@ for r in rows:
         f"| {r[0]} | {r[1]} | {r[2]} | {r[3]:.3f} | {r[4]:.3f} | {r[5]:.3f} | {r[6]:.3f} | {r[7]:.3f} | {r[8]:.3f} | {r[9]:.3f} |"
     )
 
-lines += ["", "## Winners vs SwiGLU candidate (median ITL)", ""]
-for gbs in (128, 256):
-    baseline = summary["cells"].get(f"winners_bs{gbs}", {}).get("itl_ms")
-    candidate = summary["cells"].get(f"swiglu_bs{gbs}", {}).get("itl_ms")
-    if not baseline or not candidate:
-        lines.append(f"- BS={gbs}: incomplete")
-        continue
-    speed = baseline["median"] / candidate["median"] if candidate["median"] else float("nan")
-    delta = baseline["median"] - candidate["median"]
-    pct = delta / baseline["median"] * 100 if baseline["median"] else float("nan")
-    lines.append(
-        f"- **BS={gbs}**: winners median {baseline['median']:.3f} → SwiGLU {candidate['median']:.3f} ms "
-        f"(**{speed:.4f}×**, {delta:+.3f} ms, {pct:+.2f}%); "
-        f"mean {baseline['mean']:.3f} → {candidate['mean']:.3f} ms"
-    )
+lines += ["", f"## Comparisons against first label ({labels[0] if labels else 'none'})", ""]
+if labels:
+    for gbs in batch_sizes:
+        baseline = summary["cells"].get(f"{labels[0]}_bs{gbs}", {}).get("itl_ms")
+        for label in labels[1:]:
+            candidate = summary["cells"].get(f"{label}_bs{gbs}", {}).get("itl_ms")
+            if not baseline or not candidate:
+                lines.append(f"- BS={gbs}, {label}: incomplete")
+                continue
+            speed = baseline["median"] / candidate["median"] if candidate["median"] else float("nan")
+            delta = baseline["median"] - candidate["median"]
+            reduction_pct = (
+                delta / baseline["median"] * 100
+                if baseline["median"]
+                else float("nan")
+            )
+            lines.append(
+                f"- **BS={gbs}, {labels[0]} vs {label}**: "
+                f"{baseline['median']:.3f} → {candidate['median']:.3f} ms "
+                f"(**{speed:.4f}×**, {delta:+.3f} ms, {reduction_pct:+.2f}%); "
+                f"mean {baseline['mean']:.3f} → {candidate['mean']:.3f} ms"
+            )
+
+if fixed_kv_series and labels:
+    lines += ["", "## Fixed-KV request pairing", ""]
+    summary["fixed_kv_request_pairing"] = {}
+    for gbs in batch_sizes:
+        reference_key = f"{labels[0]}_bs{gbs}"
+        reference_ids = series.get(reference_key, {}).get("prompt_ids", [])
+        if len(reference_ids) != n_runs or any(not value for value in reference_ids):
+            raise SystemExit(f"invalid fixed-KV prompt IDs in {reference_key}")
+        matched = []
+        for label in labels[1:]:
+            key = f"{label}_bs{gbs}"
+            candidate_ids = series.get(key, {}).get("prompt_ids", [])
+            if candidate_ids != reference_ids:
+                raise SystemExit(f"fixed-KV request sequence mismatch: {reference_key} vs {key}")
+            matched.append(label)
+        summary["fixed_kv_request_pairing"][str(gbs)] = {
+            "reference": labels[0],
+            "matched_labels": matched,
+            "n_exact_prompt_sets": len(reference_ids),
+        }
+        lines.append(
+            f"- BS={gbs}: all {len(reference_ids)} measured prompt sets match exactly "
+            f"across {' -> '.join(labels)} by protocol hash."
+        )
+
+if labels == ["p1_before", "r2a", "p1_after"]:
+    lines += ["", "## P1/r2a/P1 drift bracket", ""]
+    summary["aba_bracket"] = {}
+    for gbs in batch_sizes:
+        before = summary["cells"].get(f"p1_before_bs{gbs}", {}).get("itl_ms")
+        candidate = summary["cells"].get(f"r2a_bs{gbs}", {}).get("itl_ms")
+        after = summary["cells"].get(f"p1_after_bs{gbs}", {}).get("itl_ms")
+        if not before or not candidate or not after:
+            lines.append(f"- BS={gbs}: incomplete")
+            continue
+        bracket_mid = (before["median"] + after["median"]) / 2.0
+        reduction = bracket_mid - candidate["median"]
+        reduction_pct = reduction / bracket_mid * 100.0
+        speedup = bracket_mid / candidate["median"]
+        drift = after["median"] - before["median"]
+        lower_than_both = candidate["median"] < min(before["median"], after["median"])
+        before_series = series[f"p1_before_bs{gbs}"]["itls"]
+        candidate_series = series[f"r2a_bs{gbs}"]["itls"]
+        after_series = series[f"p1_after_bs{gbs}"]["itls"]
+        paired_reductions = [
+            (left + right) / 2.0 - middle
+            for left, middle, right in zip(before_series, candidate_series, after_series)
+        ]
+        paired = stats(paired_reductions)
+        summary["aba_bracket"][str(gbs)] = {
+            "p1_before_median_itl_ms": before["median"],
+            "r2a_median_itl_ms": candidate["median"],
+            "p1_after_median_itl_ms": after["median"],
+            "p1_bracket_midpoint_median_itl_ms": bracket_mid,
+            "p1_drift_ms": drift,
+            "r2a_reduction_ms": reduction,
+            "r2a_reduction_pct": reduction_pct,
+            "r2a_speedup": speedup,
+            "r2a_lower_than_both_p1_brackets": lower_than_both,
+            "paired_p1_midpoint_minus_r2a_itl_ms": paired,
+            "paired_positive_fraction": (
+                sum(value > 0 for value in paired_reductions) / len(paired_reductions)
+                if paired_reductions
+                else None
+            ),
+        }
+        lines.append(
+            f"- **BS={gbs}**: P1 {before['median']:.3f} → r2a {candidate['median']:.3f} "
+            f"→ P1 {after['median']:.3f} ms; bracket midpoint {bracket_mid:.3f} ms, "
+            f"r2a **{speedup:.4f}×** ({reduction:+.3f} ms, {reduction_pct:+.2f}%), "
+            f"P1 drift {drift:+.3f} ms, lower-than-both={str(lower_than_both).lower()}"
+        )
+        if paired:
+            lines.append(
+                f"  Paired per-request-sequence P1-midpoint minus r2a: "
+                f"mean {paired['mean']:+.4f} ms, median {paired['median']:+.4f} ms, "
+                f"p10/p90 {paired['p10']:+.4f}/{paired['p90']:+.4f} ms; "
+                f"positive {sum(value > 0 for value in paired_reductions)}/{len(paired_reductions)}."
+            )
 
 (out / "TPOT_SUMMARY.md").write_text("\n".join(lines) + "\n")
 (out / "TPOT_SUMMARY.json").write_text(json.dumps(summary, indent=2) + "\n")
@@ -453,7 +663,23 @@ for label in $LABELS; do
   run_label "$label"
 done
 
+if [[ "$VALIDATE_ONLY" == 1 ]]; then
+  echo "======== VALIDATION DONE $(date -Is) OUT=$OUT ========"
+  ls -lah "$OUT" | head -40
+  exit 0
+fi
+
 summarize
+if [[ "$FIXED_KV_SERIES" == 1 && "$LABELS" == "p1_before r2a p1_after" ]]; then
+  for gbs in $GLOBAL_BS_LIST; do
+    "$PY" "$FIXED_KV_ABA_ANALYZER" \
+      --before "$OUT/decode_p1_before_bs${gbs}.jsonl" \
+      --candidate "$OUT/decode_r2a_bs${gbs}.jsonl" \
+      --after "$OUT/decode_p1_after_bs${gbs}.jsonl" \
+      --output "$OUT/ABA_BOOTSTRAP_bs${gbs}.json" \
+      --expected-runs "$N_RUNS"
+  done
+fi
 echo "======== ALL DONE $(date -Is) OUT=$OUT ========"
 ls -lah "$OUT" | head -40
 cat "$OUT/TPOT_SUMMARY.md"

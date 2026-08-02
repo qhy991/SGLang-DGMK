@@ -32,6 +32,7 @@ _GLM52_ENV_KEYS = frozenset(
         "SGLANG_GLM52_INFINI_KERNEL_NVTX",
         "SGLANG_GLM52_HOTSPOT_MODULE",
         "SGLANG_OPT_MOE_SWIGLU_QUANT_VARIANT",
+        "SGLANG_INFINI_V_APPLY_QUANT",
         # 1 (default): pick the MoE masked-grouped M tile from expected_m.
         # 0: always use DeepGEMM stock 128. See infini_moe_align.py.
         "SGLANG_GLM52_INFINI_MOE_ALIGN",

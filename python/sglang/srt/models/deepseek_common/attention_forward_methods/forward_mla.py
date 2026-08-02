@@ -77,6 +77,7 @@ from sglang.srt.utils.custom_op import register_custom_op
 logger = logging.getLogger(__name__)
 _SGLANG_EXPERIMENTAL_LORA_OPTI = envs.SGLANG_EXPERIMENTAL_LORA_OPTI.get()
 _infini_q_a_nq_logged = False
+_infini_v_apply_quant_logged = False
 
 if TYPE_CHECKING:
     from sglang.srt.models.deepseek_v2 import DeepseekV2AttentionMLA
@@ -94,6 +95,9 @@ if _is_cuda:
     from sgl_kernel import bmm_fp8 as _raw_bmm_fp8
     from sglang.srt.layers.glm52_opt import (
         infini_q_a_norm_quant as _infini_q_a_norm_quant,
+    )
+    from sglang.srt.layers.glm52_opt import (
+        infini_v_apply_quant as _infini_v_apply_quant,
     )
 
     # TODO(yuwei): remove this wrapper after sgl-kernel registers its own fake/meta impl
@@ -686,6 +690,7 @@ class DeepseekMLAForwardMixin:
         llama_4_scaling,
         fusion_plan: Optional[MlaBmmFusionPlan] = None,
     ):
+        global _infini_v_apply_quant_logged
         save_kv_cache = True
 
         if self.current_attention_backend in FORWARD_ABSORB_CORE_ATTENTION_BACKENDS:
@@ -1019,10 +1024,39 @@ class DeepseekMLAForwardMixin:
             )
             attn_bmm_output = attn_bmm_output.transpose(0, 1).flatten(1, 2)
         else:
-            if is_in_tc_piecewise_cuda_graph():
+            v_apply_input = attn_output.transpose(0, 1)
+            use_infini_v_apply_quant = False
+            if _infini_v_apply_quant.enabled():
+                from sglang.srt.model_executor.runner import get_is_capture_mode
+
+                lora_active = (
+                    _SGLANG_EXPERIMENTAL_LORA_OPTI or is_kv_b_lora_active(self)
+                )
+                use_infini_v_apply_quant = _infini_v_apply_quant.is_available(
+                    v_apply_input,
+                    self.w_vc,
+                    self.o_proj,
+                    decode_or_idle=forward_batch.forward_mode.is_decode_or_idle(),
+                    capture_mode=get_is_capture_mode(),
+                    lora_active=lora_active,
+                )
+            if use_infini_v_apply_quant:
+                quant_rows = v_apply_input.shape[1]
+                attn_bmm_output = _infini_v_apply_quant.fused_v_apply_quant(
+                    v_apply_input,
+                    self.w_vc,
+                )
+                if not _infini_v_apply_quant_logged:
+                    logger.info(
+                        "GLM-5.2 V-apply+packed-quant fusion selected: "
+                        "M=%d H=64 K=512 N=256",
+                        quant_rows,
+                    )
+                    _infini_v_apply_quant_logged = True
+            elif is_in_tc_piecewise_cuda_graph():
                 # torch dynamo requires out= op was called where output tensor was non-contiguous
                 attn_bmm_output = (
-                    torch.bmm(attn_output.transpose(0, 1), self.w_vc)
+                    torch.bmm(v_apply_input, self.w_vc)
                     .transpose(0, 1)
                     .flatten(1, 2)
                 )
@@ -1033,7 +1067,7 @@ class DeepseekMLAForwardMixin:
                     device=attn_output.device,
                 )
                 torch.bmm(
-                    attn_output.transpose(0, 1),
+                    v_apply_input,
                     self.w_vc,
                     out=attn_bmm_output.view(
                         -1, self.num_local_heads, self.v_head_dim

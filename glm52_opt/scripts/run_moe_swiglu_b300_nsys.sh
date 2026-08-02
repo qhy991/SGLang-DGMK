@@ -27,6 +27,9 @@ ROUTER_PAD_MASK_FUSION=${ROUTER_PAD_MASK_FUSION:-0}
 ROUTER_DEEPEP_IDS_FUSION=${ROUTER_DEEPEP_IDS_FUSION:-0}
 POST_MOE_SHARED_ADD_NORM_QUANT=${POST_MOE_SHARED_ADD_NORM_QUANT:-0}
 QA_NORM_QUANT=${QA_NORM_QUANT:-0}
+V_APPLY_QUANT=${V_APPLY_QUANT:-0}
+FLASHMLA_DECODE_STACK=${FLASHMLA_DECODE_STACK:-p1_c2}
+FLASHMLA_PREBUILT_SO=${FLASHMLA_PREBUILT_SO:-}
 RUN_ID=${RUN_ID:-nsys_moe_swiglu_${SWIGLU_MODE}_$(date -u +%Y%m%dT%H%M%SZ)}
 OUT=$ROOT/bench_results/$RUN_ID
 ENV_FILE=${SGLANG_GLM52_ENV_FILE:-$ROOT/cache/sglang/glm52_opt.env}
@@ -68,6 +71,21 @@ if [[ "$POST_MOE_SHARED_ADD_NORM_QUANT" != 0 && "$POST_MOE_SHARED_ADD_NORM_QUANT
 fi
 if [[ "$QA_NORM_QUANT" != 0 && "$QA_NORM_QUANT" != 1 ]]; then
   echo "[ERR] QA_NORM_QUANT must be 0 or 1; got $QA_NORM_QUANT" >&2
+  exit 2
+fi
+if [[ "$V_APPLY_QUANT" != 0 && "$V_APPLY_QUANT" != 1 ]]; then
+  echo "[ERR] V_APPLY_QUANT must be 0 or 1; got $V_APPLY_QUANT" >&2
+  exit 2
+fi
+case "$FLASHMLA_DECODE_STACK" in
+  p1_c2|r2a|r2a_c2|stack_r2a) ;;
+  *)
+    echo "[ERR] unsupported FLASHMLA_DECODE_STACK=$FLASHMLA_DECODE_STACK" >&2
+    exit 2
+    ;;
+esac
+if [[ -n "$FLASHMLA_PREBUILT_SO" && ! -f "$FLASHMLA_PREBUILT_SO" ]]; then
+  echo "[ERR] missing FLASHMLA_PREBUILT_SO=$FLASHMLA_PREBUILT_SO" >&2
   exit 2
 fi
 for path in "$PY" "$NSYS" "$SERVER_LAUNCHER" "$TRIGGER_RUNNER" \
@@ -191,10 +209,14 @@ SGLANG_GLM52_ROUTER_PAD_MASK_FUSION=$ROUTER_PAD_MASK_FUSION
 SGLANG_GLM52_ROUTER_DEEPEP_IDS_FUSION=$ROUTER_DEEPEP_IDS_FUSION
 SGLANG_INFINI_FUSED_SHARED_ADD_NORM_QUANT=$POST_MOE_SHARED_ADD_NORM_QUANT
 SGLANG_INFINI_FUSED_QA_NORM_QUANT=$QA_NORM_QUANT
+SGLANG_INFINI_V_APPLY_QUANT=$V_APPLY_QUANT
 SGLANG_INFINI_FUSED_SHARED_NQ_ROWS=1
 GLM52_FLASHMLA_USE_PREBUILT=1
-GLM52_FLASHMLA_DECODE_STACK=p1_c2
+GLM52_FLASHMLA_DECODE_STACK=$FLASHMLA_DECODE_STACK
 EOF
+if [[ -n "$FLASHMLA_PREBUILT_SO" ]]; then
+  echo "GLM52_FLASHMLA_PREBUILT_SO=$FLASHMLA_PREBUILT_SO" >> "$ENV_FILE"
+fi
 if [[ "$SWIGLU_MODE" == candidate ]]; then
   echo "SGLANG_OPT_MOE_SWIGLU_QUANT_VARIANT=cuda_valid_cta" >> "$ENV_FILE"
 fi
@@ -212,6 +234,12 @@ fi
   echo "- router DeepEP int64-ID fusion: $ROUTER_DEEPEP_IDS_FUSION"
   echo "- post-MoE shared-add+RMSNorm+quant fusion: $POST_MOE_SHARED_ADD_NORM_QUANT"
   echo "- q_a RMSNorm+packed-quant producer fusion: $QA_NORM_QUANT"
+  echo "- V-apply BMM + packed quant before o_proj: $V_APPLY_QUANT"
+  echo "- FlashMLA decode stack: $FLASHMLA_DECODE_STACK"
+  if [[ -n "$FLASHMLA_PREBUILT_SO" ]]; then
+    echo "- FlashMLA explicit prebuilt: $FLASHMLA_PREBUILT_SO"
+    echo "- FlashMLA prebuilt sha256: $(sha256sum "$FLASHMLA_PREBUILT_SO" | awk '{print $1}')"
+  fi
   if [[ "$SWIGLU_MODE" == candidate ]]; then
     echo "- SwiGLU: cuda_valid_cta; stock body; grid=128 rather than 65,536"
   else
@@ -280,6 +308,23 @@ for i in $(seq 1 180); do
   sleep 10
 done
 [[ "$ready" -eq 1 ]] || { echo "[ERR] server readiness timeout" >&2; exit 2; }
+
+if [[ -n "$FLASHMLA_PREBUILT_SO" ]]; then
+  flashmla_prebuilt_real=$(readlink -f "$FLASHMLA_PREBUILT_SO")
+  flashmla_loaded_ranks=0
+  while read -r gpu_pid; do
+    [[ -n "$gpu_pid" && -r "/proc/$gpu_pid/maps" ]] || continue
+    if grep -F -q "$flashmla_prebuilt_real" "/proc/$gpu_pid/maps"; then
+      flashmla_loaded_ranks=$((flashmla_loaded_ranks + 1))
+    fi
+  done < <(nvidia-smi --query-compute-apps=pid --format=csv,noheader,nounits | sort -u)
+  if [[ "$flashmla_loaded_ranks" -ne "$DP" ]]; then
+    echo "[ERR] expected explicit FlashMLA prebuilt on $DP GPU ranks; observed $flashmla_loaded_ranks" >&2
+    tail -160 "$OUT/nsys_launch.log"
+    exit 2
+  fi
+  echo "[VALID] FlashMLA explicit prebuilt loaded_ranks=$flashmla_loaded_ranks path=$flashmla_prebuilt_real"
+fi
 
 router_selection_count=$(grep -F -c \
   "GLM-5.2 router padded-ID mask fusion selected" \
@@ -379,6 +424,21 @@ elif [[ "$qa_nq_selection_count" -ne 0 ]]; then
   exit 2
 fi
 echo "[VALID] q_a fusion=$QA_NORM_QUANT selection_count=$qa_nq_selection_count"
+
+v_apply_quant_selection_count=$(grep -F -c \
+  "GLM-5.2 V-apply+packed-quant fusion selected" \
+  "$OUT/nsys_launch.log" || true)
+if [[ "$V_APPLY_QUANT" == 1 ]]; then
+  if [[ "$v_apply_quant_selection_count" -ne "$DP" ]]; then
+    echo "[ERR] expected V-apply quant fusion on $DP ranks, observed $v_apply_quant_selection_count" >&2
+    tail -160 "$OUT/nsys_launch.log"
+    exit 2
+  fi
+elif [[ "$v_apply_quant_selection_count" -ne 0 ]]; then
+  echo "[ERR] stock denominator selected V-apply fusion on $v_apply_quant_selection_count ranks" >&2
+  exit 2
+fi
+echo "[VALID] V-apply quant fusion=$V_APPLY_QUANT selection_count=$v_apply_quant_selection_count"
 
 rate=$($PY -c "print(($S - 64) / float($S))")
 result=$OUT/decode_${SWIGLU_MODE}_bs${GLOBAL_BS}.jsonl
