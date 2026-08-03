@@ -2,6 +2,7 @@
 #include <sgl_kernel/utils.h>
 
 #include <sgl_kernel/runtime.cuh>
+#include <sgl_kernel/cta.cuh>
 #include <sgl_kernel/type.cuh>
 #include <sgl_kernel/utils.cuh>
 #include <sgl_kernel/vec.cuh>
@@ -90,6 +91,84 @@ struct UnaryActivationParams {
   void* __restrict__ out;
   uint32_t num_vecs;
 };
+
+struct SiluAndMulQuantFp8Params {
+  const void* __restrict__ input;
+  void* __restrict__ output_q;
+  float* __restrict__ output_s;
+  uint32_t hidden_dim;
+  uint32_t num_tokens;
+};
+
+// Fuse the dense SwiGLU output with the dynamic per-token FP8 quantization
+// consumed by the following FP8 linear. One CTA owns one token so its scale
+// never leaves the CTA. The activated value is rounded to T before the amax
+// and FP8 conversion, matching the standalone activation -> quant sequence.
+template <typename T, bool kUsePDL>
+__global__ __launch_bounds__(512, 2) void silu_and_mul_quant_fp8_kernel(
+    const __grid_constant__ SiluAndMulQuantFp8Params params) {
+  using namespace device;
+  constexpr auto kVecSize = kMaxVecBytes / sizeof(T);
+  constexpr auto kQuantBlockSize = 512u;
+  // Keep the same 32 BF16/FP16 activated values per thread on all NVIDIA
+  // generations: two 32-byte vectors on Blackwell, four 16-byte vectors on
+  // older architectures. This supports dense intermediate widths <= 16384.
+  constexpr auto kVecsPerThread = kMaxVecBytes == 32 ? 2u : 4u;
+  using input_vec_t = AlignedVector<T, kVecSize>;
+  using output_vec_t = AlignedVector<fp8_e4m3_t, kVecSize>;
+
+  const auto token_id = blockIdx.x;
+  const auto num_vecs = params.hidden_dim / kVecSize;
+  const auto token_input_vec = static_cast<uint64_t>(token_id) * num_vecs * 2;
+  const auto token_output_vec = static_cast<uint64_t>(token_id) * num_vecs;
+  PDLWaitPrimary<kUsePDL>();
+
+  input_vec_t activated_vecs[kVecsPerThread];
+  float local_max = 0.0f;
+#pragma unroll
+  for (uint32_t slot = 0; slot < kVecsPerThread; ++slot) {
+    const uint32_t vec_id = threadIdx.x + slot * kQuantBlockSize;
+    if (vec_id < num_vecs) {
+      input_vec_t gate;
+      input_vec_t up;
+      gate.load(params.input, token_input_vec + vec_id);
+      up.load(params.input, token_input_vec + num_vecs + vec_id);
+#pragma unroll
+      for (uint32_t i = 0; i < kVecSize; ++i) {
+        const float gate_f32 = cast<fp32_t>(gate[i]);
+        const float up_f32 = cast<fp32_t>(up[i]);
+        const T activated = cast<T>(apply_activation_f32<ActivationKind::kSiLU>(gate_f32) * up_f32);
+        activated_vecs[slot][i] = activated;
+        local_max = fmaxf(local_max, fabsf(cast<fp32_t>(activated)));
+      }
+    }
+  }
+
+  __shared__ float reduce_smem[32];
+  cta::reduce_max(local_max, reduce_smem);
+  __syncthreads();
+  const float scale = reduce_smem[0] / kFP8E4M3Max;
+  if (threadIdx.x == 0) {
+    params.output_s[token_id] = scale;
+  }
+  const float scale_inv = scale == 0.0f ? 0.0f : 1.0f / scale;
+
+#pragma unroll
+  for (uint32_t slot = 0; slot < kVecsPerThread; ++slot) {
+    const uint32_t vec_id = threadIdx.x + slot * kQuantBlockSize;
+    if (vec_id < num_vecs) {
+      output_vec_t output;
+#pragma unroll
+      for (uint32_t i = 0; i < kVecSize; ++i) {
+        const float value = fmaxf(
+            fminf(cast<fp32_t>(activated_vecs[slot][i]) * scale_inv, kFP8E4M3Max), -kFP8E4M3Max);
+        output[i] = cast<fp8_e4m3_t>(value);
+      }
+      output.store(params.output_q, token_output_vec + vec_id);
+    }
+  }
+  PDLTriggerSecondary<kUsePDL>();
+}
 
 template <typename T, ActivationKind kAct, bool kUsePDL>
 __global__ void act_kernel(const __grid_constant__ UnaryActivationParams params) {
@@ -250,6 +329,41 @@ struct ActivationKernel {
     };
     const auto kernel = select_unary_kernel(type);
     LaunchKernel(num_blocks, kBlockSize, device).enable_pdl(kUsePDL)(kernel, params);
+  }
+
+  static void run_silu_and_mul_quant_fp8(
+      const tvm::ffi::TensorView input,
+      const tvm::ffi::TensorView output_q,
+      const tvm::ffi::TensorView output_s) {
+    using namespace host;
+
+    auto N = SymbolicSize{"num_tokens"};
+    auto D_in = SymbolicSize{"input_width"};
+    auto D_out = SymbolicSize{"output_width"};
+    auto device_ = SymbolicDevice{};
+    device_.set_options<kDLCUDA>();
+
+    TensorMatcher({N, D_in}).with_dtype<T>().with_device(device_).verify(input);
+    TensorMatcher({N, D_out}).with_dtype<fp8_e4m3_t>().with_device(device_).verify(output_q);
+    TensorMatcher({N, 1}).with_dtype<fp32_t>().with_device(device_).verify(output_s);
+
+    const auto hidden_size = static_cast<uint32_t>(D_out.unwrap());
+    const auto num_tokens = static_cast<uint32_t>(N.unwrap());
+    const auto device = device_.unwrap();
+    if (num_tokens == 0) return;
+    RuntimeCheck(hidden_size * 2 == D_in.unwrap(), "invalid fused SwiGLU quant dimension");
+    RuntimeCheck(hidden_size % kVecSize == 0, "hidden size must be divisible by vector size");
+    RuntimeCheck(hidden_size <= 16384, "fused SwiGLU quant supports hidden size <= 16384");
+
+    const auto params = SiluAndMulQuantFp8Params{
+        .input = input.data_ptr(),
+        .output_q = output_q.data_ptr(),
+        .output_s = static_cast<float*>(output_s.data_ptr()),
+        .hidden_dim = hidden_size,
+        .num_tokens = num_tokens,
+    };
+    LaunchKernel(num_tokens, 512u, device).enable_pdl(kUsePDL)(
+        silu_and_mul_quant_fp8_kernel<T, kUsePDL>, params);
   }
 };
 

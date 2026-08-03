@@ -46,6 +46,10 @@ def _jit_activation_module(dtype: torch.dtype) -> Module:
                 "run_unary_activation",
                 f"ActivationKernel<{args}>::run_unary_activation",
             ),
+            (
+                "run_silu_and_mul_quant_fp8",
+                f"ActivationKernel<{args}>::run_silu_and_mul_quant_fp8",
+            ),
         ],
     )
 
@@ -148,6 +152,34 @@ def silu_and_mul(
     expert_step: int = 1,
 ) -> torch.Tensor:
     return run_activation("silu", input, out, expert_ids, expert_step)
+
+
+@register_custom_op(mutates_args=["output_q", "output_s"])
+def _run_silu_and_mul_quant_fp8_inplace(
+    input: torch.Tensor,
+    output_q: torch.Tensor,
+    output_s: torch.Tensor,
+) -> None:
+    module = _jit_activation_module(input.dtype)
+    module.run_silu_and_mul_quant_fp8(input, output_q, output_s)
+
+
+def silu_and_mul_quant_fp8(
+    input: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Dense SwiGLU followed by dynamic per-token FP8 E4M3 quantization."""
+    hidden_size = input.shape[-1] // 2
+    input_2d = input.view(-1, hidden_size * 2)
+    output_q = torch.empty(
+        (input_2d.shape[0], hidden_size),
+        dtype=torch.float8_e4m3fn,
+        device=input.device,
+    )
+    output_s = torch.empty(
+        (input_2d.shape[0], 1), dtype=torch.float32, device=input.device
+    )
+    _run_silu_and_mul_quant_fp8_inplace(input_2d, output_q, output_s)
+    return output_q.view(*input.shape[:-1], hidden_size), output_s
 
 
 def gelu_and_mul(

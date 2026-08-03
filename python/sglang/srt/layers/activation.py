@@ -63,6 +63,7 @@ if _is_cuda:
         gelu_tanh_and_mul,
         relu2,
         silu_and_mul,
+        silu_and_mul_quant_fp8,
     )
 elif _is_xpu:
     from sgl_kernel import gelu_and_mul, gelu_tanh_and_mul, silu_and_mul
@@ -105,6 +106,12 @@ class SiluAndMul(MultiPlatformOp):
         out = torch.empty(output_shape, dtype=x.dtype, device=x.device)
         silu_and_mul(x, out)
         return out
+
+    def forward_cuda_quant_fp8(
+        self, x: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.dtype]:
+        q_x, x_scale = silu_and_mul_quant_fp8(x)
+        return q_x, x_scale, x.dtype
 
     def forward_aiter(self, x: torch.Tensor, limit: float = 0.0) -> torch.Tensor:
         d = x.shape[-1] // 2

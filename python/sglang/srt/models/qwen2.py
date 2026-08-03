@@ -51,13 +51,17 @@ from sglang.srt.model_loader.weight_utils import (
 )
 from sglang.srt.runtime_context import get_parallel
 from sglang.srt.server_args import get_global_server_args
-from sglang.srt.utils import add_prefix, make_layers
+from sglang.srt.utils import add_prefix, get_bool_env_var, make_layers
 from sglang.srt.utils.hf_transformers_utils import get_rope_config
 
 Qwen2Config = None
 
 
 logger = logging.getLogger(__name__)
+
+_enable_dense_swiglu_fp8_quant = get_bool_env_var(
+    "SGLANG_ENABLE_DENSE_SWIGLU_FP8_QUANT"
+)
 
 
 class Qwen2MLP(nn.Module):
@@ -100,7 +104,22 @@ class Qwen2MLP(nn.Module):
             x = x.bfloat16()
 
         gate_up, _ = self.gate_up_proj(x)
-        x = self.act_fn(gate_up)
+        down_quant_method = self.down_proj.quant_method
+        use_fused_swiglu_fp8_quant = (
+            _enable_dense_swiglu_fp8_quant
+            and down_quant_method.__class__.__name__ == "Fp8LinearMethod"
+            and down_quant_method.cutlass_fp8_supported
+            and not down_quant_method.use_marlin
+            and not down_quant_method.use_mxfp8
+            and not down_quant_method.block_quant
+            and self.down_proj.input_size_per_partition <= 16384
+            and self.down_proj.input_scale is None
+            and self.down_proj.weight_scale.numel() == self.down_proj.weight.shape[1]
+        )
+        if use_fused_swiglu_fp8_quant:
+            x = self.act_fn.forward_cuda_quant_fp8(gate_up)
+        else:
+            x = self.act_fn(gate_up)
         x, _ = self.down_proj(x, forward_batch=forward_batch)
         return x
 

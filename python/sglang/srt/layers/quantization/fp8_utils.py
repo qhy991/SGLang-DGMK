@@ -1648,7 +1648,9 @@ def apply_fp8_linear_bmm_flashinfer(
 
 
 def apply_fp8_linear(
-    input: torch.Tensor,
+    input: Union[
+        torch.Tensor, Tuple[torch.Tensor, torch.Tensor, torch.dtype]
+    ],
     weight: torch.Tensor,
     weight_scale: torch.Tensor,
     input_scale: Optional[torch.Tensor] = None,
@@ -1670,11 +1672,25 @@ def apply_fp8_linear(
         )
     output_padding = 17 if pad_output else None
 
-    # View input as 2D matrix for fp8 methods
-    input_2d = input.view(-1, input.shape[-1])
-    output_shape = [*input.shape[:-1], weight.shape[1]]
+    # The tuple is emitted by the opt-in dense SwiGLU+FP8 quant epilogue. It
+    # carries the original activation dtype so the GEMM output contract stays
+    # identical even though the materialized input is already FP8.
+    prequantized_input = isinstance(input, tuple)
+    if prequantized_input:
+        qinput, x_scale, input_dtype = input
+        input_2d = qinput.view(-1, qinput.shape[-1])
+        output_shape = [*qinput.shape[:-1], weight.shape[1]]
+    else:
+        input_dtype = input.dtype
+        input_2d = input.view(-1, input.shape[-1])
+        output_shape = [*input.shape[:-1], weight.shape[1]]
 
-    if compressed_tensor_quant:
+    if prequantized_input:
+        if not (cutlass_fp8_supported and weight_scale.numel() == weight.shape[1]):
+            raise RuntimeError(
+                "Prequantized SwiGLU input requires the CUTLASS FP8 per-token/per-channel path"
+            )
+    elif compressed_tensor_quant:
         # Maybe apply padding to output, see comment in __init__
         num_token_padding = output_padding
         if cutlass_fp8_supported and weight_scale.numel() == weight.shape[1]:
@@ -1740,7 +1756,7 @@ def apply_fp8_linear(
             # Massage the input to be 2D
             qinput = qinput.view(-1, qinput.shape[-1])
             output = triton_scaled_mm(
-                qinput, weight, x_scale, weight_scale, input.dtype, bias
+                qinput, weight, x_scale, weight_scale, input_dtype, bias
             )
         else:
             output = fp8_scaled_mm(
@@ -1748,7 +1764,7 @@ def apply_fp8_linear(
                 weight,
                 x_scale,
                 weight_scale,
-                out_dtype=input.dtype,
+                out_dtype=input_dtype,
                 bias=bias,
             )
         return output.view(*output_shape)
@@ -1781,7 +1797,7 @@ def apply_fp8_linear(
                 WQ=weight.T,
                 x_scale=x_scale,
                 w_scale=weight_scale,
-                dtype=input.dtype,
+                dtype=input_dtype,
             )
             if bias is not None:
                 output += bias
@@ -1797,7 +1813,7 @@ def apply_fp8_linear(
             output = torch._scaled_mm(
                 qinput,
                 weight,
-                out_dtype=input.dtype,
+                out_dtype=input_dtype,
                 scale_a=x_scale,
                 scale_b=weight_scale.t(),
                 bias=bias,
@@ -1811,7 +1827,7 @@ def apply_fp8_linear(
         output = torch._scaled_mm(
             qinput,
             weight,
-            out_dtype=input.dtype,
+            out_dtype=input_dtype,
             scale_a=x_scale,
             scale_b=weight_scale,
             bias=bias,
@@ -1840,7 +1856,7 @@ def apply_fp8_linear(
         input_2d.shape,
         output_shape,
         bias,
-        input.dtype,
+        input_dtype,
     )
 
 
