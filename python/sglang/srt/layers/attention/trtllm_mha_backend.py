@@ -6,6 +6,7 @@ The kernel supports sm100 only, with sliding window and attention sink features.
 """
 
 import logging
+import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
 
@@ -59,6 +60,8 @@ class TRTLLMMHAMetadata:
     cache_seqlens_int32: torch.Tensor = None
     # Maximum sequence length for query
     max_seq_len_q: int = 1
+    # Maximum sequence length for key/value on host-visible extend paths
+    max_seq_len_kv: Optional[int] = None
     # Cumulative sequence lengths for `query
     cu_seqlens_q: torch.Tensor = None
     # Cumulative sequence lengths for key
@@ -137,6 +140,24 @@ class TRTLLMHAAttnBackend(FlashInferAttnBackend):
         self.speculative_num_draft_tokens = (
             model_runner.server_args.speculative_num_draft_tokens
         )
+
+        # Experimental prefill-only plan selector. Keep the stock paged plan as
+        # the default and require an explicit kill-switch opt-in for the
+        # alternative max-KV bound.
+        self._prefill_plan = os.environ.get(
+            "SGLANG_TRTLLM_MHA_PREFILL_PLAN", "paged"
+        ).lower()
+        if self._prefill_plan not in {"paged", "paged_actual_kv"}:
+            raise ValueError(
+                "SGLANG_TRTLLM_MHA_PREFILL_PLAN must be one of "
+                "paged or paged_actual_kv; got "
+                f"{self._prefill_plan!r}"
+            )
+        if self._prefill_plan != "paged":
+            logger.warning(
+                "TRTLLM-MHA experimental prefill plan enabled: %s",
+                self._prefill_plan,
+            )
 
         # SWA hybrid models split the KV cache into full and SWA pools with
         # separate index spaces; SWA layers need a translated page_table.
@@ -720,6 +741,17 @@ class TRTLLMHAAttnBackend(FlashInferAttnBackend):
             metadata.max_seq_len_q = (
                 int(max_q.item()) if isinstance(max_q, torch.Tensor) else int(max_q)
             )
+            if self._prefill_plan != "paged":
+                prefix_lens = forward_batch.extend_prefix_lens_cpu
+                if prefix_lens is None:
+                    prefix_lens = [0] * len(forward_batch.extend_seq_lens_cpu)
+                metadata.max_seq_len_kv = max(
+                    int(prefix.item() if isinstance(prefix, torch.Tensor) else prefix)
+                    + int(extend.item() if isinstance(extend, torch.Tensor) else extend)
+                    for prefix, extend in zip(
+                        prefix_lens, forward_batch.extend_seq_lens_cpu
+                    )
+                )
             if (
                 forward_batch.extend_prefix_lens_cpu is not None
                 and any(forward_batch.extend_prefix_lens_cpu)
@@ -927,6 +959,12 @@ class TRTLLMHAAttnBackend(FlashInferAttnBackend):
                 q_len_per_req=self.forward_metadata.max_seq_len_q,
             )
         else:
+            max_kv_len = (
+                self.forward_metadata.max_seq_len_kv
+                if self._prefill_plan != "paged"
+                and self.forward_metadata.max_seq_len_kv is not None
+                else self.max_context_len
+            )
             o = flashinfer.prefill.trtllm_batch_context_with_kv_cache(
                 query=q,
                 kv_cache=kv_cache,
@@ -934,7 +972,7 @@ class TRTLLMHAAttnBackend(FlashInferAttnBackend):
                 block_tables=page_table,
                 seq_lens=self.forward_metadata.cache_seqlens_int32,
                 max_q_len=self.forward_metadata.max_seq_len_q,
-                max_kv_len=self.max_context_len,
+                max_kv_len=max_kv_len,
                 bmm1_scale=bmm1_scale,
                 bmm2_scale=bmm2_scale,
                 batch_size=self.forward_metadata.cu_seqlens_q.shape[0] - 1,
