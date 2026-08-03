@@ -48,6 +48,8 @@ limitations under the License.
 #include <cutlass/gemm/kernel/gemm_universal.hpp>
 #include <cutlass/util/packed_stride.hpp>
 
+#include <cstdlib>
+
 #include "cutlass_extensions/gemm/fp8_gemm_sm90_dispatch.cuh"
 #include "math.hpp"
 #include "utils.h"
@@ -677,6 +679,13 @@ void sm100_fp8_dispatch_bias(
   using CTAShape16 = Shape<_64, _64, _128>;
   using ClusterShape16 = Shape<_1, _4, _1>;
 
+  // T12: opt-in large-prefill shape oracle.  Keep this default-off while the
+  // exact Qwen3-4B B16T512 portfolio is evaluated on SM100.  The switch is
+  // process-static so the hot path does not repeatedly parse the environment.
+  // Only bias-free exact target shapes enter these experimental kernels.
+  using CTAShapeT12WideN = Shape<_256, _256, _64>;
+  using ClusterShapeT12WideN = Shape<_2, _1, _1>;
+
   using MainloopScheduleType = cutlass::gemm::collective::KernelScheduleAuto;
   using EpilogueScheduleType = cutlass::epilogue::collective::EpilogueScheduleAuto;
   using TileSchedulerType = void;
@@ -768,6 +777,35 @@ void sm100_fp8_dispatch_bias(
       EpilogueScheduleType,
       TileSchedulerType,
       false>;
+
+  using GemmT12WideN = DeviceGemmFp8RowwiseSm100<
+      ElementInput,
+      ElementOutput,
+      AccumElementType,
+      CTAShapeT12WideN,
+      ClusterShapeT12WideN,
+      MainloopScheduleType,
+      EpilogueScheduleType,
+      TileSchedulerType,
+      false>;
+
+  static const int t12_config = [] {
+    const char* value = std::getenv("SGLANG_FP8_SM100_T12_CONFIG");
+    return value == nullptr ? 0 : std::atoi(value);
+  }();
+  const int64_t m_exact = a.size(0);
+  const int64_t n_exact = b.size(1);
+  const int64_t k_exact = a.size(1);
+  const bool t12_shape =
+      m_exact == 8192 &&
+      ((n_exact == 6144 && k_exact == 2560) || (n_exact == 2560 && k_exact == 4096) ||
+       (n_exact == 19456 && k_exact == 2560) || (n_exact == 2560 && k_exact == 9728));
+  if (!bias && t12_shape) {
+    if (t12_config == 1) {
+      return launch_sm100_fp8_scaled_mm<GemmT12WideN, false>(
+          out, a, b, scales_a, scales_b, bias);
+    }
+  }
 
   // next power of 2 (minimum 16)
   uint32_t const m = a.size(0);
