@@ -12,7 +12,10 @@ from pathlib import Path
 from typing import Any
 
 
-ACTIVATION_SHORT_NAME = "silu_mul_quant_varlen_kernel"
+ACTIVATION_SHORT_NAMES = (
+    "silu_mul_quant_varlen_kernel",
+    "task25_silu_mul_quant_grid_stride_kernel",
+)
 DEEPGEMM_SHORT_NAME = "sm100_fp8_fp4_gemm_1d1d_impl"
 
 
@@ -41,10 +44,27 @@ def short_name_id(connection: sqlite3.Connection, value: str) -> int:
     return int(row[0])
 
 
+def first_short_name_id(
+    connection: sqlite3.Connection, values: tuple[str, ...]
+) -> tuple[str, int]:
+    for value in values:
+        row = connection.execute(
+            "select id from StringIds where value = ?", (value,)
+        ).fetchone()
+        if row is not None:
+            return value, int(row[0])
+    raise RuntimeError(
+        "none of the activation CUDA kernel short names are present: "
+        + ", ".join(values)
+    )
+
+
 def analyze(path: Path, max_neighbor_gap_us: float) -> dict[str, Any]:
     connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     try:
-        activation_id = short_name_id(connection, ACTIVATION_SHORT_NAME)
+        activation_short_name, activation_id = first_short_name_id(
+            connection, ACTIVATION_SHORT_NAMES
+        )
         deepgemm_id = short_name_id(connection, DEEPGEMM_SHORT_NAME)
         bounds = connection.execute(
             "select min(start), max(end) from CUPTI_ACTIVITY_KIND_KERNEL "
@@ -52,7 +72,7 @@ def analyze(path: Path, max_neighbor_gap_us: float) -> dict[str, Any]:
             (activation_id,),
         ).fetchone()
         if bounds is None or bounds[0] is None or bounds[1] is None:
-            raise RuntimeError(f"no {ACTIVATION_SHORT_NAME} launches in {path}")
+            raise RuntimeError(f"no {activation_short_name} launches in {path}")
         lower = max(int(bounds[0]) - 1_000_000, 0)
         upper = int(bounds[1]) + 1_000_000
         rows = list(
@@ -125,6 +145,7 @@ def analyze(path: Path, max_neighbor_gap_us: float) -> dict[str, Any]:
     )
     result: dict[str, Any] = {
         "sqlite": str(path),
+        "activation_short_name": activation_short_name,
         "activation_bounds_s": [int(bounds[0]) / 1e9, int(bounds[1]) / 1e9],
         "triples": len(samples),
         "per_device_triples": {

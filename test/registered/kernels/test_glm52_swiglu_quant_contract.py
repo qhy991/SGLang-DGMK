@@ -44,7 +44,7 @@ def _eligibility_kwargs(**overrides):
         "gemm1_alpha": None,
         "gemm1_clamp_limit": None,
         "num_real_tokens": 16,
-        "variant": "cuda_valid_cta",
+        "variant": "cuda_grid_stride",
     }
     kwargs.update(overrides)
     return kwargs

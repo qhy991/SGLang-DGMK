@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Capture one fixed-KV B300 decode trace with stock or valid-CTA SwiGLU.
+# Capture one fixed-KV B300 decode trace with stock or route-complete SwiGLU.
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -218,7 +218,7 @@ if [[ -n "$FLASHMLA_PREBUILT_SO" ]]; then
   echo "GLM52_FLASHMLA_PREBUILT_SO=$FLASHMLA_PREBUILT_SO" >> "$ENV_FILE"
 fi
 if [[ "$SWIGLU_MODE" == candidate ]]; then
-  echo "SGLANG_OPT_MOE_SWIGLU_QUANT_VARIANT=cuda_valid_cta" >> "$ENV_FILE"
+  echo "SGLANG_OPT_MOE_SWIGLU_QUANT_VARIANT=cuda_grid_stride" >> "$ENV_FILE"
 fi
 
 {
@@ -241,7 +241,7 @@ fi
     echo "- FlashMLA prebuilt sha256: $(sha256sum "$FLASHMLA_PREBUILT_SO" | awk '{print $1}')"
   fi
   if [[ "$SWIGLU_MODE" == candidate ]]; then
-    echo "- SwiGLU: cuda_valid_cta; stock body; grid=128 rather than 65,536"
+    echo "- SwiGLU: cuda_grid_stride; graph-static CTA pool drains sum(masked_m)"
   else
     echo "- SwiGLU: stock production denominator; grid=65,536"
   fi
@@ -356,7 +356,7 @@ elif [[ "$router_ids_selection_count" -ne 0 ]]; then
 fi
 echo "[VALID] router DeepEP-ID fusion=$ROUTER_DEEPEP_IDS_FUSION selection_count=$router_ids_selection_count"
 
-selection_pattern="GLM-5.2 masked SwiGLU quant selected: variant=cuda_valid_cta capability=(10, 3) shape=(32, 8192, 4096)"
+selection_pattern="GLM-5.2 masked SwiGLU quant selected: variant=cuda_grid_stride capability=(10, 3) shape=(32, 8192, 4096)"
 selection_count=$(grep -c "$selection_pattern" "$OUT/nsys_launch.log" || true)
 if [[ "$SWIGLU_MODE" == candidate ]]; then
   graph_buckets=(1 2 4 8 12 16)

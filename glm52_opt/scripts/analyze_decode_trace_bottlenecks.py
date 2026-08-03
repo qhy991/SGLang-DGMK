@@ -13,7 +13,10 @@ from pathlib import Path
 from typing import Any
 
 
-ACTIVATION_SHORT_NAME = "silu_mul_quant_varlen_kernel"
+ACTIVATION_SHORT_NAMES = (
+    "silu_mul_quant_varlen_kernel",
+    "task25_silu_mul_quant_grid_stride_kernel",
+)
 
 
 def percentile(values: list[float], fraction: float) -> float:
@@ -63,7 +66,10 @@ def category(name: str) -> str:
         return "deepgemm_other"
     if "flash_fwd" in lowered or "flashmla" in lowered or "flash_mla" in lowered:
         return "flashmla"
-    if "silu_mul_quant_varlen" in lowered:
+    if (
+        "silu_mul_quant_varlen" in lowered
+        or "task25_silu_mul_quant_grid_stride" in lowered
+    ):
         return "moe_swiglu_quant"
     if "per_token_group_quant" in lowered or "quantize_k_cache" in lowered:
         return "quantization"
@@ -94,6 +100,7 @@ def concise_name(name: str) -> str:
         ("deep_ep::internode_ll::dispatch", "deepep_ll_dispatch"),
         ("deep_ep::internode_ll::combine", "deepep_ll_combine"),
         ("silu_mul_quant_varlen_kernel", "moe_swiglu_quant"),
+        ("task25_silu_mul_quant_grid_stride_kernel", "moe_swiglu_quant"),
         ("flashmla_sparse_decode_p1_consumer", "flashmla_p1_consumer"),
         ("flash_fwd_splitkv_mla", "flashmla_splitkv"),
         ("flashmla_sparse_decode_combine", "flashmla_combine"),
@@ -121,11 +128,19 @@ WAIT_PATTERNS = {
 def analyze(path: Path, top_n: int) -> dict[str, Any]:
     connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     try:
-        activation_row = connection.execute(
-            "select id from StringIds where value = ?", (ACTIVATION_SHORT_NAME,)
-        ).fetchone()
+        activation_short_name = ""
+        activation_row = None
+        for short_name in ACTIVATION_SHORT_NAMES:
+            activation_row = connection.execute(
+                "select id from StringIds where value = ?", (short_name,)
+            ).fetchone()
+            if activation_row is not None:
+                activation_short_name = short_name
+                break
         if activation_row is None:
-            raise RuntimeError(f"missing {ACTIVATION_SHORT_NAME} in {path}")
+            raise RuntimeError(
+                f"missing all activation short names {ACTIVATION_SHORT_NAMES} in {path}"
+            )
         lower, upper = connection.execute(
             "select min(start), max(end) from CUPTI_ACTIVITY_KIND_KERNEL "
             "where shortName = ?",
@@ -249,6 +264,7 @@ def analyze(path: Path, top_n: int) -> dict[str, Any]:
 
         return {
             "sqlite": str(path),
+            "activation_short_name": activation_short_name,
             "decode_bounds_s": [int(lower) / 1e9, int(upper) / 1e9],
             "decode_window_ms": (int(upper) - int(lower)) / 1e6,
             "summed_kernel_ms": total / 1e6,

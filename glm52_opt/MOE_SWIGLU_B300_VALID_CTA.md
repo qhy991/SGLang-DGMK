@@ -1,4 +1,22 @@
-# B300 Masked MoE SwiGLU+Quant：valid-CTA 优化与固定 KV 验证
+# 已作废：B300 Masked MoE SwiGLU+Quant valid-CTA 实验
+
+> **状态：INVALIDATED（2026-08-03）。本页所有性能数字都不得作为 winner
+> 或生产晋级依据。** 旧实现把源 rank 的 `M*topk` 当作目的 rank 的工作量
+> 上界；EP 路由偏斜时 `sum(masked_m) > M*topk`，会漏写合法 routed rows。
+> 此外，直接把单工作 CTA 改成循环 CTA 后，PDL trigger 也必须推迟到每个
+> CTA 的最后一轮，否则下游 W2 可能在后续 row 写完前启动。
+
+旧测试只构造了 `sum(masked_m)=M*topk` 的单 rank 代理，又只跑了每个启动
+顺序一条请求，因此未暴露这两个正确性缺口。下面保留原文仅用于事故追溯；
+14.72% TPOT、14.06x activation 和 2.84x Harness 等数字全部作废。替代实现
+是 `cuda_grid_stride`：host-known `M*topk` 只是 CTA pool，每个 CTA 在设备端
+循环直到完整消费 `sum(masked_m)`，且只在自己的最后一个 work item 前触发
+PDL。新的偏斜/热点 Harness、8 卡 nsys 和多批次固定-KV结果记录在
+`MOE_SWIGLU_B300_GRID_STRIDE.md`。
+
+---
+
+## 以下是已作废的历史记录
 
 - 日期：2026-08-02
 - 机器：B300-M2，8×NVIDIA B300 SXM6 AC，TP8/DP8/EP8

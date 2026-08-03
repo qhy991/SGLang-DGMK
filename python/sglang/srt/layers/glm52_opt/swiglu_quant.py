@@ -42,7 +42,7 @@ _TRITON_VARIANTS: Final = {
     "split1024_w4": (1024, 4),
     "group512_w1": (512, 1),
 }
-_CUDA_VARIANT: Final = "cuda_valid_cta"
+_CUDA_VARIANT: Final = "cuda_grid_stride"
 _VARIANT_NAMES: Final = frozenset((*_TRITON_VARIANTS, _CUDA_VARIANT))
 
 
@@ -304,6 +304,9 @@ def silu_mul_quant_packed_into(
 
     block_n, num_warps = _TRITON_VARIANTS[variant]
     split_count = _HIDDEN // block_n
+    # Triton candidates still use this value as a hard correctness bound and
+    # therefore remain benchmark-only.  Production selects the CUDA grid-stride
+    # variant, whose pool size is not a bound on sum(masked_m).
     routed_slots = max(1, num_real_tokens * _TOPK)
     _silu_mul_quant_packed_kernel[(routed_slots, split_count)](
         gateup_output,

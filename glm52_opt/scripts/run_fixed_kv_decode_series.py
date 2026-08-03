@@ -23,6 +23,7 @@ import json
 import random
 import re
 import time
+from array import array
 from pathlib import Path
 from typing import Any
 
@@ -58,6 +59,14 @@ def parse_args() -> argparse.Namespace:
         help="Read model config.json when zero.",
     )
     parser.add_argument("--stream-interval", type=int, default=1)
+    parser.add_argument(
+        "--token-plan",
+        type=Path,
+        help=(
+            "optional fixed-kv-natural-token-plan-v1 uint32 file; when set, "
+            "prefixes and every suffix come from its recorded dataset tokens"
+        ),
+    )
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument(
         "--cache-hit-tolerance",
@@ -188,7 +197,12 @@ def build_suffix(
     return suffix
 
 
-def protocol_id(args: argparse.Namespace, vocab_size: int, sequence_index: int) -> str:
+def protocol_id(
+    args: argparse.Namespace,
+    vocab_size: int,
+    sequence_index: int,
+    input_source_id: str,
+) -> str:
     spec = {
         "protocol": PROTOCOL_VERSION,
         "seed": args.seed,
@@ -198,10 +212,95 @@ def protocol_id(args: argparse.Namespace, vocab_size: int, sequence_index: int) 
         "output_len": args.output_len,
         "vocab_size": vocab_size,
         "sequence_index": sequence_index,
+        "input_source_id": input_source_id,
     }
     return hashlib.sha256(
         json.dumps(spec, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def load_token_plan(
+    path: Path,
+    args: argparse.Namespace,
+    vocab_size: int,
+) -> tuple[list[list[int]], array, dict[str, Any]]:
+    metadata_path = path.with_name(path.name + ".json")
+    metadata = json.loads(metadata_path.read_text())
+    expected = {
+        "format": "fixed-kv-natural-token-plan-v1",
+        "batch_size": args.batch_size,
+        "input_len": args.input_len,
+        "prefix_len": args.prefix_len,
+        "suffix_len": args.input_len - args.prefix_len,
+        "runs": args.runs,
+        "warmup_runs": args.warmup_runs,
+        "sequence_count_including_correctness": args.warmup_runs + args.runs + 1,
+    }
+    for key, value in expected.items():
+        if metadata.get(key) != value:
+            raise RuntimeError(
+                f"token plan {metadata_path} has {key}={metadata.get(key)!r}; "
+                f"expected {value!r}"
+            )
+    actual_sha256 = sha256_file(path)
+    if metadata.get("plan_sha256") != actual_sha256:
+        raise RuntimeError(
+            f"token plan hash mismatch: {actual_sha256} != "
+            f"{metadata.get('plan_sha256')}"
+        )
+    expected_tokens = args.batch_size * int(metadata["stream_tokens"])
+    if path.stat().st_size != expected_tokens * 4:
+        raise RuntimeError(
+            f"token plan byte size {path.stat().st_size} != {expected_tokens * 4}"
+        )
+    tokens = array("I")
+    with path.open("rb") as handle:
+        tokens.fromfile(handle, expected_tokens)
+    if len(tokens) != expected_tokens:
+        raise RuntimeError(
+            f"token plan has {len(tokens)} uint32 values, expected {expected_tokens}"
+        )
+    if tokens and max(tokens) >= vocab_size:
+        raise RuntimeError(
+            f"token plan contains token {max(tokens)} outside vocab_size={vocab_size}"
+        )
+    stream_tokens = int(metadata["stream_tokens"])
+    prefixes = [
+        list(
+            tokens[
+                request_index * stream_tokens : request_index * stream_tokens
+                + args.prefix_len
+            ]
+        )
+        for request_index in range(args.batch_size)
+    ]
+    return prefixes, tokens, metadata
+
+
+def planned_suffix(
+    tokens: array,
+    metadata: dict[str, Any],
+    *,
+    request_index: int,
+    sequence_index: int,
+) -> list[int]:
+    stream_tokens = int(metadata["stream_tokens"])
+    prefix_len = int(metadata["prefix_len"])
+    suffix_len = int(metadata["suffix_len"])
+    start = (
+        request_index * stream_tokens
+        + prefix_len
+        + sequence_index * suffix_len
+    )
+    return list(tokens[start : start + suffix_len])
 
 
 def write_jsonl(path: Path, row: dict[str, Any]) -> None:
@@ -302,6 +401,75 @@ def run_decode_batch(
     return latency, last_ttft, hit_rate, server_info
 
 
+def run_correctness_probe(
+    *,
+    session: requests.Session,
+    base_url: str,
+    input_ids: list[list[int]],
+    output_len: int,
+    timeout: int,
+) -> dict[str, Any]:
+    """Generate one untimed batch and hash every greedy output token ID."""
+
+    payload = {
+        "input_ids": input_ids,
+        "sampling_params": {
+            "temperature": 0.0,
+            "max_new_tokens": output_len,
+            "ignore_eos": True,
+        },
+        "return_logprob": True,
+        "top_logprobs_num": 0,
+        "stream": False,
+    }
+    response = session.post(f"{base_url}/generate", json=payload, timeout=timeout)
+    response.raise_for_status()
+    body = response.json()
+    records = body if isinstance(body, list) else [body]
+    if len(records) != len(input_ids):
+        raise RuntimeError(
+            f"correctness probe expected {len(input_ids)} responses, got "
+            f"{len(records)}"
+        )
+
+    output_token_ids: list[list[int]] = []
+    for index, record in enumerate(records):
+        ids = record.get("output_ids")
+        if ids is None:
+            logprobs = record.get("meta_info", {}).get("output_token_logprobs")
+            if logprobs is not None:
+                ids = [entry[1] for entry in logprobs]
+        if ids is None:
+            raise RuntimeError(
+                f"correctness probe response {index} has no output token IDs"
+            )
+        normalized = [int(token_id) for token_id in ids]
+        if len(normalized) != output_len:
+            raise RuntimeError(
+                f"correctness probe response {index} has {len(normalized)} "
+                f"tokens, expected {output_len}"
+            )
+        output_token_ids.append(normalized)
+
+    canonical = json.dumps(output_token_ids, separators=(",", ":")).encode()
+    return {
+        "batch_size": len(output_token_ids),
+        "output_len": output_len,
+        "output_token_count": sum(len(row) for row in output_token_ids),
+        "output_token_ids_sha256": hashlib.sha256(canonical).hexdigest(),
+        "per_request_output_token_ids_sha256": [
+            hashlib.sha256(
+                json.dumps(row, separators=(",", ":")).encode()
+            ).hexdigest()
+            for row in output_token_ids
+        ],
+        # 128*48 integer IDs are small enough to retain, and are necessary to
+        # distinguish one-token numerical drift from a wholesale wrong-route
+        # failure when hashes differ across independently launched services.
+        "output_token_ids": output_token_ids,
+    }
+
+
 def last_server_metrics(server_info: dict[str, Any]) -> tuple[float, float]:
     states = server_info.get("internal_states") or []
     state = states[0] if states else {}
@@ -317,6 +485,9 @@ def main() -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     warmup_path = output_path.with_name(output_path.name + ".warmup.jsonl")
     protocol_path = output_path.with_name(output_path.name + ".protocol.json")
+    correctness_path = output_path.with_name(
+        output_path.name + ".correctness.json"
+    )
     output_path.write_text("")
     warmup_path.write_text("")
 
@@ -325,12 +496,27 @@ def main() -> None:
     validate_args(args, vocab_size)
     target_hit_rate = args.prefix_len / float(args.input_len)
     suffix_len = args.input_len - args.prefix_len
-    prefixes, offsets = build_base_prefixes(
-        batch_size=args.batch_size,
-        prefix_len=args.prefix_len,
-        vocab_size=vocab_size,
-        seed=args.seed,
-    )
+    token_plan: array | None = None
+    token_plan_metadata: dict[str, Any] | None = None
+    if args.token_plan is not None:
+        prefixes, token_plan, token_plan_metadata = load_token_plan(
+            args.token_plan.resolve(), args, vocab_size
+        )
+        offsets: list[int] = []
+        input_source = "sharegpt-token-plan"
+        input_source_id = (
+            f"{token_plan_metadata['format']}:"
+            f"{token_plan_metadata['plan_sha256']}"
+        )
+    else:
+        prefixes, offsets = build_base_prefixes(
+            batch_size=args.batch_size,
+            prefix_len=args.prefix_len,
+            vocab_size=vocab_size,
+            seed=args.seed,
+        )
+        input_source = "deterministic-random-ids"
+        input_source_id = "deterministic-random-ids-v1"
     protocol = {
         "protocol": PROTOCOL_VERSION,
         "label": args.label,
@@ -347,9 +533,33 @@ def main() -> None:
         "vocab_size": vocab_size,
         "target_cache_hit_rate": target_hit_rate,
         "cache_hit_tolerance": args.cache_hit_tolerance,
-        "base_offsets_sha256": hashlib.sha256(
-            json.dumps(offsets, separators=(",", ":")).encode()
-        ).hexdigest(),
+        "input_source": input_source,
+        "input_source_id": input_source_id,
+        "base_offsets_sha256": (
+            hashlib.sha256(
+                json.dumps(offsets, separators=(",", ":")).encode()
+            ).hexdigest()
+            if offsets
+            else None
+        ),
+        "token_plan": (
+            {
+                "path": str(args.token_plan.resolve()),
+                "metadata_path": str(
+                    args.token_plan.resolve().with_name(
+                        args.token_plan.name + ".json"
+                    )
+                ),
+                "format": token_plan_metadata["format"],
+                "plan_sha256": token_plan_metadata["plan_sha256"],
+                "sampled_record_ids_sha256": token_plan_metadata[
+                    "sampled_record_ids_sha256"
+                ],
+                "records_tokenized": token_plan_metadata["records_tokenized"],
+            }
+            if token_plan_metadata is not None
+            else None
+        ),
     }
     protocol_path.write_text(json.dumps(protocol, indent=2, sort_keys=True) + "\n")
     print(json.dumps(protocol, indent=2, sort_keys=True), flush=True)
@@ -364,17 +574,26 @@ def main() -> None:
             is_warmup = sequence_index < args.warmup_runs
             if not is_warmup:
                 measured_index += 1
-            inputs = [
-                prefix
-                + build_suffix(
-                    request_index=request_index,
-                    sequence_index=sequence_index,
-                    suffix_len=suffix_len,
-                    vocab_size=vocab_size,
-                    seed=args.seed,
+            inputs = []
+            for request_index, prefix in enumerate(prefixes):
+                suffix = (
+                    planned_suffix(
+                        token_plan,
+                        token_plan_metadata,
+                        request_index=request_index,
+                        sequence_index=sequence_index,
+                    )
+                    if token_plan is not None
+                    and token_plan_metadata is not None
+                    else build_suffix(
+                        request_index=request_index,
+                        sequence_index=sequence_index,
+                        suffix_len=suffix_len,
+                        vocab_size=vocab_size,
+                        seed=args.seed,
+                    )
                 )
-                for request_index, prefix in enumerate(prefixes)
-            ]
+                inputs.append(prefix + suffix)
             latency, last_ttft, hit_rate, server_info = run_decode_batch(
                 session=session,
                 base_url=base_url,
@@ -402,12 +621,16 @@ def main() -> None:
             )
             row = {
                 "protocol": PROTOCOL_VERSION,
+                "input_source": input_source,
+                "input_source_id": input_source_id,
                 "run_name": run_name,
                 "label": args.label,
                 "is_warmup": is_warmup,
                 "sequence_index": sequence_index,
                 "measured_index": None if is_warmup else measured_index,
-                "prompt_set_id": protocol_id(args, vocab_size, sequence_index),
+                "prompt_set_id": protocol_id(
+                    args, vocab_size, sequence_index, input_source_id
+                ),
                 "batch_size": args.batch_size,
                 "input_len": args.input_len,
                 "prefix_len": args.prefix_len,
@@ -440,6 +663,60 @@ def main() -> None:
             )
             del inputs
             gc.collect()
+
+        # Keep output validation outside the timed series.  It uses the next
+        # deterministic suffix, so it neither replays a measured suffix nor
+        # perturbs any recorded latency.  All A/B/A arms must reproduce all
+        # 128*output_len greedy token IDs exactly.
+        correctness_sequence_index = total_sequences
+        correctness_inputs = []
+        for request_index, prefix in enumerate(prefixes):
+            suffix = (
+                planned_suffix(
+                    token_plan,
+                    token_plan_metadata,
+                    request_index=request_index,
+                    sequence_index=correctness_sequence_index,
+                )
+                if token_plan is not None and token_plan_metadata is not None
+                else build_suffix(
+                    request_index=request_index,
+                    sequence_index=correctness_sequence_index,
+                    suffix_len=suffix_len,
+                    vocab_size=vocab_size,
+                    seed=args.seed,
+                )
+            )
+            correctness_inputs.append(prefix + suffix)
+        correctness = run_correctness_probe(
+            session=session,
+            base_url=base_url,
+            input_ids=correctness_inputs,
+            output_len=args.output_len,
+            timeout=args.timeout,
+        )
+        correctness.update(
+            protocol=PROTOCOL_VERSION,
+            input_source=input_source,
+            input_source_id=input_source_id,
+            label=args.label,
+            sequence_index=correctness_sequence_index,
+            prompt_set_id=protocol_id(
+                args,
+                vocab_size,
+                correctness_sequence_index,
+                input_source_id,
+            ),
+        )
+        correctness_path.write_text(
+            json.dumps(correctness, indent=2, sort_keys=True) + "\n"
+        )
+        print(
+            "[VALID] correctness probe "
+            f"tokens={correctness['output_token_count']} "
+            f"sha256={correctness['output_token_ids_sha256']}",
+            flush=True,
+        )
 
     rows = [json.loads(line) for line in output_path.read_text().splitlines() if line]
     if len(rows) != args.runs:

@@ -425,10 +425,10 @@ def swiglu_quant_variant() -> str | None:
     variant = variant.strip()
     if not variant:
         return None
-    if variant != "cuda_valid_cta":
+    if variant != "cuda_grid_stride":
         raise ValueError(
             "SGLANG_OPT_MOE_SWIGLU_QUANT_VARIANT must be "
-            f"'cuda_valid_cta', got {variant!r}"
+            f"'cuda_grid_stride', got {variant!r}"
         )
     return variant
 
