@@ -31,6 +31,18 @@ using namespace cute;
 
 using ProblemShape = cutlass::gemm::GroupProblemShape<Shape<int, int, int>>;
 
+// This is an explicit performance contract, not a correctness requirement.
+// The N=8 decode tile is faster when every expert fits in one token tile, but
+// concentrated routing makes it reread weights. problem_sizes is device-side
+// during CUDA Graph replay, so validating the maximum here would introduce a
+// host synchronization. Keep stock as the default and allow deployments whose
+// router guarantees max(problem_sizes[:, 0]) <= 8 to opt in before first use.
+static bool use_sm100_fp8_moe_max8_narrow_decode() {
+  static const bool enabled =
+      getBoolEnv("SGLANG_CUTLASS_FP8_MOE_ASSUME_MAX_EXPERT_ROWS_8");
+  return enabled;
+}
+
 template <typename OutType, typename ScheduleConfig, typename LayoutD>
 void launch_sm90_fp8_blockwise_scaled_group_mm(
     torch::Tensor& out_ptrs,
@@ -387,7 +399,7 @@ void sm100_fp8_blockwise_group_mm_dispatch_shape(
         expert_offsets,
         workspace);
     output = output_t.t();
-  } else if (a.size(0) <= 256) {
+  } else if (a.size(0) <= 256 && use_sm100_fp8_moe_max8_narrow_decode()) {
     run_get_group_gemm_starts<
         MmaConfigDecodeNarrow::LayoutSFA,
         MmaConfigDecodeNarrow::LayoutSFB,
