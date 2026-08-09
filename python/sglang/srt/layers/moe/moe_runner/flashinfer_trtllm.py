@@ -722,7 +722,7 @@ def fused_experts_none_to_flashinfer_trtllm_fp8(
                 topk_output.topk_ids, topk_output.topk_weights
             )
 
-            output = trtllm_fp8_block_scale_routed_moe_wrapper(
+            trtllm_fp8_block_scale_routed_moe_wrapper(
                 topk_ids=packed_topk_ids,
                 routing_bias=None,
                 hidden_states=a_q,
@@ -731,6 +731,7 @@ def fused_experts_none_to_flashinfer_trtllm_fp8(
                 gemm1_weights_scale=quant_info.w13_weight_scale_inv,
                 gemm2_weights=quant_info.w2_weight,
                 gemm2_weights_scale=quant_info.w2_weight_scale_inv,
+                output=symm_output,
                 num_experts=quant_info.global_num_experts,
                 top_k=runner_config.top_k,
                 n_group=None,
@@ -756,7 +757,7 @@ def fused_experts_none_to_flashinfer_trtllm_fp8(
         else:
             assert TopKOutputChecker.format_is_bypassed(topk_output)
 
-            output = trtllm_fp8_block_scale_moe_wrapper(
+            trtllm_fp8_block_scale_moe_wrapper(
                 routing_logits=router_logits,
                 routing_bias=correction_bias,
                 hidden_states=a_q,
@@ -765,6 +766,7 @@ def fused_experts_none_to_flashinfer_trtllm_fp8(
                 gemm1_weights_scale=quant_info.w13_weight_scale_inv,
                 gemm2_weights=quant_info.w2_weight,
                 gemm2_weights_scale=quant_info.w2_weight_scale_inv,
+                output=symm_output,
                 num_experts=quant_info.global_num_experts,
                 top_k=topk_config.top_k,
                 n_group=topk_config.num_expert_group,
@@ -783,8 +785,6 @@ def fused_experts_none_to_flashinfer_trtllm_fp8(
                 fp8_quantization_type=int(fp8_quantization_type),
                 activation_type=quant_info.activation_type,
             )
-        # TODO: Once https://github.com/flashinfer-ai/flashinfer/issues/2703 is fixed, pass output to moe kernel and remove this copy.
-        symm_output.copy_(output)
         output = symm_output
     else:
         assert TopKOutputChecker.format_is_bypassed(topk_output)
