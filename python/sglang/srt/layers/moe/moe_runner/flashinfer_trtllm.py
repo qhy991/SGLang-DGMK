@@ -651,8 +651,14 @@ def fused_experts_none_to_flashinfer_trtllm_fp8(
     from flashinfer.fused_moe import Fp8QuantizationType
 
     from sglang.srt.layers.moe.token_dispatcher.standard import StandardCombineInput
-    from sglang.srt.layers.moe.topk import TopKOutputChecker
+    from sglang.srt.layers.moe.topk import (
+        TopKOutputChecker,
+        capture_routed_experts_if_allowed,
+    )
     from sglang.srt.layers.moe.utils import RoutingMethodType
+    from sglang.srt.state_capturer.routed_experts import (
+        get_global_experts_capturer,
+    )
 
     _SUPPORTED_FP8_ACTIVATIONS = {"silu", "relu2"}
     assert runner_config.activation in _SUPPORTED_FP8_ACTIVATIONS, (
@@ -756,6 +762,21 @@ def fused_experts_none_to_flashinfer_trtllm_fp8(
         else:
             assert TopKOutputChecker.format_is_bypassed(topk_output)
 
+            routing_replay_out = None
+            if (
+                topk_config.allow_routed_experts_capture
+                and get_global_experts_capturer() is not None
+            ):
+                if runner_config.layer_id is None:
+                    raise RuntimeError(
+                        "FlashInfer routed-expert capture requires runner layer_id."
+                    )
+                routing_replay_out = torch.empty(
+                    (a_q.shape[0], topk_config.top_k),
+                    dtype=torch.int16,
+                    device=a_q.device,
+                )
+
             output = trtllm_fp8_block_scale_moe_wrapper(
                 routing_logits=router_logits,
                 routing_bias=correction_bias,
@@ -782,7 +803,14 @@ def fused_experts_none_to_flashinfer_trtllm_fp8(
                 tune_max_num_tokens=next_power_of_2(a_q.shape[0]),
                 fp8_quantization_type=int(fp8_quantization_type),
                 activation_type=quant_info.activation_type,
+                routing_replay_out=routing_replay_out,
             )
+            if routing_replay_out is not None:
+                capture_routed_experts_if_allowed(
+                    topk_config,
+                    runner_config.layer_id,
+                    routing_replay_out,
+                )
         # TODO: Once https://github.com/flashinfer-ai/flashinfer/issues/2703 is fixed, pass output to moe kernel and remove this copy.
         symm_output.copy_(output)
         output = symm_output

@@ -29,13 +29,16 @@ def _fake_fp8_block_scale_moe(
     tune_max_num_tokens: int = 8192,
     fp8_quantization_type: Optional[int] = None,
     activation_type: Optional[int] = None,
+    routing_replay_out: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     return torch.empty(
         hidden_states.shape, dtype=torch.bfloat16, device=hidden_states.device
     )
 
 
-@register_custom_op(fake_impl=_fake_fp8_block_scale_moe)
+@register_custom_op(
+    fake_impl=_fake_fp8_block_scale_moe, mutates_args=["routing_replay_out"]
+)
 def trtllm_fp8_block_scale_moe_wrapper(
     routing_logits: torch.Tensor,
     routing_bias: Optional[torch.Tensor],
@@ -60,6 +63,7 @@ def trtllm_fp8_block_scale_moe_wrapper(
     tune_max_num_tokens: int = 8192,
     fp8_quantization_type: Optional[int] = None,
     activation_type: Optional[int] = None,
+    routing_replay_out: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     try:
         from flashinfer.fused_moe import trtllm_fp8_block_scale_moe
@@ -90,6 +94,7 @@ def trtllm_fp8_block_scale_moe_wrapper(
         "weight_layout": weight_layout,
         "enable_pdl": enable_pdl,
         "tune_max_num_tokens": tune_max_num_tokens,
+        "routing_replay_out": routing_replay_out,
     }
     if fp8_quantization_type is not None:
         from flashinfer.fused_moe import Fp8QuantizationType
