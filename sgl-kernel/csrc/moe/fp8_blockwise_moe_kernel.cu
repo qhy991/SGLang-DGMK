@@ -232,7 +232,16 @@ void launch_sm100_fp8_blockwise_scaled_group_mm(
           sizeof(typename CollectiveEpilogue::SharedStorage))>,
       typename ScheduleConfig::KernelSchedule>::CollectiveOp;
 
-  using GemmKernel = cutlass::gemm::kernel::GemmUniversal<ProblemShape, CollectiveMainloop, CollectiveEpilogue, void>;
+  static constexpr bool UseNarrowAlongNOneBlockScheduler =
+      cute::size<0>(typename ScheduleConfig::MmaTileShape{}) == 128 &&
+      cute::size<1>(typename ScheduleConfig::MmaTileShape{}) == 8 &&
+      cute::size<2>(typename ScheduleConfig::MmaTileShape{}) == 128;
+  using TileSchedulerTag = cute::conditional_t<
+      UseNarrowAlongNOneBlockScheduler,
+      cutlass::gemm::GroupSchedulerAlongNOneBlockN,
+      void>;
+  using GemmKernel = cutlass::gemm::kernel::GemmUniversal<
+      ProblemShape, CollectiveMainloop, CollectiveEpilogue, TileSchedulerTag>;
 
   using Gemm = cutlass::gemm::device::GemmUniversalAdapter<GemmKernel>;
   using UnderlyingProblemShape = ProblemShape::UnderlyingProblemShape;
