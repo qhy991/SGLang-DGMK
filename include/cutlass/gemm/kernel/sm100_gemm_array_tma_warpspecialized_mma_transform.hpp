@@ -132,7 +132,11 @@ public:
   using CtaShape_MNK = typename CollectiveMainloop::CtaShape_MNK;
 
   static constexpr bool IsGroupedGemmKernel = !cute::is_same_v<InternalStrideA, StrideA>;
-  using TileSchedulerTag = cute::conditional_t<IsGroupedGemmKernel, GroupScheduler, TileSchedulerTag_>;
+  using TileSchedulerTag = cute::conditional_t<
+    IsGroupedGemmKernel &&
+        !cute::is_same_v<TileSchedulerTag_, GroupSchedulerAlongNOneBlockN>,
+    GroupScheduler,
+    TileSchedulerTag_>;
 
   using TileScheduler = typename detail::TileSchedulerSelector<
     TileSchedulerTag, ArchTag, CtaShape_MNK, ClusterShape, SchedulerPipelineStageCount, ProblemShape>::Scheduler;

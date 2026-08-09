@@ -54,11 +54,16 @@ namespace cutlass::gemm::kernel::detail {
 // If we had access to host-side problem shapes, one could to use it to figure out the grid shape
 // and thereafter use CLC query (which can then be linearized and mapped to an appropriate tile coord).
 
-template<class GroupProblemShape, int SchedulerPipelineStageCount>
+template<
+  class GroupProblemShape,
+  int SchedulerPipelineStageCount,
+  bool AlongNOneBlockN = false
+>
 class PersistentTileSchedulerSm100Group {
 
 public:
-  using UnderlyingScheduler = PersistentTileSchedulerSm90Group<GroupProblemShape, SchedulerPipelineStageCount>;
+  using UnderlyingScheduler = PersistentTileSchedulerSm90Group<
+      GroupProblemShape, SchedulerPipelineStageCount, AlongNOneBlockN>;
   using Params = PersistentTileSchedulerSm100GroupParams<GroupProblemShape>;
   using WorkTileInfo = typename UnderlyingScheduler::WorkTileInfo;
   using Arguments = typename UnderlyingScheduler::Arguments;
@@ -96,6 +101,7 @@ public:
       cta_shape, selected_cluster_shape);
 
     Params params;
+    constexpr auto forced_raster_order = RasterOrderOptions::AlongN;
     params.initialize(
       problem_blocks,
       problem_shapes,
@@ -103,7 +109,7 @@ public:
       to_gemm_coord(selected_cluster_shape),
       hw_info,
       args.max_swizzle_size,
-      args.raster_order
+      AlongNOneBlockN ? forced_raster_order : args.raster_order
     );
 
     return params;

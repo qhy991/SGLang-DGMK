@@ -52,6 +52,12 @@ struct StreamKScheduler { };
 
 struct GroupScheduler { }; // Only used for Grouped GEMMs
 
+// Grouped scheduler specialization for workloads that guarantee one logical
+// CTA along N. It forces AlongN rasterization so that the N-cluster divisor is
+// a compile-time power of two and removes dynamic U64 quotient/remainder from
+// the device scheduler. Callers must opt in explicitly.
+struct GroupSchedulerAlongNOneBlockN { };
+
 struct DynamicPersistentScheduler { };
 
 struct StaticPersistentScheduler { };
@@ -165,7 +171,7 @@ template <
   class GroupProblemShape
 >
 struct TileSchedulerSelector<
-    GroupScheduler,
+  GroupScheduler,
     arch::Sm90,
     TileShape,
     ClusterShape
@@ -255,6 +261,24 @@ struct TileSchedulerSelector<
     GroupProblemShape
   > {
   using Scheduler = PersistentTileSchedulerSm100Group<GroupProblemShape, SchedulerPipelineStageCount>;
+};
+
+template <
+  class TileShape,
+  class ClusterShape,
+  uint32_t SchedulerPipelineStageCount,
+  class GroupProblemShape
+>
+struct TileSchedulerSelector<
+    GroupSchedulerAlongNOneBlockN,
+    arch::Sm100,
+    TileShape,
+    ClusterShape,
+    SchedulerPipelineStageCount,
+    GroupProblemShape
+  > {
+  using Scheduler = PersistentTileSchedulerSm100Group<
+      GroupProblemShape, SchedulerPipelineStageCount, true>;
 };
 
 // SM100 stream-K scheduler

@@ -43,7 +43,11 @@ namespace cutlass::gemm::kernel::detail {
 ///////////////////////////////////////////////////////////////////////////////
 
 // Persistent Thread Block (TB) scheduler
-template <class GroupProblemShape, int SchedulerPipelineStageCount>
+template <
+  class GroupProblemShape,
+  int SchedulerPipelineStageCount,
+  bool AlongNOneBlockN = false
+>
 class PersistentTileSchedulerSm90Group {
   //
   // Data members
@@ -248,7 +252,10 @@ public:
     // MSVC requires protecting use of CUDA-specific nonstandard syntax,
     // like blockIdx and gridDim, with __CUDA_ARCH__.
 #if defined(__CUDA_ARCH__)
-    if (scheduler_params.raster_order_ == RasterOrder::AlongN) {
+    if constexpr (AlongNOneBlockN) {
+      current_work_linear_idx_ = uint64_t(blockIdx.x) + uint64_t(blockIdx.y) * uint64_t(gridDim.x);
+    }
+    else if (scheduler_params.raster_order_ == RasterOrder::AlongN) {
       current_work_linear_idx_ = uint64_t(blockIdx.x) + uint64_t(blockIdx.y) * uint64_t(gridDim.x);
     }
     else {
@@ -275,7 +282,13 @@ public:
     auto problem_blocks_m = round_up(ctas_along_m, (1 << params_.log_swizzle_size_) * params_.cluster_shape_.m());
     auto problem_blocks_n = round_up(ctas_along_n, (1 << params_.log_swizzle_size_) * params_.cluster_shape_.n());
     current_group_info_.total_tiles = problem_blocks_m * problem_blocks_n;
-    current_group_info_.problem_blocks_along_raster_order = params_.raster_order_ == RasterOrder::AlongN ? problem_blocks_n : problem_blocks_m;
+    if constexpr (AlongNOneBlockN) {
+      current_group_info_.problem_blocks_along_raster_order = problem_blocks_n;
+    }
+    else {
+      current_group_info_.problem_blocks_along_raster_order =
+          params_.raster_order_ == RasterOrder::AlongN ? problem_blocks_n : problem_blocks_m;
+    }
 
 #else
     CUTLASS_ASSERT(false && "This line should never be reached");
@@ -327,7 +340,13 @@ public:
           }
           auto problem_blocks_m = round_up(ctas_along_m, (1 << log_swizzle_size) * cluster_shape.m());
           auto problem_blocks_n = round_up(ctas_along_n, (1 << log_swizzle_size) * cluster_shape.n());
-          group_info.problem_blocks_along_raster_order = raster_order == RasterOrder::AlongN ? problem_blocks_n : problem_blocks_m;
+          if constexpr (AlongNOneBlockN) {
+            group_info.problem_blocks_along_raster_order = problem_blocks_n;
+          }
+          else {
+            group_info.problem_blocks_along_raster_order =
+                raster_order == RasterOrder::AlongN ? problem_blocks_n : problem_blocks_m;
+          }
           group_info.total_tiles = problem_blocks_m * problem_blocks_n;
         } else {
           group_info.total_tiles = INT_MAX;
@@ -374,7 +393,10 @@ public:
     // put cluster_shape.m/n() as the minor dimension based on raster order AlongN/M resp.
     // Therefore, the offset of a CTA (inside a cluster) in the minor dimension can be directly be 
     // inferred by the blockIdx along the minor dimension.
-    if (raster_order == RasterOrder::AlongN) {
+    if constexpr (AlongNOneBlockN) {
+      cluster_minor_offset = blockIdx.x;
+    }
+    else if (raster_order == RasterOrder::AlongN) {
       cluster_minor_offset = blockIdx.x;
     }
     else {
@@ -388,10 +410,19 @@ public:
     offset = cluster_id & ((1 << log_swizzle_size) - 1);
     extra = cluster_id >> log_swizzle_size;
 
-    uint64_t curr_group_cluster_blk_major = divmod_cluster_shape_major.divide(group_info.problem_blocks_along_raster_order);
-
-    cluster_idx_minor_div_swizzle = extra / curr_group_cluster_blk_major;
-    cluster_idx_major = extra % curr_group_cluster_blk_major;
+    if constexpr (AlongNOneBlockN) {
+      // The opt-in contract guarantees one logical N block. Padding for an
+      // AlongN swizzle therefore makes the N-major cluster count exactly
+      // 2^log_swizzle_size. Replace quotient/remainder with shifts and masks.
+      cluster_idx_minor_div_swizzle = extra >> log_swizzle_size;
+      cluster_idx_major = extra & ((uint64_t(1) << log_swizzle_size) - 1);
+    }
+    else {
+      uint64_t curr_group_cluster_blk_major =
+          divmod_cluster_shape_major.divide(group_info.problem_blocks_along_raster_order);
+      cluster_idx_minor_div_swizzle = extra / curr_group_cluster_blk_major;
+      cluster_idx_major = extra % curr_group_cluster_blk_major;
+    }
 
     cluster_idx_minor = cluster_idx_minor_div_swizzle * (1 << log_swizzle_size) + offset;
 
@@ -400,7 +431,10 @@ public:
     auto major_work_idx = static_cast<int32_t>(cluster_idx_major * divmod_cluster_shape_major.divisor + 
                                                cluster_major_offset);
 
-    if (raster_order == RasterOrder::AlongN) {
+    if constexpr (AlongNOneBlockN) {
+      return {minor_work_idx, major_work_idx, group_info.group_idx, valid_tile};
+    }
+    else if (raster_order == RasterOrder::AlongN) {
       return {minor_work_idx, major_work_idx, group_info.group_idx, valid_tile};
     }
     else {
