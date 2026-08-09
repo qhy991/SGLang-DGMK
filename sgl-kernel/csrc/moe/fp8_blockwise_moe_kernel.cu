@@ -330,6 +330,21 @@ void sm100_fp8_blockwise_group_mm_dispatch_shape(
     using LayoutSFA = decltype(ScaleConfig::deduce_layoutSFA());
     using LayoutSFB = decltype(ScaleConfig::deduce_layoutSFB());
   };
+  struct MmaConfigDecodeNarrow {
+    using ElementA = cutlass::float_e4m3_t;
+    using MmaTileShape = Shape<_128, _8, _128>;
+    using ClusterShape = Shape<_1, _1, _1>;
+    using KernelSchedule = cutlass::gemm::KernelPtrArrayTmaWarpSpecializedBlockwise1SmSm100;
+    using EpilogueSchedule = cutlass::epilogue::PtrArrayTmaWarpSpecialized1Sm;
+    // The decode path computes B^T A^T = C^T. Weight block scales therefore
+    // occupy the M axis while per-token activation scales occupy the narrow N
+    // axis. This admits a narrow token tile instead of padding each expert
+    // to the default 64-row tile.
+    using ScaleConfig =
+        cutlass::detail::Sm100BlockwiseScaleConfig<128, 1, 128, cute::UMMA::Major::K, cute::UMMA::Major::K>;
+    using LayoutSFA = decltype(ScaleConfig::deduce_layoutSFA());
+    using LayoutSFB = decltype(ScaleConfig::deduce_layoutSFB());
+  };
   int num_experts = (int)expert_offsets.size(0);
   torch::TensorOptions options_int = torch::TensorOptions().dtype(torch::kInt64).device(a.device());
   torch::Tensor problem_sizes_transpose = torch::empty(num_experts * 3, options_int);
@@ -358,6 +373,43 @@ void sm100_fp8_blockwise_group_mm_dispatch_shape(
         problem_sizes_transpose,
         true);
     launch_sm100_fp8_blockwise_scaled_group_mm<OutType, MmaConfig1, cutlass::layout::ColumnMajor>(
+        out_ptrs,
+        a_ptrs,
+        b_ptrs,
+        a_scales_ptrs,
+        b_scales_ptrs,
+        stride_a,
+        stride_b,
+        stride_c,
+        layout_sfa,
+        layout_sfb,
+        problem_sizes_transpose,
+        expert_offsets,
+        workspace);
+    output = output_t.t();
+  } else if (a.size(0) <= 256) {
+    run_get_group_gemm_starts<
+        MmaConfigDecodeNarrow::LayoutSFA,
+        MmaConfigDecodeNarrow::LayoutSFB,
+        MmaConfigDecodeNarrow::ScaleConfig>(
+        expert_offsets,
+        a_ptrs,
+        b_ptrs,
+        out_ptrs,
+        a_scales_ptrs,
+        b_scales_ptrs,
+        b_t,
+        a_t,
+        output_t,
+        scales_b_t,
+        scales_a_t,
+        layout_sfa,
+        layout_sfb,
+        problem_sizes,
+        problem_sizes_transpose,
+        true);
+    launch_sm100_fp8_blockwise_scaled_group_mm<
+        OutType, MmaConfigDecodeNarrow, cutlass::layout::ColumnMajor>(
         out_ptrs,
         a_ptrs,
         b_ptrs,
