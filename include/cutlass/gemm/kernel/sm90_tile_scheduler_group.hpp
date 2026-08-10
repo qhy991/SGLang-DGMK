@@ -46,7 +46,8 @@ namespace cutlass::gemm::kernel::detail {
 template <
   class GroupProblemShape,
   int SchedulerPipelineStageCount,
-  bool AlongNOneBlockN = false
+  bool AlongNOneBlockN = false,
+  int ContiguousMTiles = 1
 >
 class PersistentTileSchedulerSm90Group {
   //
@@ -54,8 +55,16 @@ class PersistentTileSchedulerSm90Group {
   //
 
 private:
+  static_assert(
+      ContiguousMTiles == 1 || (AlongNOneBlockN && ContiguousMTiles == 2),
+      "Contiguous M-tile scheduling is only supported by the explicit AlongN chunk-2 contract");
   uint64_t current_work_linear_idx_ = 0;
   uint64_t total_grid_size_ = 0;
+  int32_t current_chunk_m_idx_ = 0;
+  int32_t current_chunk_n_idx_ = 0;
+  int32_t current_chunk_group_idx_ = 0;
+  int32_t current_chunk_valid_ = 0;
+  int32_t current_chunk_subtile_ = 0;
 
   // Tracking current group, its starting linear idx and total tiles
   struct GroupInfo {
@@ -281,6 +290,9 @@ public:
     }
     auto problem_blocks_m = round_up(ctas_along_m, (1 << params_.log_swizzle_size_) * params_.cluster_shape_.m());
     auto problem_blocks_n = round_up(ctas_along_n, (1 << params_.log_swizzle_size_) * params_.cluster_shape_.n());
+    if constexpr (ContiguousMTiles == 2) {
+      problem_blocks_m = (problem_blocks_m + 1) >> 1;
+    }
     current_group_info_.total_tiles = problem_blocks_m * problem_blocks_n;
     if constexpr (AlongNOneBlockN) {
       current_group_info_.problem_blocks_along_raster_order = problem_blocks_n;
@@ -340,6 +352,9 @@ public:
           }
           auto problem_blocks_m = round_up(ctas_along_m, (1 << log_swizzle_size) * cluster_shape.m());
           auto problem_blocks_n = round_up(ctas_along_n, (1 << log_swizzle_size) * cluster_shape.n());
+          if constexpr (ContiguousMTiles == 2) {
+            problem_blocks_m = (problem_blocks_m + 1) >> 1;
+          }
           if constexpr (AlongNOneBlockN) {
             group_info.problem_blocks_along_raster_order = problem_blocks_n;
           }
@@ -470,8 +485,32 @@ public:
     TileSchedulerPipelineState scheduler_pipe_producer_state,
     uint32_t advance_count = 1) {
 
-    current_work_linear_idx_ += total_grid_size_ * uint64_t(advance_count);
-    auto work_tile = get_current_work_for_linear_idx(current_work_linear_idx_);
+    WorkTileInfo work_tile;
+    if constexpr (ContiguousMTiles == 2) {
+      CUTLASS_ASSERT(advance_count == 1);
+      current_chunk_subtile_ += static_cast<int32_t>(advance_count);
+      if (current_chunk_subtile_ < ContiguousMTiles) {
+        work_tile = {
+            current_chunk_m_idx_ + current_chunk_subtile_,
+            current_chunk_n_idx_,
+            current_chunk_group_idx_,
+            current_chunk_valid_};
+      }
+      else {
+        current_chunk_subtile_ = 0;
+        current_work_linear_idx_ += total_grid_size_;
+        work_tile = get_current_work_for_linear_idx(current_work_linear_idx_);
+        current_chunk_m_idx_ = work_tile.M_idx * ContiguousMTiles;
+        current_chunk_n_idx_ = work_tile.N_idx;
+        current_chunk_group_idx_ = work_tile.L_idx;
+        current_chunk_valid_ = work_tile.is_valid_tile;
+        work_tile.M_idx = current_chunk_m_idx_;
+      }
+    }
+    else {
+      current_work_linear_idx_ += total_grid_size_ * uint64_t(advance_count);
+      work_tile = get_current_work_for_linear_idx(current_work_linear_idx_);
+    }
     scheduler_pipeline.producer_acquire(scheduler_pipe_producer_state);
     if (cute::elect_one_sync()) {
       response_ptr_[scheduler_pipe_producer_state.index()] = work_tile;
@@ -613,7 +652,16 @@ public:
   CUTLASS_DEVICE
   auto
   initial_work_tile_info(ClusterShape) {
-    return get_current_work_for_linear_idx(current_work_linear_idx_);
+    auto work_tile = get_current_work_for_linear_idx(current_work_linear_idx_);
+    if constexpr (ContiguousMTiles == 2) {
+      current_chunk_m_idx_ = work_tile.M_idx * ContiguousMTiles;
+      current_chunk_n_idx_ = work_tile.N_idx;
+      current_chunk_group_idx_ = work_tile.L_idx;
+      current_chunk_valid_ = work_tile.is_valid_tile;
+      current_chunk_subtile_ = 0;
+      work_tile.M_idx = current_chunk_m_idx_;
+    }
+    return work_tile;
   }
 };
 

@@ -134,7 +134,8 @@ public:
   static constexpr bool IsGroupedGemmKernel = !cute::is_same_v<InternalStrideA, StrideA>;
   using TileSchedulerTag = cute::conditional_t<
     IsGroupedGemmKernel &&
-        !cute::is_same_v<TileSchedulerTag_, GroupSchedulerAlongNOneBlockN>,
+        !cute::is_same_v<TileSchedulerTag_, GroupSchedulerAlongNOneBlockN> &&
+        !cute::is_same_v<TileSchedulerTag_, GroupSchedulerAlongNOneBlockNChunkM2>,
     GroupScheduler,
     TileSchedulerTag_>;
 

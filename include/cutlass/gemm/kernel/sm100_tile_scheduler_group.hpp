@@ -57,13 +57,14 @@ namespace cutlass::gemm::kernel::detail {
 template<
   class GroupProblemShape,
   int SchedulerPipelineStageCount,
-  bool AlongNOneBlockN = false
+  bool AlongNOneBlockN = false,
+  int ContiguousMTiles = 1
 >
 class PersistentTileSchedulerSm100Group {
 
 public:
   using UnderlyingScheduler = PersistentTileSchedulerSm90Group<
-      GroupProblemShape, SchedulerPipelineStageCount, AlongNOneBlockN>;
+      GroupProblemShape, SchedulerPipelineStageCount, AlongNOneBlockN, ContiguousMTiles>;
   using Params = PersistentTileSchedulerSm100GroupParams<GroupProblemShape>;
   using WorkTileInfo = typename UnderlyingScheduler::WorkTileInfo;
   using Arguments = typename UnderlyingScheduler::Arguments;

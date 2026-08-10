@@ -58,6 +58,13 @@ struct GroupScheduler { }; // Only used for Grouped GEMMs
 // the device scheduler. Callers must opt in explicitly.
 struct GroupSchedulerAlongNOneBlockN { };
 
+// Same one-N-block contract, but schedules two consecutive M tiles from one
+// expert before advancing to the next persistent work chunk. Each group must
+// contain an even number of M tiles, and the scheduler must advance one work
+// response at a time. This reduces grouped tensor-map replacement/acquire
+// frequency without a helper kernel.
+struct GroupSchedulerAlongNOneBlockNChunkM2 { };
+
 struct DynamicPersistentScheduler { };
 
 struct StaticPersistentScheduler { };
@@ -279,6 +286,24 @@ struct TileSchedulerSelector<
   > {
   using Scheduler = PersistentTileSchedulerSm100Group<
       GroupProblemShape, SchedulerPipelineStageCount, true>;
+};
+
+template <
+  class TileShape,
+  class ClusterShape,
+  uint32_t SchedulerPipelineStageCount,
+  class GroupProblemShape
+>
+struct TileSchedulerSelector<
+    GroupSchedulerAlongNOneBlockNChunkM2,
+    arch::Sm100,
+    TileShape,
+    ClusterShape,
+    SchedulerPipelineStageCount,
+    GroupProblemShape
+  > {
+  using Scheduler = PersistentTileSchedulerSm100Group<
+      GroupProblemShape, SchedulerPipelineStageCount, true, 2>;
 };
 
 // SM100 stream-K scheduler
