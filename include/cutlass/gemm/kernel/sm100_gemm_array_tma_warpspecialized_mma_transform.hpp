@@ -161,7 +161,12 @@ public:
                                                  NumMainloopABLoadThreads + NumMMAThreads +
                                                  NumEpilogueLoadThreads + NumEpilogueThreads +
                                                  NumMainloopSFLoadThreads, 128);
-  static constexpr uint32_t MinBlocksPerMultiprocessor = 1;
+  static constexpr bool UseNarrowSm100TwoCtaResources =
+    cute::size<0>(CtaShape_MNK{}) == 128 &&
+    cute::size<1>(CtaShape_MNK{}) == 8 &&
+    cute::size<2>(CtaShape_MNK{}) == 128;
+  static constexpr uint32_t MinBlocksPerMultiprocessor =
+    UseNarrowSm100TwoCtaResources ? 2 : 1;
   static constexpr uint32_t NumFixupBarriers = 1;
   static constexpr uint32_t CLCResponseSize = sizeof(typename TileScheduler::CLCResponse);
   
@@ -198,8 +203,16 @@ public:
   using TmemAllocator = cute::conditional_t<cute::size(cute::shape<0>(typename TiledMma::ThrLayoutVMNK{})) == 1,
       cute::TMEM::Allocator1Sm, cute::TMEM::Allocator2Sm>;
 
+  // CuTe's six-stage 128x8 accumulator layout occupies exactly 64 TMEM
+  // columns. Allocating that footprint instead of the full 512-column pool
+  // lets both narrow CTAs resident on an SM own disjoint TMEM regions.
+  // Preserve the full-pool allocation for every other kernel shape.
+  static constexpr uint32_t TmemAllocationColumns =
+    UseNarrowSm100TwoCtaResources ? 64 : TmemAllocator::Sm100TmemCapacityColumns;
+
   static constexpr uint32_t GenericRegisterRequirement = 48;
-  static constexpr uint32_t AccumRegisterRequirement = 256;
+  static constexpr uint32_t AccumRegisterRequirement =
+    UseNarrowSm100TwoCtaResources ? 120 : 256;
 
   // Kernel level shared memory storage
   struct SharedStorage {
@@ -745,6 +758,11 @@ public:
     auto acc_shape = collective_mainloop.partition_accumulator_shape();
     Tensor accumulators = cutlass::detail::make_sm100_accumulator<AccumulatorPipelineStageCount, IsOverlappingAccum>(
         tiled_mma, acc_shape, EpilogueTile{});
+    static_assert(
+      !UseNarrowSm100TwoCtaResources ||
+        cutlass::detail::find_tmem_tensor_col_offset(decltype(accumulators){}) ==
+          TmemAllocationColumns,
+      "The narrow two-CTA TMEM allocation must cover the accumulator layout exactly");
 
     pipeline_init_wait(cluster_size);
 
@@ -1006,7 +1024,7 @@ public:
       arch::warpgroup_reg_dealloc<GenericRegisterRequirement>();
 
       // Tmem allocation sequence
-      tmem_allocator.allocate(TmemAllocator::Sm100TmemCapacityColumns, &shared_storage.tmem_base_ptr);
+      tmem_allocator.allocate(TmemAllocationColumns, &shared_storage.tmem_base_ptr);
       __syncwarp();
       tmem_allocation_result_barrier.arrive();
       uint32_t tmem_base_ptr = shared_storage.tmem_base_ptr;
@@ -1079,7 +1097,7 @@ public:
 
   
       // Free entire tmem allocation
-      tmem_allocator.free(tmem_base_ptr, TmemAllocator::Sm100TmemCapacityColumns);
+      tmem_allocator.free(tmem_base_ptr, TmemAllocationColumns);
     }
 
     else if (is_participant.epi_load) {
