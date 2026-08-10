@@ -2099,7 +2099,8 @@ class ServerArgs:
         "baseline (the per-K g_cache is K x larger and the reconstruction "
         "refolds the per-K decay every step), so it is not recommended for KDA "
         "models. Requires the Triton linear-attn decode backend and "
-        "--mamba-radix-cache-strategy no_buffer.",
+        "--mamba-radix-cache-strategy no_buffer together with "
+        "--disable-overlap-schedule.",
     ] = False
     linear_replayssm_cache_len: A[
         int,
@@ -5131,8 +5132,8 @@ class ServerArgs:
         # the COW copy-into-slot path resets the ring cursor) -- so the
         # --disable-radix-cache requirement is dropped.
         #
-        # Slice 2b only wires the no_buffer mamba scheduler strategy (the
-        # default). The extra_buffer strategy donates the track snapshot via
+        # Slice 2b only wires the no_buffer mamba radix-cache strategy. The
+        # extra_buffer strategy donates the track snapshot via
         # `donate_mamba_ping_pong_slot` with a separate ping-pong slot swap that
         # does NOT route through MambaPool.copy_from, so the ReplaySSM ring
         # cursor of the donated/kept slot would not be reset there. Handling
