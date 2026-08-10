@@ -218,6 +218,16 @@ void launch_sm100_fp8_blockwise_scaled_group_mm(
       AlignmentC,
       typename ScheduleConfig::EpilogueSchedule>::CollectiveOp;
 
+  static constexpr bool UseNarrowAlongNOneBlockScheduler =
+      cute::size<0>(typename ScheduleConfig::MmaTileShape{}) == 128 &&
+      cute::size<1>(typename ScheduleConfig::MmaTileShape{}) == 8 &&
+      cute::size<2>(typename ScheduleConfig::MmaTileShape{}) == 128;
+  using MainloopStageCount = cute::conditional_t<
+      UseNarrowAlongNOneBlockScheduler,
+      cutlass::gemm::collective::StageCount<6>,
+      cutlass::gemm::collective::StageCountAutoCarveout<static_cast<int>(
+          sizeof(typename CollectiveEpilogue::SharedStorage))>>;
+
   using CollectiveMainloop = typename cutlass::gemm::collective::CollectiveBuilder<
       ArchTag,
       OperatorClass,
@@ -230,14 +240,9 @@ void launch_sm100_fp8_blockwise_scaled_group_mm(
       ElementAccumulator,
       typename ScheduleConfig::MmaTileShape,
       typename ScheduleConfig::ClusterShape,
-      cutlass::gemm::collective::StageCountAutoCarveout<static_cast<int>(
-          sizeof(typename CollectiveEpilogue::SharedStorage))>,
+      MainloopStageCount,
       typename ScheduleConfig::KernelSchedule>::CollectiveOp;
 
-  static constexpr bool UseNarrowAlongNOneBlockScheduler =
-      cute::size<0>(typename ScheduleConfig::MmaTileShape{}) == 128 &&
-      cute::size<1>(typename ScheduleConfig::MmaTileShape{}) == 8 &&
-      cute::size<2>(typename ScheduleConfig::MmaTileShape{}) == 128;
   static_assert(
       !UseNarrowAlongNOneBlockScheduler || !std::is_same_v<NarrowTileSchedulerTag, void>,
       "The narrow SM100 tile requires an explicit scheduler tag");
@@ -247,6 +252,14 @@ void launch_sm100_fp8_blockwise_scaled_group_mm(
       void>;
   using GemmKernel = cutlass::gemm::kernel::GemmUniversal<
       ProblemShape, CollectiveMainloop, CollectiveEpilogue, TileSchedulerTag>;
+  static_assert(
+      !UseNarrowAlongNOneBlockScheduler ||
+          sizeof(typename GemmKernel::SharedStorage) <= 116736,
+      "The six-stage narrow kernel must fit two CTAs in B200 shared memory");
+  static_assert(
+      !UseNarrowAlongNOneBlockScheduler ||
+          GemmKernel::MinBlocksPerMultiprocessor == 2,
+      "The narrow kernel must request two resident CTAs per SM");
 
   using Gemm = cutlass::gemm::device::GemmUniversalAdapter<GemmKernel>;
   using UnderlyingProblemShape = ProblemShape::UnderlyingProblemShape;
@@ -271,9 +284,10 @@ void launch_sm100_fp8_blockwise_scaled_group_mm(
 
   cutlass::KernelHardwareInfo hw_info;
 
-  hw_info.device_id = 0;
-  // sm_count is the number of SMs on the current device, since we only support SM100 blackwell, so we set it to 148
-  hw_info.sm_count = 148;
+  hw_info.device_id = c10::cuda::current_device();
+  // Phase grid148: retain the two-CTA-capable kernel resources, but launch one
+  // persistent scheduler CTA per physical SM to avoid the duplicated CLC work.
+  hw_info.sm_count = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
   typename GemmKernel::EpilogueArguments epilogue_args{
       {},
       nullptr,
