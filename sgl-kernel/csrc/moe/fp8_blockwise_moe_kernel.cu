@@ -238,7 +238,7 @@ void launch_sm100_fp8_blockwise_scaled_group_mm(
       cute::size<2>(typename ScheduleConfig::MmaTileShape{}) == 128;
   using TileSchedulerTag = cute::conditional_t<
       UseNarrowAlongNOneBlockScheduler,
-      cutlass::gemm::GroupSchedulerAlongNOneBlockN,
+      cutlass::gemm::GroupSchedulerAlongNOneBlockNChunkM2,
       void>;
   using GemmKernel = cutlass::gemm::kernel::GemmUniversal<
       ProblemShape, CollectiveMainloop, CollectiveEpilogue, TileSchedulerTag>;
@@ -410,7 +410,11 @@ void sm100_fp8_blockwise_group_mm_dispatch_shape(
         expert_offsets,
         workspace);
     output = output_t.t();
-  } else if (a.size(0) <= 256 && use_sm100_fp8_moe_balanced_narrow_decode()) {
+  } else if (
+      // The transposed decode GEMM has M = b.size(2). ChunkM2 requires an
+      // even number of 128-wide M tiles so its adjacent-tile pair is complete.
+      a.size(0) <= 256 && b.size(2) % 256 == 0 &&
+      use_sm100_fp8_moe_balanced_narrow_decode()) {
     run_get_group_gemm_starts<
         MmaConfigDecodeNarrow::LayoutSFA,
         MmaConfigDecodeNarrow::LayoutSFB,
