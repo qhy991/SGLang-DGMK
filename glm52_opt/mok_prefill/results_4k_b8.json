@@ -1,0 +1,91 @@
+{
+  "environment": {
+    "gpu": "8x NVIDIA B300 (SM103)",
+    "topology": "TP8-DP8-EP8",
+    "model": "GLM-5.2-FP8",
+    "sparse_layers": 75,
+    "batch_size": 8,
+    "input_tokens_per_request": 4096,
+    "output_tokens_per_request": 1,
+    "effective_prefill_chunk_m": 1024,
+    "cache_hit_rate": 0.0,
+    "samples_per_path": 10
+  },
+  "native": {
+    "latency_seconds": [
+      1.0854,
+      1.3519,
+      1.344,
+      1.1002,
+      1.3363,
+      1.0822,
+      1.12,
+      1.349,
+      1.3498,
+      1.3379
+    ],
+    "input_throughput_tokens_per_second": [
+      30195.56,
+      24243.02,
+      24383.95,
+      29788.21,
+      24525.69,
+      30283.41,
+      29261.51,
+      24294.35,
+      24279.07,
+      24496.41
+    ],
+    "latency_mean_seconds": 1.24567,
+    "latency_median_seconds": 1.3371,
+    "latency_p90_seconds": 1.35001,
+    "input_throughput_mean_tokens_per_second": 26575.118,
+    "input_throughput_median_tokens_per_second": 24511.05,
+    "load_weight_memory_gb_per_card": 109.48
+  },
+  "mok": {
+    "latency_seconds": [
+      1.0143,
+      1.0156,
+      1.0086,
+      1.0148,
+      1.0164,
+      1.0066,
+      1.008,
+      1.0184,
+      1.0115,
+      1.0093
+    ],
+    "input_throughput_tokens_per_second": [
+      32310.6,
+      32270.9,
+      32493.64,
+      32296.42,
+      32244.88,
+      32560.25,
+      32516.5,
+      32180.62,
+      32402.31,
+      32475.38
+    ],
+    "latency_mean_seconds": 1.01235,
+    "latency_median_seconds": 1.0129,
+    "latency_p90_seconds": 1.0166,
+    "input_throughput_mean_tokens_per_second": 32375.15,
+    "input_throughput_median_tokens_per_second": 32356.455,
+    "load_weight_memory_gb_per_card": 205.03
+  },
+  "relative_change_percent": {
+    "latency_mean": -18.7305,
+    "latency_median": -24.2465,
+    "latency_p90": -24.6969,
+    "input_throughput_mean": 21.825,
+    "input_throughput_median": 32.0076
+  },
+  "deterministic_first_token_smoke": {
+    "native_token_ids": [198, 154842, 198, 198, 198, 612, 798, 154842],
+    "mok_token_ids": [198, 154842, 198, 198, 198, 612, 798, 154842],
+    "exact_matches": 8,
+    "total": 8
+  }
+}
