@@ -31,6 +31,7 @@ _GLM52_ENV_KEYS = frozenset(
         "SGLANG_GLM52_NSYS_SECONDS",
         "SGLANG_GLM52_INFINI_KERNEL_NVTX",
         "SGLANG_GLM52_HOTSPOT_MODULE",
+        "SGLANG_OPT_MOE_SWIGLU_QUANT_VARIANT",
         # 1 (default for graph_only specs): only select under graph capture.
         # 0: allow eager selection for diagnostic leaf timing.
         "SGLANG_GLM52_W2_GRAPH_ONLY",
@@ -325,6 +326,37 @@ def allow_abi_adapter() -> bool:
     """
     ensure_glm52_env()
     return _truthy("SGLANG_GLM52_ALLOW_ABI_ADAPTER")
+
+
+@lru_cache(maxsize=1)
+def swiglu_quant_variant() -> str | None:
+    """Return the explicitly armed B300 masked-MoE activation variant.
+
+    The candidate is intentionally absent from every default profile. It is
+    reachable only when the campaign profile, exact op allowlist, and bounded
+    implementation are all selected before worker startup.
+    """
+
+    from sglang.srt.environ import envs
+
+    ensure_glm52_env()
+    if not is_enabled() or profile_name() != "b300_moe_swiglu_quant":
+        return None
+    allow = opt_ops_allowlist()
+    if allow is None or "moe_swiglu_quant" not in allow:
+        return None
+    variant = envs.SGLANG_OPT_MOE_SWIGLU_QUANT_VARIANT.get()
+    if variant is None:
+        return None
+    variant = variant.strip()
+    if not variant:
+        return None
+    if variant != "cuda_valid_cta":
+        raise ValueError(
+            "SGLANG_OPT_MOE_SWIGLU_QUANT_VARIANT must be "
+            f"'cuda_valid_cta', got {variant!r}"
+        )
+    return variant
 
 
 def deepgemm_variant() -> str | None:
