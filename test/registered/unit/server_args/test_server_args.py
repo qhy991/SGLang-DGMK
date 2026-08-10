@@ -95,6 +95,36 @@ class TestMambaCacheStochasticRounding(unittest.TestCase):
             server_args._handle_mamba_backend()
 
 
+class TestLinearReplaySSMServerArgs(unittest.TestCase):
+    def test_rejects_extra_buffer_with_current_flag_name(self):
+        server_args = ServerArgs(model_path="dummy")
+        object.__setattr__(server_args, "enable_linear_replayssm", True)
+        object.__setattr__(server_args, "linear_attn_decode_backend", "triton")
+        object.__setattr__(
+            server_args, "mamba_radix_cache_strategy", "extra_buffer"
+        )
+
+        with (
+            patch(
+                "sglang.srt.arg_groups.overrides.mamba_extra_buffer_of",
+                return_value=True,
+            ),
+            self.assertRaisesRegex(
+                ValueError, r"--mamba-radix-cache-strategy='extra_buffer'"
+            ),
+        ):
+            server_args._handle_linear_attn_backend()
+
+    def test_accepts_no_buffer(self):
+        server_args = ServerArgs(
+            model_path="dummy",
+            enable_linear_replayssm=True,
+            mamba_radix_cache_strategy="no_buffer",
+        )
+        self.assertTrue(server_args.enable_linear_replayssm)
+        self.assertEqual(server_args.mamba_radix_cache_strategy, "no_buffer")
+
+
 class TestLoadBalanceMethod(unittest.TestCase):
     def _load_balance_args(self, **kwargs):
         server_args = ServerArgs(model_path="dummy", **kwargs)
