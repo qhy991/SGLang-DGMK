@@ -56,8 +56,9 @@ class PersistentTileSchedulerSm90Group {
 
 private:
   static_assert(
-      ContiguousMTiles == 1 || (AlongNOneBlockN && ContiguousMTiles == 2),
-      "Contiguous M-tile scheduling is only supported by the explicit AlongN chunk-2 contract");
+      ContiguousMTiles == 1 ||
+          (AlongNOneBlockN && (ContiguousMTiles == 2 || ContiguousMTiles == 3)),
+      "Contiguous M-tile scheduling is only supported by explicit AlongN chunk contracts");
   uint64_t current_work_linear_idx_ = 0;
   uint64_t total_grid_size_ = 0;
   int32_t current_chunk_m_idx_ = 0;
@@ -291,7 +292,12 @@ public:
     auto problem_blocks_m = round_up(ctas_along_m, (1 << params_.log_swizzle_size_) * params_.cluster_shape_.m());
     auto problem_blocks_n = round_up(ctas_along_n, (1 << params_.log_swizzle_size_) * params_.cluster_shape_.n());
     if constexpr (ContiguousMTiles == 2) {
+      // Preserve the positive-domain power-of-two lowering used by ChunkM2;
+      // generic signed division emits correction instructions in SASS.
       problem_blocks_m = (problem_blocks_m + 1) >> 1;
+    }
+    else if constexpr (ContiguousMTiles > 2) {
+      problem_blocks_m = (problem_blocks_m + ContiguousMTiles - 1) / ContiguousMTiles;
     }
     current_group_info_.total_tiles = problem_blocks_m * problem_blocks_n;
     if constexpr (AlongNOneBlockN) {
@@ -354,6 +360,9 @@ public:
           auto problem_blocks_n = round_up(ctas_along_n, (1 << log_swizzle_size) * cluster_shape.n());
           if constexpr (ContiguousMTiles == 2) {
             problem_blocks_m = (problem_blocks_m + 1) >> 1;
+          }
+          else if constexpr (ContiguousMTiles > 2) {
+            problem_blocks_m = (problem_blocks_m + ContiguousMTiles - 1) / ContiguousMTiles;
           }
           if constexpr (AlongNOneBlockN) {
             group_info.problem_blocks_along_raster_order = problem_blocks_n;
@@ -486,7 +495,7 @@ public:
     uint32_t advance_count = 1) {
 
     WorkTileInfo work_tile;
-    if constexpr (ContiguousMTiles == 2) {
+    if constexpr (ContiguousMTiles > 1) {
       CUTLASS_ASSERT(advance_count == 1);
       current_chunk_subtile_ += static_cast<int32_t>(advance_count);
       if (current_chunk_subtile_ < ContiguousMTiles) {
@@ -653,7 +662,7 @@ public:
   auto
   initial_work_tile_info(ClusterShape) {
     auto work_tile = get_current_work_for_linear_idx(current_work_linear_idx_);
-    if constexpr (ContiguousMTiles == 2) {
+    if constexpr (ContiguousMTiles > 1) {
       current_chunk_m_idx_ = work_tile.M_idx * ContiguousMTiles;
       current_chunk_n_idx_ = work_tile.N_idx;
       current_chunk_group_idx_ = work_tile.L_idx;

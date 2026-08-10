@@ -65,6 +65,11 @@ struct GroupSchedulerAlongNOneBlockN { };
 // frequency without a helper kernel.
 struct GroupSchedulerAlongNOneBlockNChunkM2 { };
 
+// Three-tile variant of the explicit AlongN contiguous-M contract. Each group
+// must contain a multiple of three M tiles, and the scheduler must advance one
+// work response at a time.
+struct GroupSchedulerAlongNOneBlockNChunkM3 { };
+
 struct DynamicPersistentScheduler { };
 
 struct StaticPersistentScheduler { };
@@ -304,6 +309,24 @@ struct TileSchedulerSelector<
   > {
   using Scheduler = PersistentTileSchedulerSm100Group<
       GroupProblemShape, SchedulerPipelineStageCount, true, 2>;
+};
+
+template <
+  class TileShape,
+  class ClusterShape,
+  uint32_t SchedulerPipelineStageCount,
+  class GroupProblemShape
+>
+struct TileSchedulerSelector<
+    GroupSchedulerAlongNOneBlockNChunkM3,
+    arch::Sm100,
+    TileShape,
+    ClusterShape,
+    SchedulerPipelineStageCount,
+    GroupProblemShape
+  > {
+  using Scheduler = PersistentTileSchedulerSm100Group<
+      GroupProblemShape, SchedulerPipelineStageCount, true, 3>;
 };
 
 // SM100 stream-K scheduler

@@ -135,7 +135,8 @@ public:
   using TileSchedulerTag = cute::conditional_t<
     IsGroupedGemmKernel &&
         !cute::is_same_v<TileSchedulerTag_, GroupSchedulerAlongNOneBlockN> &&
-        !cute::is_same_v<TileSchedulerTag_, GroupSchedulerAlongNOneBlockNChunkM2>,
+        !cute::is_same_v<TileSchedulerTag_, GroupSchedulerAlongNOneBlockNChunkM2> &&
+        !cute::is_same_v<TileSchedulerTag_, GroupSchedulerAlongNOneBlockNChunkM3>,
     GroupScheduler,
     TileSchedulerTag_>;
 
