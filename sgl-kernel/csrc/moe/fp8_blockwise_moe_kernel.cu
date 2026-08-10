@@ -3,6 +3,8 @@
 #include <cutlass/arch/arch.h>
 #include <torch/all.h>
 
+#include <type_traits>
+
 #include "cute/tensor.hpp"
 #include "cutlass/cutlass.h"
 #include "cutlass/epilogue/collective/collective_builder.hpp"
@@ -169,7 +171,7 @@ void launch_sm90_fp8_blockwise_scaled_group_mm(
   TORCH_CHECK(status == cutlass::Status::kSuccess, "Failed to run GEMM");
 }
 
-template <typename OutType, typename ScheduleConfig, typename LayoutD>
+template <typename OutType, typename ScheduleConfig, typename LayoutD, typename NarrowTileSchedulerTag = void>
 void launch_sm100_fp8_blockwise_scaled_group_mm(
     torch::Tensor& out_ptrs,
     const torch::Tensor& a_ptrs,
@@ -236,9 +238,12 @@ void launch_sm100_fp8_blockwise_scaled_group_mm(
       cute::size<0>(typename ScheduleConfig::MmaTileShape{}) == 128 &&
       cute::size<1>(typename ScheduleConfig::MmaTileShape{}) == 8 &&
       cute::size<2>(typename ScheduleConfig::MmaTileShape{}) == 128;
+  static_assert(
+      !UseNarrowAlongNOneBlockScheduler || !std::is_same_v<NarrowTileSchedulerTag, void>,
+      "The narrow SM100 tile requires an explicit scheduler tag");
   using TileSchedulerTag = cute::conditional_t<
       UseNarrowAlongNOneBlockScheduler,
-      cutlass::gemm::GroupSchedulerAlongNOneBlockNChunkM2,
+      NarrowTileSchedulerTag,
       void>;
   using GemmKernel = cutlass::gemm::kernel::GemmUniversal<
       ProblemShape, CollectiveMainloop, CollectiveEpilogue, TileSchedulerTag>;
@@ -410,11 +415,7 @@ void sm100_fp8_blockwise_group_mm_dispatch_shape(
         expert_offsets,
         workspace);
     output = output_t.t();
-  } else if (
-      // The transposed decode GEMM has M = b.size(2). ChunkM2 requires an
-      // even number of 128-wide M tiles so its adjacent-tile pair is complete.
-      a.size(0) <= 256 && b.size(2) % 256 == 0 &&
-      use_sm100_fp8_moe_balanced_narrow_decode()) {
+  } else if (a.size(0) <= 256 && use_sm100_fp8_moe_balanced_narrow_decode()) {
     run_get_group_gemm_starts<
         MmaConfigDecodeNarrow::LayoutSFA,
         MmaConfigDecodeNarrow::LayoutSFB,
@@ -435,21 +436,68 @@ void sm100_fp8_blockwise_group_mm_dispatch_shape(
         problem_sizes,
         problem_sizes_transpose,
         true);
-    launch_sm100_fp8_blockwise_scaled_group_mm<
-        OutType, MmaConfigDecodeNarrow, cutlass::layout::ColumnMajor>(
-        out_ptrs,
-        a_ptrs,
-        b_ptrs,
-        a_scales_ptrs,
-        b_scales_ptrs,
-        stride_a,
-        stride_b,
-        stride_c,
-        layout_sfa,
-        layout_sfb,
-        problem_sizes_transpose,
-        expert_offsets,
-        workspace);
+    // The transposed decode GEMM has M = b.size(2). Select the largest
+    // proven exact-cover chunk without reading device-resident routing
+    // metadata: M3 for three 128-wide tiles, M2 for a tile pair, and the
+    // original grouped scheduler for other sizes.
+    if (b.size(2) % 384 == 0) {
+      launch_sm100_fp8_blockwise_scaled_group_mm<
+          OutType,
+          MmaConfigDecodeNarrow,
+          cutlass::layout::ColumnMajor,
+          cutlass::gemm::GroupSchedulerAlongNOneBlockNChunkM3>(
+          out_ptrs,
+          a_ptrs,
+          b_ptrs,
+          a_scales_ptrs,
+          b_scales_ptrs,
+          stride_a,
+          stride_b,
+          stride_c,
+          layout_sfa,
+          layout_sfb,
+          problem_sizes_transpose,
+          expert_offsets,
+          workspace);
+    } else if (b.size(2) % 256 == 0) {
+      launch_sm100_fp8_blockwise_scaled_group_mm<
+          OutType,
+          MmaConfigDecodeNarrow,
+          cutlass::layout::ColumnMajor,
+          cutlass::gemm::GroupSchedulerAlongNOneBlockNChunkM2>(
+          out_ptrs,
+          a_ptrs,
+          b_ptrs,
+          a_scales_ptrs,
+          b_scales_ptrs,
+          stride_a,
+          stride_b,
+          stride_c,
+          layout_sfa,
+          layout_sfb,
+          problem_sizes_transpose,
+          expert_offsets,
+          workspace);
+    } else {
+      launch_sm100_fp8_blockwise_scaled_group_mm<
+          OutType,
+          MmaConfigDecodeNarrow,
+          cutlass::layout::ColumnMajor,
+          cutlass::gemm::GroupScheduler>(
+          out_ptrs,
+          a_ptrs,
+          b_ptrs,
+          a_scales_ptrs,
+          b_scales_ptrs,
+          stride_a,
+          stride_b,
+          stride_c,
+          layout_sfa,
+          layout_sfb,
+          problem_sizes_transpose,
+          expert_offsets,
+          workspace);
+    }
     output = output_t.t();
   } else if (a.size(0) > 2048 && a.size(1) >= 2048) {
     run_get_group_gemm_starts<MmaConfig2::LayoutSFA, MmaConfig2::LayoutSFB, MmaConfig2::ScaleConfig>(
