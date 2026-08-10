@@ -35,6 +35,19 @@ class ModeConfig:
     one_shot_pull_threshold: int  # below this, use one-shot pull
 
 
+def resolve_max_pull_size(max_pull_size: Optional[int]) -> int:
+    """Resolve the JIT pull buffer while preserving explicit callers."""
+    if max_pull_size is not None:
+        return max_pull_size
+    value = envs.SGLANG_JIT_CUSTOM_ALL_REDUCE_MAX_PULL_SIZE_BYTES.get()
+    if value < 0:
+        raise ValueError(
+            "SGLANG_JIT_CUSTOM_ALL_REDUCE_MAX_PULL_SIZE_BYTES must be "
+            f"non-negative, got {value}"
+        )
+    return value
+
+
 class CustomAllReduceV2:
     def __init__(
         self,
@@ -53,8 +66,7 @@ class CustomAllReduceV2:
         self.group = group
         self.rank = dist.get_rank(group=self.group)
         self.world_size = dist.get_world_size(group=self.group)
-        if max_pull_size is None:  # default to 16MB
-            max_pull_size = 16 * 1024 * 1024
+        max_pull_size = resolve_max_pull_size(max_pull_size)
         if max_push_size is None:  # default to recommended size
             config = THRESHOLD_2_SHOT_MAP[self.world_size]
             max_push_size = config.one_shot_push_threshold
