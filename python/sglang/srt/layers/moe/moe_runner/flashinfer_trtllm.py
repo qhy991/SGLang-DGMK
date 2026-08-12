@@ -25,7 +25,9 @@ from sglang.srt.distributed.device_communicators.pynccl_allocator import (
 from sglang.srt.environ import envs
 from sglang.srt.layers.dp_attention import is_allocation_symmetric
 from sglang.srt.layers.moe.flashinfer_trtllm_moe import (
+    trtllm_fp8_block_scale_moe_out_wrapper,
     trtllm_fp8_block_scale_moe_wrapper,
+    trtllm_fp8_block_scale_routed_moe_out_wrapper,
     trtllm_fp8_block_scale_routed_moe_wrapper,
     trtllm_fp8_per_tensor_scale_moe_wrapper,
 )
@@ -722,7 +724,7 @@ def fused_experts_none_to_flashinfer_trtllm_fp8(
                 topk_output.topk_ids, topk_output.topk_weights
             )
 
-            output = trtllm_fp8_block_scale_routed_moe_wrapper(
+            trtllm_fp8_block_scale_routed_moe_out_wrapper(
                 topk_ids=packed_topk_ids,
                 routing_bias=None,
                 hidden_states=a_q,
@@ -749,14 +751,16 @@ def fused_experts_none_to_flashinfer_trtllm_fp8(
                     else routing_method_type
                 ),
                 use_shuffled_weight=use_shuffled_weight,
+                output=symm_output,
                 tune_max_num_tokens=next_power_of_2(a_q.shape[0]),
                 fp8_quantization_type=int(fp8_quantization_type),
                 activation_type=quant_info.activation_type,
             )
+            output = symm_output
         else:
             assert TopKOutputChecker.format_is_bypassed(topk_output)
 
-            output = trtllm_fp8_block_scale_moe_wrapper(
+            trtllm_fp8_block_scale_moe_out_wrapper(
                 routing_logits=router_logits,
                 routing_bias=correction_bias,
                 hidden_states=a_q,
@@ -779,13 +783,12 @@ def fused_experts_none_to_flashinfer_trtllm_fp8(
                 ),
                 routing_method_type=routing_method_type,
                 use_shuffled_weight=use_shuffled_weight,
+                output=symm_output,
                 tune_max_num_tokens=next_power_of_2(a_q.shape[0]),
                 fp8_quantization_type=int(fp8_quantization_type),
                 activation_type=quant_info.activation_type,
             )
-        # TODO: Once https://github.com/flashinfer-ai/flashinfer/issues/2703 is fixed, pass output to moe kernel and remove this copy.
-        symm_output.copy_(output)
-        output = symm_output
+            output = symm_output
     else:
         assert TopKOutputChecker.format_is_bypassed(topk_output)
         assert quant_info.w13_input_scale is not None
