@@ -1,0 +1,19 @@
+{
+  "status": "causal-profile-only-not-promotion-timing",
+  "candidate": "N6 combination",
+  "dispatch_progress_calls_device_median": {
+    "baseline": 616,
+    "candidate": 654,
+    "change_percent": 6.17
+  },
+  "cached_notify_combine_wait_change_percent": {
+    "p50": -43.65,
+    "p90": -45.91
+  },
+  "combine_kernel_p50_interpretation": "approximately unchanged",
+  "padded_id_mask_kernels_removed_per_gpu": {
+    "minimum": 316,
+    "maximum": 466
+  },
+  "attribution_warning": "The matched profile measures the three-part N6 combination and cannot isolate DeepEP-SM, placement, or router-fusion effects."
+}

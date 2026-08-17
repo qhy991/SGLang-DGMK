@@ -13,7 +13,7 @@ Maintain **sglang `glm52-opt`** + **DeepGEMM-GLM52** fork in parallel.
 ## Weekly rebase (sglang)
 
 ```bash
-cd /home/qinhaiyan/sglang
+cd "${SGLANG_ROOT:?set SGLANG_ROOT to the repository checkout}"
 git fetch origin
 git checkout glm52-opt
 git rebase origin/main
@@ -32,9 +32,9 @@ git rebase origin/main
 ## DeepGEMM variant bump
 
 ```bash
-cd /home/qinhaiyan/DeepGEMM-GLM52
+cd "${DEEPGEMM_GLM52_ROOT:?set DEEPGEMM_GLM52_ROOT}"
 git checkout <new-commit>
-cd /home/qinhaiyan/KDA-Pilot-Exp/llm/scripts/deepgemm_glm52
+cd "${SGLANG_ROOT:?set SGLANG_ROOT}/third_party/deepgemm_glm52"
 ./build_overlay.sh
 # update glm52_opt/manifest.json deepgemm_commit
 export SGLANG_GLM52_DEEPGEMM_VARIANT=<short-sha>
@@ -51,10 +51,10 @@ unset SGLANG_GLM52_OPT SGLANG_GLM52_DEEPGEMM_VARIANT
 ## CI smoke (local)
 
 ```bash
-cd /home/qinhaiyan/sglang
+cd "${SGLANG_ROOT:?set SGLANG_ROOT to the repository checkout}"
 ./scripts/glm52_opt_smoke.sh
-cd /home/qinhaiyan/Kernel-Harness/archive/0720-Best-GLM-52/llm_flops_style
-CUDA_VISIBLE_DEVICES=0 ../../../.venv/bin/python bench_decode.py
+cd third_party/kernel-archive/0720-Best-GLM-52/llm_flops_style
+CUDA_VISIBLE_DEVICES=0 "${HARNESS_PYTHON:?set HARNESS_PYTHON}" bench_decode.py
 ```
 
 Expected decode layer speedup ~1.44–1.51× vs stock (see `COMPARISON_TABLE.md`).

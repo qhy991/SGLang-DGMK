@@ -1,0 +1,176 @@
+{
+  "arms": {
+    "baseline": {
+      "median_ttft_ms": {
+        "cv": 0.0060803140648614815,
+        "max": 2068.38,
+        "mean": 2049.444,
+        "median": 2042.12,
+        "min": 2039.98,
+        "stdev": 12.461263178345973
+      },
+      "p90_ttft_ms": {
+        "cv": 0.029257601956383848,
+        "max": 3158.83,
+        "mean": 3058.212,
+        "median": 3035.39,
+        "min": 2959.05,
+        "stdev": 89.47594939423657
+      },
+      "total_token_throughput": {
+        "cv": 0.0351069453862017,
+        "max": 481297.63,
+        "mean": 461539.1,
+        "median": 452544.29,
+        "min": 448084.26,
+        "stdev": 16203.227977296685
+      }
+    },
+    "candidate": {
+      "median_ttft_ms": {
+        "cv": 0.033789860144909124,
+        "max": 2057.02,
+        "mean": 1950.3400000000001,
+        "median": 1933.67,
+        "min": 1887.18,
+        "stdev": 65.90171583502206
+      },
+      "p90_ttft_ms": {
+        "cv": 0.10805187827647227,
+        "max": 3487.86,
+        "mean": 3107.348,
+        "median": 2891.13,
+        "min": 2827.27,
+        "stdev": 335.75478785863953
+      },
+      "total_token_throughput": {
+        "cv": 0.030600189344880104,
+        "max": 502934.23,
+        "mean": 483248.0,
+        "median": 486640.21,
+        "min": 468435.15,
+        "stdev": 14787.48030053462
+      }
+    }
+  },
+  "non_treatment_server_args_identical": true,
+  "pairs": [
+    {
+      "baseline": {
+        "median_ttft_ms": 2039.98,
+        "p90_ttft_ms": 2959.05,
+        "total_token_throughput": 481297.63
+      },
+      "candidate": {
+        "median_ttft_ms": 1887.18,
+        "p90_ttft_ms": 3460.4,
+        "total_token_throughput": 468578.53
+      },
+      "candidate_won_p50": true,
+      "p50_reduction": 0.07490269512446202,
+      "p90_change": 0.16942937767188782,
+      "pair": 1,
+      "throughput_change": -0.026426683214708535
+    },
+    {
+      "baseline": {
+        "median_ttft_ms": 2042.12,
+        "p90_ttft_ms": 2993.67,
+        "total_token_throughput": 476924.22
+      },
+      "candidate": {
+        "median_ttft_ms": 1910.8,
+        "p90_ttft_ms": 2827.27,
+        "total_token_throughput": 502934.23
+      },
+      "candidate_won_p50": true,
+      "p50_reduction": 0.0643057215051025,
+      "p90_change": -0.05558394879863182,
+      "pair": 2,
+      "throughput_change": 0.054536987029092376
+    },
+    {
+      "baseline": {
+        "median_ttft_ms": 2068.38,
+        "p90_ttft_ms": 3158.83,
+        "total_token_throughput": 448845.1
+      },
+      "candidate": {
+        "median_ttft_ms": 1933.67,
+        "p90_ttft_ms": 2870.08,
+        "total_token_throughput": 486640.21
+      },
+      "candidate_won_p50": true,
+      "p50_reduction": 0.06512826463222432,
+      "p90_change": -0.09141042727845439,
+      "pair": 3,
+      "throughput_change": 0.08420524140733643
+    },
+    {
+      "baseline": {
+        "median_ttft_ms": 2056.02,
+        "p90_ttft_ms": 3035.39,
+        "total_token_throughput": 448084.26
+      },
+      "candidate": {
+        "median_ttft_ms": 2057.02,
+        "p90_ttft_ms": 2891.13,
+        "total_token_throughput": 489651.88
+      },
+      "candidate_won_p50": false,
+      "p50_reduction": -0.00048637659166739233,
+      "p90_change": -0.04752601807346002,
+      "pair": 4,
+      "throughput_change": 0.09276741834225555
+    },
+    {
+      "baseline": {
+        "median_ttft_ms": 2040.72,
+        "p90_ttft_ms": 3144.12,
+        "total_token_throughput": 452544.29
+      },
+      "candidate": {
+        "median_ttft_ms": 1963.03,
+        "p90_ttft_ms": 3487.86,
+        "total_token_throughput": 468435.15
+      },
+      "candidate_won_p50": true,
+      "p50_reduction": 0.03806989689913365,
+      "p90_change": 0.10932788824854023,
+      "pair": 5,
+      "throughput_change": 0.035114485700394216
+    }
+  ],
+  "screen": {
+    "candidate_pair_wins": 4,
+    "decision": "continue-to-independent-seed",
+    "gates": {
+      "p50": true,
+      "p90": true,
+      "pair_wins": true,
+      "slo": true,
+      "throughput": true
+    },
+    "max_p90_regression": 0.02,
+    "max_throughput_regression": 0.01,
+    "p50_reduction": 0.053106575519558,
+    "p90_regression": -0.04752601807346002,
+    "passes": true,
+    "required_p50_reduction": 0.01,
+    "required_pair_wins": 4,
+    "throughput_regression": -0.07534272501814132
+  },
+  "sequence": [
+    "baseline",
+    "candidate",
+    "candidate",
+    "baseline",
+    "baseline",
+    "candidate",
+    "candidate",
+    "baseline",
+    "baseline",
+    "candidate"
+  ],
+  "status": "formal-primary-screen-no-profiler"
+}

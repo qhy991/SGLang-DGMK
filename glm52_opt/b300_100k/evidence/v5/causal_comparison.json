@@ -1,0 +1,1614 @@
+{
+  "capture": {
+    "candidate": {
+      "devices": 8,
+      "gpu_active_fraction_device_median": 0.6895772085449565,
+      "trace_span_ms_device_median": 10074.888736
+    },
+    "candidate_trace_span_delta_percent": -0.1892619831163178,
+    "control": {
+      "devices": 8,
+      "gpu_active_fraction_device_median": 0.7124131009238884,
+      "trace_span_ms_device_median": 10093.992827
+    }
+  },
+  "categories": {
+    "deepep_cached_notify_combine_wait": {
+      "candidate": {
+        "calls_max": 339,
+        "calls_min": 339,
+        "device_median": {
+          "calls": 339.0,
+          "calls_per_second": 33.64801439028854,
+          "kernel_sum_fraction": 0.01873946370296551,
+          "kernel_sum_ms_per_call": 0.3659928008849558,
+          "max": 3.4702685,
+          "p50": 0.3580025,
+          "p90": 0.570947,
+          "p99": 1.7557049999999998,
+          "time_ge_50ms": 0.0
+        },
+        "per_device": {
+          "0": {
+            "calls": 339,
+            "calls_per_second": 33.914225698417106,
+            "kernel_sum_fraction": 0.01966186328874952,
+            "kernel_sum_ms_per_call": 0.36063777876106196,
+            "max": 3.556569,
+            "p50": 0.351427,
+            "p90": 0.56058,
+            "p99": 1.669995,
+            "time_ge_50ms": 0.0
+          },
+          "1": {
+            "calls": 339,
+            "calls_per_second": 33.01694404849689,
+            "kernel_sum_fraction": 0.01474438219884054,
+            "kernel_sum_ms_per_call": 0.29876586430678465,
+            "max": 3.367671,
+            "p50": 0.273058,
+            "p90": 0.48346,
+            "p99": 2.005358,
+            "time_ge_50ms": 0.0
+          },
+          "2": {
+            "calls": 339,
+            "calls_per_second": 33.64603807279371,
+            "kernel_sum_fraction": 0.017817064117181498,
+            "kernel_sum_ms_per_call": 0.37134782300884955,
+            "max": 3.651121,
+            "p50": 0.364578,
+            "p90": 0.581314,
+            "p99": 1.555271,
+            "time_ge_50ms": 0.0
+          },
+          "3": {
+            "calls": 339,
+            "calls_per_second": 33.061195105636244,
+            "kernel_sum_fraction": 0.014645974592541503,
+            "kernel_sum_ms_per_call": 0.30057998820058995,
+            "max": 3.383968,
+            "p50": 0.321059,
+            "p90": 0.509157,
+            "p99": 1.535054,
+            "time_ge_50ms": 0.0
+          },
+          "4": {
+            "calls": 339,
+            "calls_per_second": 33.649990707783374,
+            "kernel_sum_fraction": 0.12943732687273155,
+            "kernel_sum_ms_per_call": 3.779026404129793,
+            "max": 7.244908,
+            "p50": 3.98988,
+            "p90": 4.416378,
+            "p99": 5.184735,
+            "time_ge_50ms": 0.0
+          },
+          "5": {
+            "calls": 339,
+            "calls_per_second": 33.607238616610836,
+            "kernel_sum_fraction": 0.012554545612173028,
+            "kernel_sum_ms_per_call": 0.21845332153392333,
+            "max": 2.62447,
+            "p50": 0.213474,
+            "p90": 0.439747,
+            "p99": 0.611077,
+            "time_ge_50ms": 0.0
+          },
+          "6": {
+            "calls": 339,
+            "calls_per_second": 33.9011658644842,
+            "kernel_sum_fraction": 0.0202389966528614,
+            "kernel_sum_ms_per_call": 0.4248048407079646,
+            "max": 3.236203,
+            "p50": 0.452353,
+            "p90": 0.60861,
+            "p99": 1.841415,
+            "time_ge_50ms": 0.0
+          },
+          "7": {
+            "calls": 339,
+            "calls_per_second": 33.66405266760781,
+            "kernel_sum_fraction": 0.12993463171988354,
+            "kernel_sum_ms_per_call": 3.7841320560471976,
+            "max": 7.147208,
+            "p50": 3.975926,
+            "p90": 4.389912,
+            "p99": 5.371582,
+            "time_ge_50ms": 0.0
+          }
+        }
+      },
+      "candidate_delta_percent": {
+        "calls": 15.699658703071663,
+        "calls_per_second": 15.919049794630059,
+        "kernel_sum_fraction": -21.38350328421569,
+        "kernel_sum_ms_per_call": -37.169541523626314,
+        "max": -12.290953638234758,
+        "p50": -28.855253247695277,
+        "p90": -39.730132716855756,
+        "p99": -43.095803744769675,
+        "time_ge_50ms": null
+      },
+      "control": {
+        "calls_max": 293,
+        "calls_min": 293,
+        "device_median": {
+          "calls": 293.0,
+          "calls_per_second": 29.027165465815678,
+          "kernel_sum_fraction": 0.023836554013227956,
+          "kernel_sum_ms_per_call": 0.5825085631399317,
+          "max": 3.9565685000000004,
+          "p50": 0.5032030000000001,
+          "p90": 0.9473175,
+          "p99": 3.08537,
+          "time_ge_50ms": 0.0
+        },
+        "per_device": {
+          "0": {
+            "calls": 293,
+            "calls_per_second": 29.24868228898942,
+            "kernel_sum_fraction": 0.01365854817139855,
+            "kernel_sum_ms_per_call": 0.3285046279863481,
+            "max": 2.895726,
+            "p50": 0.253601,
+            "p90": 0.517827,
+            "p99": 2.345356,
+            "time_ge_50ms": 0.0
+          },
+          "1": {
+            "calls": 293,
+            "calls_per_second": 28.178847945717198,
+            "kernel_sum_fraction": 0.023942304513857555,
+            "kernel_sum_ms_per_call": 0.5793245836177474,
+            "max": 4.133622,
+            "p50": 0.499298,
+            "p90": 0.770884,
+            "p99": 2.809358,
+            "time_ge_50ms": 0.0
+          },
+          "2": {
+            "calls": 293,
+            "calls_per_second": 29.027181152689085,
+            "kernel_sum_fraction": 0.026317585962212224,
+            "kernel_sum_ms_per_call": 0.6709528771331058,
+            "max": 4.035242,
+            "p50": 0.584482,
+            "p90": 1.324036,
+            "p99": 3.512297,
+            "time_ge_50ms": 0.0
+          },
+          "3": {
+            "calls": 293,
+            "calls_per_second": 29.249227272550996,
+            "kernel_sum_fraction": 0.023730803512598358,
+            "kernel_sum_ms_per_call": 0.585692542662116,
+            "max": 3.824189,
+            "p50": 0.507108,
+            "p90": 0.969415,
+            "p99": 2.718933,
+            "time_ge_50ms": 0.0
+          },
+          "4": {
+            "calls": 293,
+            "calls_per_second": 29.027149778942274,
+            "kernel_sum_fraction": 0.0190206657216234,
+            "kernel_sum_ms_per_call": 0.39565120819112626,
+            "max": 3.685648,
+            "p50": 0.209216,
+            "p90": 0.92522,
+            "p99": 3.162062,
+            "time_ge_50ms": 0.0
+          },
+          "5": {
+            "calls": 293,
+            "calls_per_second": 28.56520661260788,
+            "kernel_sum_fraction": 0.024020466198448373,
+            "kernel_sum_ms_per_call": 0.6180138976109215,
+            "max": 4.340157,
+            "p50": 0.552931,
+            "p90": 1.050855,
+            "p99": 3.854491,
+            "time_ge_50ms": 0.0
+          },
+          "6": {
+            "calls": 293,
+            "calls_per_second": 29.065002381325403,
+            "kernel_sum_fraction": 0.0177998798095773,
+            "kernel_sum_ms_per_call": 0.38226830375426624,
+            "max": 3.877895,
+            "p50": 0.318401,
+            "p90": 0.582561,
+            "p99": 3.008678,
+            "time_ge_50ms": 0.0
+          },
+          "7": {
+            "calls": 293,
+            "calls_per_second": 28.56259265331574,
+            "kernel_sum_fraction": 0.10974943312504451,
+            "kernel_sum_ms_per_call": 3.697387829351536,
+            "max": 7.749532,
+            "p50": 3.816301,
+            "p90": 4.209392,
+            "p99": 6.907707,
+            "time_ge_50ms": 0.0
+          }
+        }
+      }
+    },
+    "deepep_combine": {
+      "candidate": {
+        "calls_max": 339,
+        "calls_min": 339,
+        "device_median": {
+          "calls": 339.0,
+          "calls_per_second": 33.64801439028854,
+          "kernel_sum_fraction": 0.04513233014398029,
+          "kernel_sum_ms_per_call": 0.9334198436578172,
+          "max": 1.1415435,
+          "p50": 0.932871,
+          "p90": 1.0185335,
+          "p99": 1.070919,
+          "time_ge_50ms": 0.0
+        },
+        "per_device": {
+          "0": {
+            "calls": 339,
+            "calls_per_second": 33.914225698417106,
+            "kernel_sum_fraction": 0.05112748932808205,
+            "kernel_sum_ms_per_call": 0.9377801032448378,
+            "max": 1.128296,
+            "p50": 0.939846,
+            "p90": 1.018247,
+            "p99": 1.070343,
+            "time_ge_50ms": 0.0
+          },
+          "1": {
+            "calls": 339,
+            "calls_per_second": 33.01694404849689,
+            "kernel_sum_fraction": 0.04583048125546774,
+            "kernel_sum_ms_per_call": 0.9286644336283186,
+            "max": 1.154791,
+            "p50": 0.926247,
+            "p90": 1.013831,
+            "p99": 1.076648,
+            "time_ge_50ms": 0.0
+          },
+          "2": {
+            "calls": 339,
+            "calls_per_second": 33.64603807279371,
+            "kernel_sum_fraction": 0.044904456054615426,
+            "kernel_sum_ms_per_call": 0.935910197640118,
+            "max": 1.162852,
+            "p50": 0.938917,
+            "p90": 1.01882,
+            "p99": 1.060932,
+            "time_ge_50ms": 0.0
+          },
+          "3": {
+            "calls": 339,
+            "calls_per_second": 33.061195105636244,
+            "kernel_sum_fraction": 0.04536020423334516,
+            "kernel_sum_ms_per_call": 0.9309294896755163,
+            "max": 1.122795,
+            "p50": 0.926857,
+            "p90": 1.017097,
+            "p99": 1.068458,
+            "time_ge_50ms": 0.0
+          },
+          "4": {
+            "calls": 339,
+            "calls_per_second": 33.649990707783374,
+            "kernel_sum_fraction": 0.032236299341279216,
+            "kernel_sum_ms_per_call": 0.9411645722713865,
+            "max": 1.159302,
+            "p50": 0.955942,
+            "p90": 1.022758,
+            "p99": 1.071495,
+            "time_ge_50ms": 0.0
+          },
+          "5": {
+            "calls": 339,
+            "calls_per_second": 33.607238616610836,
+            "kernel_sum_fraction": 0.05295279893577593,
+            "kernel_sum_ms_per_call": 0.9213965339233039,
+            "max": 1.162346,
+            "p50": 0.90996,
+            "p90": 1.020041,
+            "p99": 1.075817,
+            "time_ge_50ms": 0.0
+          },
+          "6": {
+            "calls": 339,
+            "calls_per_second": 33.9011658644842,
+            "kernel_sum_fraction": 0.04409081468823809,
+            "kernel_sum_ms_per_call": 0.9254407138643068,
+            "max": 1.085156,
+            "p50": 0.922211,
+            "p90": 1.016228,
+            "p99": 1.057124,
+            "time_ge_50ms": 0.0
+          },
+          "7": {
+            "calls": 339,
+            "calls_per_second": 33.66405266760781,
+            "kernel_sum_fraction": 0.03223750266445119,
+            "kernel_sum_ms_per_call": 0.9388641474926254,
+            "max": 1.113222,
+            "p50": 0.938885,
+            "p90": 1.029926,
+            "p99": 1.089606,
+            "time_ge_50ms": 0.0
+          }
+        }
+      },
+      "candidate_delta_percent": {
+        "calls": 15.699658703071663,
+        "calls_per_second": 15.919049794630059,
+        "kernel_sum_fraction": 12.56007176450533,
+        "kernel_sum_ms_per_call": -4.406426629458792,
+        "max": -3.6475788103651485,
+        "p50": -2.070863050310834,
+        "p90": -7.557105547979548,
+        "p99": -6.899236229107785,
+        "time_ge_50ms": null
+      },
+      "control": {
+        "calls_max": 293,
+        "calls_min": 293,
+        "device_median": {
+          "calls": 293.0,
+          "calls_per_second": 29.027165465815678,
+          "kernel_sum_fraction": 0.04009621656816703,
+          "kernel_sum_ms_per_call": 0.9764462303754265,
+          "max": 1.1847585,
+          "p50": 0.9525980000000001,
+          "p90": 1.1017975,
+          "p99": 1.1502795,
+          "time_ge_50ms": 0.0
+        },
+        "per_device": {
+          "0": {
+            "calls": 293,
+            "calls_per_second": 29.24868228898942,
+            "kernel_sum_fraction": 0.040130171142489006,
+            "kernel_sum_ms_per_call": 0.9651792252559727,
+            "max": 1.160006,
+            "p50": 0.944773,
+            "p90": 1.089509,
+            "p99": 1.141542,
+            "time_ge_50ms": 0.0
+          },
+          "1": {
+            "calls": 293,
+            "calls_per_second": 28.178847945717198,
+            "kernel_sum_fraction": 0.04086254294568749,
+            "kernel_sum_ms_per_call": 0.9887383924914677,
+            "max": 1.217254,
+            "p50": 0.960901,
+            "p90": 1.128582,
+            "p99": 1.176646,
+            "time_ge_50ms": 0.0
+          },
+          "2": {
+            "calls": 293,
+            "calls_per_second": 29.027181152689085,
+            "kernel_sum_fraction": 0.03852046625366993,
+            "kernel_sum_ms_per_call": 0.9820588293515359,
+            "max": 1.610629,
+            "p50": 0.962083,
+            "p90": 1.097507,
+            "p99": 1.178019,
+            "time_ge_50ms": 0.0
+          },
+          "3": {
+            "calls": 293,
+            "calls_per_second": 29.249227272550996,
+            "kernel_sum_fraction": 0.040062261993845064,
+            "kernel_sum_ms_per_call": 0.9887641638225256,
+            "max": 1.691724,
+            "p50": 0.978696,
+            "p90": 1.103337,
+            "p99": 1.148392,
+            "time_ge_50ms": 0.0
+          },
+          "4": {
+            "calls": 293,
+            "calls_per_second": 29.027149778942274,
+            "kernel_sum_fraction": 0.04586483640590071,
+            "kernel_sum_ms_per_call": 0.9540401058020478,
+            "max": 1.153988,
+            "p50": 0.930917,
+            "p90": 1.070533,
+            "p99": 1.120389,
+            "time_ge_50ms": 0.0
+          },
+          "5": {
+            "calls": 293,
+            "calls_per_second": 28.56520661260788,
+            "kernel_sum_fraction": 0.0381506515094995,
+            "kernel_sum_ms_per_call": 0.9815643310580204,
+            "max": 1.1674,
+            "p50": 0.960423,
+            "p90": 1.106856,
+            "p99": 1.152167,
+            "time_ge_50ms": 0.0
+          },
+          "6": {
+            "calls": 293,
+            "calls_per_second": 29.065002381325403,
+            "kernel_sum_fraction": 0.04473284808338638,
+            "kernel_sum_ms_per_call": 0.9606778327645051,
+            "max": 1.160419,
+            "p50": 0.931425,
+            "p90": 1.100258,
+            "p99": 1.145538,
+            "time_ge_50ms": 0.0
+          },
+          "7": {
+            "calls": 293,
+            "calls_per_second": 28.56259265331574,
+            "kernel_sum_fraction": 0.028831898770785583,
+            "kernel_sum_ms_per_call": 0.9713281296928327,
+            "max": 1.202117,
+            "p50": 0.936131,
+            "p90": 1.115364,
+            "p99": 1.152708,
+            "time_ge_50ms": 0.0
+          }
+        }
+      }
+    },
+    "deepep_dispatch": {
+      "candidate": {
+        "calls_max": 340,
+        "calls_min": 340,
+        "device_median": {
+          "calls": 340.0,
+          "calls_per_second": 33.747271069905906,
+          "kernel_sum_fraction": 0.02610139211958719,
+          "kernel_sum_ms_per_call": 0.5457930426470587,
+          "max": 2.439933,
+          "p50": 0.5251395,
+          "p90": 0.5750124999999999,
+          "p99": 0.9785170000000001,
+          "time_ge_50ms": 0.0
+        },
+        "per_device": {
+          "0": {
+            "calls": 340,
+            "calls_per_second": 34.01426766212926,
+            "kernel_sum_fraction": 0.029860930357914102,
+            "kernel_sum_ms_per_call": 0.5460980970588235,
+            "max": 2.455184,
+            "p50": 0.524004,
+            "p90": 0.577284,
+            "p99": 0.985223,
+            "time_ge_50ms": 0.0
+          },
+          "1": {
+            "calls": 340,
+            "calls_per_second": 33.11433916368419,
+            "kernel_sum_fraction": 0.027115455043359014,
+            "kernel_sum_ms_per_call": 0.5478252852941177,
+            "max": 2.431472,
+            "p50": 0.527395,
+            "p90": 0.57738,
+            "p99": 0.982759,
+            "time_ge_50ms": 0.0
+          },
+          "2": {
+            "calls": 340,
+            "calls_per_second": 33.74528892256596,
+            "kernel_sum_fraction": 0.02584229705824735,
+            "kernel_sum_ms_per_call": 0.5370276352941177,
+            "max": 2.448394,
+            "p50": 0.523395,
+            "p90": 0.569794,
+            "p99": 0.956004,
+            "time_ge_50ms": 0.0
+          },
+          "3": {
+            "calls": 340,
+            "calls_per_second": 33.15872075491541,
+            "kernel_sum_fraction": 0.026137411953150124,
+            "kernel_sum_ms_per_call": 0.5348415647058824,
+            "max": 2.107987,
+            "p50": 0.520709,
+            "p90": 0.567493,
+            "p99": 0.926697,
+            "time_ge_50ms": 0.0
+          },
+          "4": {
+            "calls": 340,
+            "calls_per_second": 33.74925321724586,
+            "kernel_sum_fraction": 0.02224332761996876,
+            "kernel_sum_ms_per_call": 0.6475017264705882,
+            "max": 2.235277,
+            "p50": 0.642276,
+            "p90": 0.685444,
+            "p99": 0.747556,
+            "time_ge_50ms": 0.0
+          },
+          "5": {
+            "calls": 340,
+            "calls_per_second": 33.70637501370998,
+            "kernel_sum_fraction": 0.031400442352880364,
+            "kernel_sum_ms_per_call": 0.5447712764705882,
+            "max": 2.355508,
+            "p50": 0.525125,
+            "p90": 0.572741,
+            "p99": 0.983305,
+            "time_ge_50ms": 0.0
+          },
+          "6": {
+            "calls": 340,
+            "calls_per_second": 34.00116930361247,
+            "kernel_sum_fraction": 0.026065372286024256,
+            "kernel_sum_ms_per_call": 0.5454879882352941,
+            "max": 2.473737,
+            "p50": 0.525154,
+            "p90": 0.567202,
+            "p99": 0.974275,
+            "time_ge_50ms": 0.0
+          },
+          "7": {
+            "calls": 340,
+            "calls_per_second": 33.76335665777775,
+            "kernel_sum_fraction": 0.0233979047027214,
+            "kernel_sum_ms_per_call": 0.6794212294117647,
+            "max": 2.512301,
+            "p50": 0.658052,
+            "p90": 0.714532,
+            "p99": 1.140647,
+            "time_ge_50ms": 0.0
+          }
+        }
+      },
+      "candidate_delta_percent": {
+        "calls": 15.646258503401356,
+        "calls_per_second": 15.86554833685556,
+        "kernel_sum_fraction": 4.449936093547335,
+        "kernel_sum_ms_per_call": -11.118259296665201,
+        "max": -29.909933227323993,
+        "p50": -1.2455736860217836,
+        "p90": -1.8245720071231153,
+        "p99": -55.731765853384886,
+        "time_ge_50ms": null
+      },
+      "control": {
+        "calls_max": 294,
+        "calls_min": 294,
+        "device_median": {
+          "calls": 294.0,
+          "calls_per_second": 29.12623428993109,
+          "kernel_sum_fraction": 0.024989380650468074,
+          "kernel_sum_ms_per_call": 0.6140665544217687,
+          "max": 3.4811395000000003,
+          "p50": 0.531763,
+          "p90": 0.585699,
+          "p99": 2.210427,
+          "time_ge_50ms": 0.0
+        },
+        "per_device": {
+          "0": {
+            "calls": 294,
+            "calls_per_second": 29.348507143218054,
+            "kernel_sum_fraction": 0.026031266388327597,
+            "kernel_sum_ms_per_call": 0.6239539523809524,
+            "max": 3.526642,
+            "p50": 0.531651,
+            "p90": 0.576227,
+            "p99": 2.266764,
+            "time_ge_50ms": 0.0
+          },
+          "1": {
+            "calls": 294,
+            "calls_per_second": 28.27502148819405,
+            "kernel_sum_fraction": 0.024393680336432,
+            "kernel_sum_ms_per_call": 0.5882387448979592,
+            "max": 2.278124,
+            "p50": 0.531875,
+            "p90": 0.587267,
+            "p99": 2.06513,
+            "time_ge_50ms": 0.0
+          },
+          "2": {
+            "calls": 294,
+            "calls_per_second": 29.12625003034331,
+            "kernel_sum_fraction": 0.024898793844528352,
+            "kernel_sum_ms_per_call": 0.6326224047619047,
+            "max": 3.501001,
+            "p50": 0.533953,
+            "p90": 0.597665,
+            "p99": 2.216486,
+            "time_ge_50ms": 0.0
+          },
+          "3": {
+            "calls": 294,
+            "calls_per_second": 29.349053986791784,
+            "kernel_sum_fraction": 0.025079967456407795,
+            "kernel_sum_ms_per_call": 0.6168854251700681,
+            "max": 2.280146,
+            "p50": 0.53274,
+            "p90": 0.592229,
+            "p99": 2.12696,
+            "time_ge_50ms": 0.0
+          },
+          "4": {
+            "calls": 294,
+            "calls_per_second": 29.126218549518867,
+            "kernel_sum_fraction": 0.029362853116915607,
+            "kernel_sum_ms_per_call": 0.6087028367346938,
+            "max": 3.500271,
+            "p50": 0.522403,
+            "p90": 0.584131,
+            "p99": 2.306698,
+            "time_ge_50ms": 0.0
+          },
+          "5": {
+            "calls": 294,
+            "calls_per_second": 28.662698785347157,
+            "kernel_sum_fraction": 0.02383856600494498,
+            "kernel_sum_ms_per_call": 0.6112476836734694,
+            "max": 3.462008,
+            "p50": 0.529316,
+            "p90": 0.581316,
+            "p99": 2.204368,
+            "time_ge_50ms": 0.0
+          },
+          "6": {
+            "calls": 294,
+            "calls_per_second": 29.164200341671226,
+            "kernel_sum_fraction": 0.027212016303362993,
+            "kernel_sum_ms_per_call": 0.5824145714285714,
+            "max": 2.120196,
+            "p50": 0.525281,
+            "p90": 0.576129,
+            "p99": 2.006052,
+            "time_ge_50ms": 0.0
+          },
+          "7": {
+            "calls": 294,
+            "calls_per_second": 28.660075904692246,
+            "kernel_sum_fraction": 0.02276097994193899,
+            "kernel_sum_ms_per_call": 0.7641946054421769,
+            "max": 3.680173,
+            "p50": 0.66157,
+            "p90": 0.730435,
+            "p99": 2.373385,
+            "time_ge_50ms": 0.0
+          }
+        }
+      }
+    },
+    "deepep_notify_dispatch_wait": {
+      "candidate": {
+        "calls_max": 340,
+        "calls_min": 340,
+        "device_median": {
+          "calls": 340.0,
+          "calls_per_second": 33.747271069905906,
+          "kernel_sum_fraction": 0.6575726112344074,
+          "kernel_sum_ms_per_call": 13.612307152941177,
+          "max": 567.625242,
+          "p50": 14.633523499999999,
+          "p90": 21.417851,
+          "p99": 79.882628,
+          "time_ge_50ms": 1002.1008135
+        },
+        "per_device": {
+          "0": {
+            "calls": 340,
+            "calls_per_second": 34.01426766212926,
+            "kernel_sum_fraction": 0.6214661664292651,
+            "kernel_sum_ms_per_call": 11.365402444117647,
+            "max": 158.560133,
+            "p50": 14.617669,
+            "p90": 20.453453,
+            "p99": 71.32887,
+            "time_ge_50ms": 405.459892
+          },
+          "1": {
+            "calls": 340,
+            "calls_per_second": 33.11433916368419,
+            "kernel_sum_fraction": 0.6593738361325827,
+            "kernel_sum_ms_per_call": 13.32161526764706,
+            "max": 567.575527,
+            "p50": 14.507332,
+            "p90": 26.747642,
+            "p99": 81.431412,
+            "time_ge_50ms": 1026.022904
+          },
+          "2": {
+            "calls": 340,
+            "calls_per_second": 33.74528892256596,
+            "kernel_sum_fraction": 0.6596411091916138,
+            "kernel_sum_ms_per_call": 13.707972794117648,
+            "max": 572.469876,
+            "p50": 14.649378,
+            "p90": 25.102001,
+            "p99": 81.591631,
+            "time_ge_50ms": 978.178723
+          },
+          "3": {
+            "calls": 340,
+            "calls_per_second": 33.15872075491541,
+            "kernel_sum_fraction": 0.6605508074345786,
+            "kernel_sum_ms_per_call": 13.516641511764705,
+            "max": 567.674957,
+            "p50": 14.552776,
+            "p90": 26.641145,
+            "p99": 93.784302,
+            "time_ge_50ms": 1027.04098
+          },
+          "4": {
+            "calls": 340,
+            "calls_per_second": 33.74925321724586,
+            "kernel_sum_fraction": 0.6321286652419634,
+            "kernel_sum_ms_per_call": 18.401221664705883,
+            "max": 658.987309,
+            "p50": 15.873822,
+            "p90": 21.349662,
+            "p99": 100.360383,
+            "time_ge_50ms": 1159.907638
+          },
+          "5": {
+            "calls": 340,
+            "calls_per_second": 33.70637501370998,
+            "kernel_sum_fraction": 0.5910133653294319,
+            "kernel_sum_ms_per_call": 10.25358502352941,
+            "max": 125.245684,
+            "p50": 14.397694,
+            "p90": 20.17691,
+            "p99": 71.717193,
+            "time_ge_50ms": 371.212331
+          },
+          "6": {
+            "calls": 340,
+            "calls_per_second": 34.00116930361247,
+            "kernel_sum_fraction": 0.6936434774102154,
+            "kernel_sum_ms_per_call": 14.516354529411766,
+            "max": 558.033105,
+            "p50": 15.126996,
+            "p90": 20.645254,
+            "p99": 71.943382,
+            "time_ge_50ms": 914.778585
+          },
+          "7": {
+            "calls": 340,
+            "calls_per_second": 33.76335665777775,
+            "kernel_sum_fraction": 0.655771386336232,
+            "kernel_sum_ms_per_call": 19.04208975882353,
+            "max": 653.887605,
+            "p50": 16.07561,
+            "p90": 21.48604,
+            "p99": 78.333844,
+            "time_ge_50ms": 1098.830248
+          }
+        }
+      },
+      "candidate_delta_percent": {
+        "calls": 15.646258503401356,
+        "calls_per_second": 15.86554833685556,
+        "kernel_sum_fraction": -2.887161115471659,
+        "kernel_sum_ms_per_call": -17.230514155202403,
+        "max": -21.180266248163427,
+        "p50": 8.753007034209137,
+        "p90": -27.81464148528965,
+        "p99": -65.0176076773893,
+        "time_ge_50ms": -37.103438095383645
+      },
+      "control": {
+        "calls_max": 294,
+        "calls_min": 294,
+        "device_median": {
+          "calls": 294.0,
+          "calls_per_second": 29.12623428993109,
+          "kernel_sum_fraction": 0.6771222206945177,
+          "kernel_sum_ms_per_call": 16.446045319727894,
+          "max": 720.156254,
+          "p50": 13.4557415,
+          "p90": 29.6706305,
+          "p99": 228.350958,
+          "time_ge_50ms": 1593.252132
+        },
+        "per_device": {
+          "0": {
+            "calls": 294,
+            "calls_per_second": 29.348507143218054,
+            "kernel_sum_fraction": 0.6779456988282262,
+            "kernel_sum_ms_per_call": 16.249954649659866,
+            "max": 616.94965,
+            "p50": 11.415289,
+            "p90": 29.268254,
+            "p99": 263.143484,
+            "time_ge_50ms": 1662.402182
+          },
+          "1": {
+            "calls": 294,
+            "calls_per_second": 28.27502148819405,
+            "kernel_sum_fraction": 0.6762987425608091,
+            "kernel_sum_ms_per_call": 16.308532292517008,
+            "max": 544.710587,
+            "p50": 12.762688,
+            "p90": 29.609629,
+            "p99": 264.114342,
+            "time_ge_50ms": 1458.669483
+          },
+          "2": {
+            "calls": 294,
+            "calls_per_second": 29.12625003034331,
+            "kernel_sum_fraction": 0.6785257918764702,
+            "kernel_sum_ms_per_call": 17.239815744897957,
+            "max": 723.043097,
+            "p50": 12.1672,
+            "p90": 31.682654,
+            "p99": 157.999109,
+            "time_ge_50ms": 1659.873642
+          },
+          "3": {
+            "calls": 294,
+            "calls_per_second": 29.349053986791784,
+            "kernel_sum_fraction": 0.6742177504647666,
+            "kernel_sum_ms_per_call": 16.583558346938776,
+            "max": 719.033434,
+            "p50": 14.300429,
+            "p90": 31.653866,
+            "p99": 193.558432,
+            "time_ge_50ms": 1526.630622
+          },
+          "4": {
+            "calls": 294,
+            "calls_per_second": 29.126218549518867,
+            "kernel_sum_fraction": 0.6111449244089727,
+            "kernel_sum_ms_per_call": 12.669260976190476,
+            "max": 690.769165,
+            "p50": 1.601703,
+            "p90": 28.924507,
+            "p99": 82.257557,
+            "time_ge_50ms": 930.591429
+          },
+          "5": {
+            "calls": 294,
+            "calls_per_second": 28.662698785347157,
+            "kernel_sum_fraction": 0.6889489523200284,
+            "kernel_sum_ms_per_call": 17.665427156462584,
+            "max": 723.298163,
+            "p50": 15.247659,
+            "p90": 29.731632,
+            "p99": 264.471771,
+            "time_ge_50ms": 1695.605674
+          },
+          "6": {
+            "calls": 294,
+            "calls_per_second": 29.164200341671226,
+            "kernel_sum_fraction": 0.6223716600579995,
+            "kernel_sum_ms_per_call": 13.320524272108843,
+            "max": 721.279074,
+            "p50": 14.148795,
+            "p90": 29.28607,
+            "p99": 36.364093,
+            "time_ge_50ms": 985.289857
+          },
+          "7": {
+            "calls": 294,
+            "calls_per_second": 28.660075904692246,
+            "kernel_sum_fraction": 0.7229301855355876,
+            "kernel_sum_ms_per_call": 24.272212765306122,
+            "max": 730.221083,
+            "p50": 16.250813,
+            "p90": 32.393852,
+            "p99": 271.017534,
+            "time_ge_50ms": 1881.184897
+          }
+        }
+      }
+    },
+    "deepgemm": {
+      "candidate": {
+        "calls_max": 1586,
+        "calls_min": 1387,
+        "device_median": {
+          "calls": 1544.0,
+          "calls_per_second": 151.91145726769298,
+          "kernel_sum_fraction": 0.08939130542027302,
+          "kernel_sum_ms_per_call": 0.4034972173981045,
+          "max": 3.0741035,
+          "p50": 0.1982735,
+          "p90": 0.783493,
+          "p99": 3.0394315,
+          "time_ge_50ms": 0.0
+        },
+        "per_device": {
+          "0": {
+            "calls": 1563,
+            "calls_per_second": 156.36558928208242,
+            "kernel_sum_fraction": 0.09879277976888,
+            "kernel_sum_ms_per_call": 0.39301802879078696,
+            "max": 2.971156,
+            "p50": 0.197666,
+            "p90": 0.796006,
+            "p99": 2.942196,
+            "time_ge_50ms": 0.0
+          },
+          "1": {
+            "calls": 1544,
+            "calls_per_second": 150.37805784920116,
+            "kernel_sum_fraction": 0.0891502140814944,
+            "kernel_sum_ms_per_call": 0.39662418069948185,
+            "max": 3.101109,
+            "p50": 0.196193,
+            "p90": 0.748325,
+            "p99": 3.079541,
+            "time_ge_50ms": 0.0
+          },
+          "2": {
+            "calls": 1544,
+            "calls_per_second": 153.24331204835835,
+            "kernel_sum_fraction": 0.09009019524093813,
+            "kernel_sum_ms_per_call": 0.4122632946891192,
+            "max": 3.237774,
+            "p50": 0.196129,
+            "p90": 0.781315,
+            "p99": 3.190478,
+            "time_ge_50ms": 0.0
+          },
+          "3": {
+            "calls": 1544,
+            "calls_per_second": 150.5796024870276,
+            "kernel_sum_fraction": 0.08963239675905164,
+            "kernel_sum_ms_per_call": 0.4038863711139896,
+            "max": 3.130909,
+            "p50": 0.200386,
+            "p90": 0.763207,
+            "p99": 3.108445,
+            "time_ge_50ms": 0.0
+          },
+          "4": {
+            "calls": 1544,
+            "calls_per_second": 153.2613146100812,
+            "kernel_sum_fraction": 0.06280664133719868,
+            "kernel_sum_ms_per_call": 0.4026042571243524,
+            "max": 3.122258,
+            "p50": 0.198881,
+            "p90": 0.745829,
+            "p99": 3.107923,
+            "time_ge_50ms": 0.0
+          },
+          "5": {
+            "calls": 1586,
+            "calls_per_second": 157.23032579924717,
+            "kernel_sum_fraction": 0.10838453456833225,
+            "kernel_sum_ms_per_call": 0.4031080636822194,
+            "max": 3.047098,
+            "p50": 0.197122,
+            "p90": 0.785671,
+            "p99": 2.999322,
+            "time_ge_50ms": 0.0
+          },
+          "6": {
+            "calls": 1387,
+            "calls_per_second": 138.7047700709132,
+            "kernel_sum_fraction": 0.07911352587468816,
+            "kernel_sum_ms_per_call": 0.40585832227829843,
+            "max": 1.950919,
+            "p50": 0.222081,
+            "p90": 1.235364,
+            "p99": 1.933895,
+            "time_ge_50ms": 0.0
+          },
+          "7": {
+            "calls": 1387,
+            "calls_per_second": 137.73463436569924,
+            "kernel_sum_fraction": 0.056859131325218096,
+            "kernel_sum_ms_per_call": 0.40472946359048306,
+            "max": 1.960203,
+            "p50": 0.225026,
+            "p90": 1.255047,
+            "p99": 1.951691,
+            "time_ge_50ms": 0.0
+          }
+        }
+      },
+      "candidate_delta_percent": {
+        "calls": 6.482758620689655,
+        "calls_per_second": 5.276916001374388,
+        "kernel_sum_fraction": 6.233087273522631,
+        "kernel_sum_ms_per_call": -4.4103061176429925,
+        "max": -1.4251348464525249,
+        "p50": -20.772204629231904,
+        "p90": 14.582530505037816,
+        "p99": -1.7724025454108894,
+        "time_ge_50ms": null
+      },
+      "control": {
+        "calls_max": 1494,
+        "calls_min": 1041,
+        "device_median": {
+          "calls": 1450.0,
+          "calls_per_second": 144.29702449272904,
+          "kernel_sum_fraction": 0.08414638764108738,
+          "kernel_sum_ms_per_call": 0.42211372482758625,
+          "max": 3.118547,
+          "p50": 0.2502575,
+          "p90": 0.6837804999999999,
+          "p99": 3.0942745,
+          "time_ge_50ms": 0.0
+        },
+        "per_device": {
+          "0": {
+            "calls": 1450,
+            "calls_per_second": 144.74603863151762,
+            "kernel_sum_fraction": 0.0870160008408497,
+            "kernel_sum_ms_per_call": 0.42289805862068963,
+            "max": 3.164912,
+            "p50": 0.250754,
+            "p90": 0.688356,
+            "p99": 3.135984,
+            "time_ge_50ms": 0.0
+          },
+          "1": {
+            "calls": 1450,
+            "calls_per_second": 139.45163659143324,
+            "kernel_sum_fraction": 0.08315173688026835,
+            "kernel_sum_ms_per_call": 0.4065621565517241,
+            "max": 3.091952,
+            "p50": 0.245922,
+            "p90": 0.668035,
+            "p99": 3.073935,
+            "time_ge_50ms": 0.0
+          },
+          "2": {
+            "calls": 1452,
+            "calls_per_second": 143.84801035394045,
+            "kernel_sum_fraction": 0.08381063913217873,
+            "kernel_sum_ms_per_call": 0.4311676074380166,
+            "max": 3.237096,
+            "p50": 0.251105,
+            "p90": 0.713378,
+            "p99": 3.189,
+            "time_ge_50ms": 0.0
+          },
+          "3": {
+            "calls": 1450,
+            "calls_per_second": 144.74873564914316,
+            "kernel_sum_fraction": 0.08448213614999603,
+            "kernel_sum_ms_per_call": 0.4213293910344828,
+            "max": 3.126264,
+            "p50": 0.249761,
+            "p90": 0.679205,
+            "p99": 3.1102,
+            "time_ge_50ms": 0.0
+          },
+          "4": {
+            "calls": 1494,
+            "calls_per_second": 148.00874324143263,
+            "kernel_sum_fraction": 0.10079836077320066,
+            "kernel_sum_ms_per_call": 0.41120394779116465,
+            "max": 3.11083,
+            "p50": 0.224225,
+            "p90": 0.675811,
+            "p99": 3.078349,
+            "time_ge_50ms": 0.0
+          },
+          "5": {
+            "calls": 1420,
+            "calls_per_second": 138.43888528977197,
+            "kernel_sum_fraction": 0.08195137239211214,
+            "kernel_sum_ms_per_call": 0.43506316619718316,
+            "max": 3.249655,
+            "p50": 0.262562,
+            "p90": 0.711909,
+            "p99": 3.198166,
+            "time_ge_50ms": 0.0
+          },
+          "6": {
+            "calls": 1461,
+            "calls_per_second": 144.92822006524372,
+            "kernel_sum_fraction": 0.09668384579228229,
+            "kernel_sum_ms_per_call": 0.4164113333333333,
+            "max": 3.086598,
+            "p50": 0.238689,
+            "p90": 0.666849,
+            "p99": 3.058214,
+            "time_ge_50ms": 0.0
+          },
+          "7": {
+            "calls": 1041,
+            "calls_per_second": 101.4800646829409,
+            "kernel_sum_fraction": 0.04641490664086884,
+            "kernel_sum_ms_per_call": 0.44011593563880885,
+            "max": 2.143688,
+            "p50": 0.315233,
+            "p90": 1.101732,
+            "p99": 2.1346,
+            "time_ge_50ms": 0.0
+          }
+        }
+      }
+    },
+    "ep_gather_scatter": {
+      "candidate": {
+        "calls_max": 1020,
+        "calls_min": 1017,
+        "device_median": {
+          "calls": 1020.0,
+          "calls_per_second": 101.24181320971772,
+          "kernel_sum_fraction": 0.010621966405675982,
+          "kernel_sum_ms_per_call": 0.07276108529411765,
+          "max": 0.35769850000000003,
+          "p50": 0.0497765,
+          "p90": 0.2060975,
+          "p99": 0.33179400000000003,
+          "time_ge_50ms": 0.0
+        },
+        "per_device": {
+          "0": {
+            "calls": 1017,
+            "calls_per_second": 101.74267709525132,
+            "kernel_sum_fraction": 0.0120049838641222,
+            "kernel_sum_ms_per_call": 0.07339844739429695,
+            "max": 0.359715,
+            "p50": 0.048864,
+            "p90": 0.206882,
+            "p99": 0.335106,
+            "time_ge_50ms": 0.0
+          },
+          "1": {
+            "calls": 1020,
+            "calls_per_second": 99.34301749105258,
+            "kernel_sum_fraction": 0.010801018930373711,
+            "kernel_sum_ms_per_call": 0.07273922156862746,
+            "max": 0.357218,
+            "p50": 0.04912,
+            "p90": 0.206049,
+            "p99": 0.33549,
+            "time_ge_50ms": 0.0
+          },
+          "2": {
+            "calls": 1020,
+            "calls_per_second": 101.23586676769787,
+            "kernel_sum_fraction": 0.010507160892995002,
+            "kernel_sum_ms_per_call": 0.07278294901960784,
+            "max": 0.355137,
+            "p50": 0.049152,
+            "p90": 0.2048,
+            "p99": 0.334402,
+            "time_ge_50ms": 0.0
+          },
+          "3": {
+            "calls": 1020,
+            "calls_per_second": 99.47616226474622,
+            "kernel_sum_fraction": 0.010736771918356964,
+            "kernel_sum_ms_per_call": 0.07323438529411765,
+            "max": 0.384068,
+            "p50": 0.050688,
+            "p90": 0.206146,
+            "p99": 0.330179,
+            "time_ge_50ms": 0.0
+          },
+          "4": {
+            "calls": 1020,
+            "calls_per_second": 101.24775965173758,
+            "kernel_sum_fraction": 0.007495601219150232,
+            "kernel_sum_ms_per_call": 0.07273214411764706,
+            "max": 0.353186,
+            "p50": 0.049985,
+            "p90": 0.204225,
+            "p99": 0.328481,
+            "time_ge_50ms": 0.0
+          },
+          "5": {
+            "calls": 1020,
+            "calls_per_second": 101.11912504112995,
+            "kernel_sum_fraction": 0.012608693345259946,
+            "kernel_sum_ms_per_call": 0.07291674313725491,
+            "max": 0.358179,
+            "p50": 0.049568,
+            "p90": 0.206722,
+            "p99": 0.331939,
+            "time_ge_50ms": 0.0
+          },
+          "6": {
+            "calls": 1020,
+            "calls_per_second": 102.00350791083741,
+            "kernel_sum_fraction": 0.010422154290930559,
+            "kernel_sum_ms_per_call": 0.07270386568627452,
+            "max": 0.350337,
+            "p50": 0.05072,
+            "p90": 0.206337,
+            "p99": 0.331649,
+            "time_ge_50ms": 0.0
+          },
+          "7": {
+            "calls": 1020,
+            "calls_per_second": 101.29006997333325,
+            "kernel_sum_fraction": 0.007493837601162221,
+            "kernel_sum_ms_per_call": 0.07253459117647058,
+            "max": 0.35917,
+            "p50": 0.050752,
+            "p90": 0.203905,
+            "p99": 0.325826,
+            "time_ge_50ms": 0.0
+          }
+        }
+      },
+      "candidate_delta_percent": {
+        "calls": 15.646258503401356,
+        "calls_per_second": 15.86554833685556,
+        "kernel_sum_fraction": 4.273017117730604,
+        "kernel_sum_ms_per_call": -12.255948682169427,
+        "max": 9.733732757205814,
+        "p50": -34.21463027819996,
+        "p90": 9.859489021913515,
+        "p99": 11.977185670170943,
+        "time_ge_50ms": null
+      },
+      "control": {
+        "calls_max": 882,
+        "calls_min": 879,
+        "device_median": {
+          "calls": 882.0,
+          "calls_per_second": 87.37870286979327,
+          "kernel_sum_fraction": 0.010186687504863443,
+          "kernel_sum_ms_per_call": 0.0829242372574741,
+          "max": 0.3259695,
+          "p50": 0.07566500000000001,
+          "p90": 0.18760100000000002,
+          "p99": 0.29630500000000004,
+          "time_ge_50ms": 0.0
+        },
+        "per_device": {
+          "0": {
+            "calls": 879,
+            "calls_per_second": 87.74604686696826,
+            "kernel_sum_fraction": 0.010448188267389242,
+            "kernel_sum_ms_per_call": 0.08376386120591581,
+            "max": 0.33037,
+            "p50": 0.076257,
+            "p90": 0.191041,
+            "p99": 0.296545,
+            "time_ge_50ms": 0.0
+          },
+          "1": {
+            "calls": 879,
+            "calls_per_second": 84.5365438371516,
+            "kernel_sum_fraction": 0.010293934417161128,
+            "kernel_sum_ms_per_call": 0.0830263890784983,
+            "max": 0.308674,
+            "p50": 0.075776,
+            "p90": 0.187457,
+            "p99": 0.293825,
+            "time_ge_50ms": 0.0
+          },
+          "2": {
+            "calls": 882,
+            "calls_per_second": 87.37875009102994,
+            "kernel_sum_fraction": 0.009791416858500119,
+            "kernel_sum_ms_per_call": 0.08292596712018141,
+            "max": 0.316001,
+            "p50": 0.07488,
+            "p90": 0.187745,
+            "p99": 0.296065,
+            "time_ge_50ms": 0.0
+          },
+          "3": {
+            "calls": 879,
+            "calls_per_second": 87.74768181765299,
+            "kernel_sum_fraction": 0.010079440592565759,
+            "kernel_sum_ms_per_call": 0.08292250739476678,
+            "max": 0.318466,
+            "p50": 0.075745,
+            "p90": 0.192097,
+            "p99": 0.30317,
+            "time_ge_50ms": 0.0
+          },
+          "4": {
+            "calls": 882,
+            "calls_per_second": 87.3786556485566,
+            "kernel_sum_fraction": 0.01188548290796587,
+            "kernel_sum_ms_per_call": 0.08213015646258504,
+            "max": 0.342305,
+            "p50": 0.074721,
+            "p90": 0.185825,
+            "p99": 0.29565,
+            "time_ge_50ms": 0.0
+          },
+          "5": {
+            "calls": 882,
+            "calls_per_second": 85.98809635604147,
+            "kernel_sum_fraction": 0.009667119386615885,
+            "kernel_sum_ms_per_call": 0.08262527664399093,
+            "max": 0.348163,
+            "p50": 0.074977,
+            "p90": 0.188257,
+            "p99": 0.30029,
+            "time_ge_50ms": 0.0
+          },
+          "6": {
+            "calls": 882,
+            "calls_per_second": 87.49260102501367,
+            "kernel_sum_fraction": 0.011628869082344175,
+            "kernel_sum_ms_per_call": 0.08296362811791383,
+            "max": 0.321569,
+            "p50": 0.076448,
+            "p90": 0.186048,
+            "p99": 0.300257,
+            "time_ge_50ms": 0.0
+          },
+          "7": {
+            "calls": 882,
+            "calls_per_second": 85.98022771407673,
+            "kernel_sum_fraction": 0.007352334854536758,
+            "kernel_sum_ms_per_call": 0.08228431065759638,
+            "max": 0.334849,
+            "p50": 0.075585,
+            "p90": 0.182369,
+            "p99": 0.287201,
+            "time_ge_50ms": 0.0
+          }
+        }
+      }
+    },
+    "flashmla_sparse_attention": {
+      "candidate": {
+        "calls_max": 156,
+        "calls_min": 121,
+        "device_median": {
+          "calls": 156.0,
+          "calls_per_second": 15.339639617508178,
+          "kernel_sum_fraction": 0.09388531169168565,
+          "kernel_sum_ms_per_call": 4.241870112762237,
+          "max": 4.3785035,
+          "p50": 4.238110000000001,
+          "p90": 4.255146,
+          "p99": 4.3631215,
+          "time_ge_50ms": 0.0
+        },
+        "per_device": {
+          "0": {
+            "calls": 156,
+            "calls_per_second": 15.6065463390946,
+            "kernel_sum_fraction": 0.10308027229442823,
+            "kernel_sum_ms_per_call": 4.108631621794872,
+            "max": 4.365468,
+            "p50": 4.117116,
+            "p90": 4.247996,
+            "p99": 4.31462,
+            "time_ge_50ms": 0.0
+          },
+          "1": {
+            "calls": 156,
+            "calls_per_second": 15.193637969219807,
+            "kernel_sum_fraction": 0.09632819066516443,
+            "kernel_sum_ms_per_call": 4.2416311346153845,
+            "max": 4.379421,
+            "p50": 4.23942,
+            "p90": 4.2559,
+            "p99": 4.361725,
+            "time_ge_50ms": 0.0
+          },
+          "2": {
+            "calls": 156,
+            "calls_per_second": 15.48313256447144,
+            "kernel_sum_fraction": 0.09272594346801154,
+            "kernel_sum_ms_per_call": 4.199727384615384,
+            "max": 4.377586,
+            "p50": 4.221233,
+            "p90": 4.24789,
+            "p99": 4.327378,
+            "time_ge_50ms": 0.0
+          },
+          "3": {
+            "calls": 156,
+            "calls_per_second": 15.214001287549422,
+            "kernel_sum_fraction": 0.09504467991535978,
+            "kernel_sum_ms_per_call": 4.238817307692307,
+            "max": 4.360711,
+            "p50": 4.233991,
+            "p90": 4.25268,
+            "p99": 4.350504,
+            "time_ge_50ms": 0.0
+          },
+          "4": {
+            "calls": 156,
+            "calls_per_second": 15.4849514761481,
+            "kernel_sum_fraction": 0.06689190071841879,
+            "kernel_sum_ms_per_call": 4.2439379679487175,
+            "max": 4.39209,
+            "p50": 4.242074,
+            "p90": 4.256121,
+            "p99": 4.374617,
+            "time_ge_50ms": 0.0
+          },
+          "5": {
+            "calls": 156,
+            "calls_per_second": 15.465277947466934,
+            "kernel_sum_fraction": 0.1122145323236973,
+            "kernel_sum_ms_per_call": 4.243086224358975,
+            "max": 4.372421,
+            "p50": 4.239333,
+            "p90": 4.257381,
+            "p99": 4.364518,
+            "time_ge_50ms": 0.0
+          },
+          "6": {
+            "calls": 121,
+            "calls_per_second": 12.100416134520907,
+            "kernel_sum_fraction": 0.07230857078600507,
+            "kernel_sum_ms_per_call": 4.252110909090908,
+            "max": 4.38024,
+            "p50": 4.248719,
+            "p90": 4.262959,
+            "p99": 4.379951,
+            "time_ge_50ms": 0.0
+          },
+          "7": {
+            "calls": 121,
+            "calls_per_second": 12.015782810562081,
+            "kernel_sum_fraction": 0.05199075700306617,
+            "kernel_sum_ms_per_call": 4.242109090909091,
+            "max": 4.40684,
+            "p50": 4.236887,
+            "p90": 4.254392,
+            "p99": 4.400217,
+            "time_ge_50ms": 0.0
+          }
+        }
+      },
+      "candidate_delta_percent": {
+        "calls": 0.0,
+        "calls_per_second": 0.7271647742034482,
+        "kernel_sum_fraction": 3.108045272770843,
+        "kernel_sum_ms_per_call": 0.004117576843332138,
+        "max": 0.04872758730918303,
+        "p50": 0.0008022508327210076,
+        "p90": -0.014509734857226508,
+        "p99": 0.18110393149946002,
+        "time_ge_50ms": null
+      },
+      "control": {
+        "calls_max": 156,
+        "calls_min": 78,
+        "device_median": {
+          "calls": 156.0,
+          "calls_per_second": 15.228900418168733,
+          "kernel_sum_fraction": 0.09105527259615234,
+          "kernel_sum_ms_per_call": 4.241695457692307,
+          "max": 4.376371000000001,
+          "p50": 4.2380759999999995,
+          "p90": 4.2557635000000005,
+          "p99": 4.355233999999999,
+          "time_ge_50ms": 0.0
+        },
+        "per_device": {
+          "0": {
+            "calls": 156,
+            "calls_per_second": 15.572677259666722,
+            "kernel_sum_fraction": 0.09383786738239633,
+            "kernel_sum_ms_per_call": 4.238948153846153,
+            "max": 4.38159,
+            "p50": 4.234229,
+            "p90": 4.254486,
+            "p99": 4.353845,
+            "time_ge_50ms": 0.0
+          },
+          "1": {
+            "calls": 156,
+            "calls_per_second": 15.003072626388679,
+            "kernel_sum_fraction": 0.0905110491487634,
+            "kernel_sum_ms_per_call": 4.113397019230769,
+            "max": 4.352822,
+            "p50": 4.103572,
+            "p90": 4.24927,
+            "p99": 4.31391,
+            "time_ge_50ms": 0.0
+          },
+          "2": {
+            "calls": 156,
+            "calls_per_second": 15.454744914059717,
+            "kernel_sum_fraction": 0.08767704760924165,
+            "kernel_sum_ms_per_call": 4.198313916666667,
+            "max": 4.379883,
+            "p50": 4.217355,
+            "p90": 4.245643,
+            "p99": 4.325003,
+            "time_ge_50ms": 0.0
+          },
+          "3": {
+            "calls": 156,
+            "calls_per_second": 15.572967421562987,
+            "kernel_sum_fraction": 0.09159949604354127,
+            "kernel_sum_ms_per_call": 4.246130692307692,
+            "max": 4.379681,
+            "p50": 4.241312,
+            "p90": 4.261984,
+            "p99": 4.338113,
+            "time_ge_50ms": 0.0
+          },
+          "4": {
+            "calls": 156,
+            "calls_per_second": 15.454728209948787,
+            "kernel_sum_fraction": 0.10864254475191638,
+            "kernel_sum_ms_per_call": 4.244531243589743,
+            "max": 4.375923,
+            "p50": 4.241489,
+            "p90": 4.257041,
+            "p99": 4.371794,
+            "time_ge_50ms": 0.0
+          },
+          "5": {
+            "calls": 150,
+            "calls_per_second": 14.623825910891405,
+            "kernel_sum_fraction": 0.0845487774423808,
+            "kernel_sum_ms_per_call": 4.249134740000001,
+            "max": 4.376254,
+            "p50": 4.247262,
+            "p90": 4.258046,
+            "p99": 4.371679,
+            "time_ge_50ms": 0.0
+          },
+          "6": {
+            "calls": 150,
+            "calls_per_second": 14.879694051873074,
+            "kernel_sum_fraction": 0.10116157267963152,
+            "kernel_sum_ms_per_call": 4.243685133333333,
+            "max": 4.376488,
+            "p50": 4.239368,
+            "p90": 4.263016,
+            "p99": 4.361832,
+            "time_ge_50ms": 0.0
+          },
+          "7": {
+            "calls": 78,
+            "calls_per_second": 7.60369360736733,
+            "kernel_sum_fraction": 0.033501941823244556,
+            "kernel_sum_ms_per_call": 4.239705782051282,
+            "max": 4.356623,
+            "p50": 4.236784,
+            "p90": 4.250416,
+            "p99": 4.356623,
+            "time_ge_50ms": 0.0
+          }
+        }
+      }
+    }
+  },
+  "inputs": {
+    "private://v5/nsys/control/per_gpu_kernel_analysis.json": "60aa1280fa3eca75e4bd833545b380b9f4cdaf853ca31d26596659dca14092be",
+    "private://v5/nsys/control/scheduler_sync_analysis.json": "a1ea2c8679598c69b58b9f365dc9a4b2dd10b7bac002b29df28eda3e78d0e0dc",
+    "private://v5/nsys/candidate/per_gpu_kernel_analysis.json": "9088fe2eea9b7691fb568d1eb428b65084ba2b83047937803ab01d937f1e8bd5",
+    "private://v5/nsys/candidate/scheduler_sync_analysis.json": "c003ef07a5cc8c71efaa260d0ee1eda9e47586f55df57b6666d4c73a57c22f0b"
+  },
+  "interpretation": "The v5 map advances more DeepEP dispatches per matched trace while reducing dispatch-notify tail wait. FlashMLA per-call duration is unchanged, so the causal signal is rank-arrival/control-plane balance rather than attention math.",
+  "purpose": "causal diagnosis only; profiled latency is not a performance estimator",
+  "scheduler_runtime_api": {
+    "candidate": {
+      "memcpy_async": {
+        "calls": 4693,
+        "device_median_ms_per_call": 0.06252464025144726,
+        "total_ms": 256.344093
+      },
+      "stream_synchronize": {
+        "calls": 930,
+        "device_median_ms_per_call": 1.0762406730769232,
+        "total_ms": 1122.958226
+      }
+    },
+    "control": {
+      "memcpy_async": {
+        "calls": 3992,
+        "device_median_ms_per_call": 0.06133662942433505,
+        "total_ms": 230.93657700000003
+      },
+      "stream_synchronize": {
+        "calls": 757,
+        "device_median_ms_per_call": 0.942720481060606,
+        "total_ms": 871.425901
+      }
+    }
+  },
+  "schema_version": 1,
+  "status": "VALID_CAUSAL_COMPARISON"
+}

@@ -1,0 +1,37 @@
+{
+  "status": "RELATIVE_WIN_BLOCKED_BY_HOST_ANCHOR",
+  "design": "fresh-server control-candidate-control",
+  "control": "accepted N6 map",
+  "candidate": "v5 temporal hybrid map",
+  "samples": [
+    {
+      "arm": "control",
+      "median_ttft_ms": 10457.46,
+      "p90_ttft_ms": 18401.27,
+      "total_token_throughput": 87524.63
+    },
+    {
+      "arm": "candidate",
+      "median_ttft_ms": 3119.99,
+      "p90_ttft_ms": 3755.22,
+      "total_token_throughput": 320683.49
+    },
+    {
+      "arm": "control",
+      "median_ttft_ms": 9600.52,
+      "p90_ttft_ms": 18028.12,
+      "total_token_throughput": 91865.47
+    }
+  ],
+  "relative_improvement_percent": {
+    "median_ttft_ms": 68.89028705781938,
+    "p90_ttft_ms": 79.38356914568155,
+    "total_token_throughput": 257.52640753308015
+  },
+  "absolute_gates": {
+    "candidate_median_ttft_le_2000ms": false,
+    "candidate_p90_ttft_le_5000ms": true,
+    "candidate_throughput_ge_438000": false
+  },
+  "interpretation": "Strong relative signal on a CPU-frequency-degraded host; not comparable to the healthy-host N6 formal anchor and not promoted."
+}
