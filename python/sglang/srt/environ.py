@@ -1032,6 +1032,12 @@ class Envs:
     SGLANG_FLASHINFER_AUTOTUNE_CACHE = EnvBool(True)
     SGLANG_ENABLE_MOE_DEFERRED_FINALIZE = EnvBool(False)
 
+    # GLM-5.2 router experiments. Each optimization is off by default and the
+    # runtime path adds stricter model/topology guards before admission.
+    SGLANG_GLM52_ROUTER_PAD_MASK_FUSION = EnvBool(False)
+    SGLANG_GLM52_ROUTER_DEEPEP_IDS_FUSION = EnvBool(False)
+    SGLANG_GLM52_ROUTER_STATIC_PLACEMENT_FUSION = EnvBool(False)
+
     # GLM-5.2 optimized kernel dispatch (SGLang-DGMK / glm52_opt)
     SGLANG_GLM52_OPT = EnvBool(False)
     SGLANG_GLM52_OPT_PROFILE = EnvStr("decode_max")

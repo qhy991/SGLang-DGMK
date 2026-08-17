@@ -32,7 +32,7 @@ from typing import (
 import torch
 import torch.nn.functional as F
 
-from sglang.srt.runtime_context import get_parallel
+from sglang.srt.runtime_context import get_parallel, get_server_args
 
 try:
     from triton_kernels.matmul_ogs import GatherIndx, RoutingData, ScatterIndx
@@ -97,7 +97,7 @@ from sglang.srt.eplb.expert_location_dispatch import (
     topk_ids_logical_to_physical,
 )
 from sglang.srt.layers.dp_attention import is_allocation_symmetric
-from sglang.srt.layers.moe import get_moe_runner_backend
+from sglang.srt.layers.moe import get_moe_a2a_backend, get_moe_runner_backend
 from sglang.srt.layers.moe.utils import (
     has_per_rank_fused_shared_slots,
 )
@@ -123,6 +123,41 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 _is_cuda = is_cuda()
+_router_pad_mask_fusion_logged = False
+_router_deepep_ids_fusion_logged = False
+_router_static_placement_fusion_logged = False
+
+
+def _log_router_pad_mask_fusion_selected() -> None:
+    global _router_pad_mask_fusion_logged
+    if not _router_pad_mask_fusion_logged:
+        logger.info(
+            "GLM-5.2 router padded-ID mask fusion selected: "
+            "EPLB/remap=off routed-expert-capture=off"
+        )
+        _router_pad_mask_fusion_logged = True
+
+
+def _log_router_deepep_ids_fusion_selected() -> None:
+    global _router_deepep_ids_fusion_logged
+    if not _router_deepep_ids_fusion_logged:
+        logger.info(
+            "GLM-5.2 router DeepEP-ID fusion selected: "
+            "masked int64 IDs written by router"
+        )
+        _router_deepep_ids_fusion_logged = True
+
+
+def _log_router_static_placement_fusion_selected() -> None:
+    global _router_static_placement_fusion_logged
+    if not _router_static_placement_fusion_logged:
+        logger.info(
+            "GLM-5.2 router static-placement fusion selected: "
+            "logical-to-physical + optional padded-row mask + int64 IDs"
+        )
+        _router_static_placement_fusion_logged = True
+
+
 _is_hip = is_hip()
 _is_cpu = is_cpu()
 _is_cpu_amx_available = cpu_has_amx_support()
@@ -1290,6 +1325,9 @@ def biased_grouped_topk_gpu(
     num_fused_shared_experts: int = 0,
     routed_scaling_factor: Optional[float] = None,
     apply_routed_scaling_factor_on_output: Optional[bool] = False,
+    num_token_non_padded: Optional[torch.Tensor] = None,
+    output_ids_int64: bool = False,
+    logical_to_physical_map: Optional[torch.Tensor] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     num_tokens = gating_output.shape[0]
     num_experts = gating_output.shape[1]
@@ -1328,6 +1366,7 @@ def biased_grouped_topk_gpu(
         )
     if (
         _is_cuda
+        and logical_to_physical_map is None
         and fused_topk_deepseek is not None
         and is_power_of_two(num_experts)
         # flashinfer constraints (applied to routed experts only)
@@ -1480,12 +1519,17 @@ def biased_grouped_topk_gpu(
                     routed_scaling_factor if routed_scaling_factor is not None else 1.0
                 ),
                 apply_routed_scaling_factor_on_output=apply_routed_scaling_factor_on_output,
+                num_token_non_padded=num_token_non_padded,
+                output_ids_int64=output_ids_int64,
             )
         elif (
             _is_cuda
             and num_expert_group == 1
             and topk_group == 1
-            and num_fused_shared_experts == 0
+            and (
+                num_fused_shared_experts == 0
+                or logical_to_physical_map is not None
+            )
             and num_experts <= 512
             and topk <= 8
         ):
@@ -1503,6 +1547,9 @@ def biased_grouped_topk_gpu(
                     routed_scaling_factor if routed_scaling_factor is not None else 1.0
                 ),
                 apply_routed_scaling_factor_on_output=apply_routed_scaling_factor_on_output,
+                num_token_non_padded=num_token_non_padded,
+                output_ids_int64=output_ids_int64,
+                logical_to_physical_map=logical_to_physical_map,
             )
         elif (
             _is_xpu
@@ -1688,6 +1735,8 @@ def _post_process_topk_ids(
     layer_id: int,
     num_token_non_padded: Optional[torch.Tensor] = None,
     expert_location_dispatch_info: Optional[ExpertLocationDispatchInfo] = None,
+    padded_region_already_masked: bool = False,
+    static_placement_already_fused: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     num_fused_shared_experts = topk_config.num_fused_shared_experts
     use_per_rank_shared_slots = has_per_rank_fused_shared_slots(
@@ -1698,7 +1747,12 @@ def _post_process_topk_ids(
     )
     capture_routed_experts_if_allowed(topk_config, layer_id, topk_ids)
     recorder_topk_ids = None
-    if _is_cuda:
+    if _is_cuda and static_placement_already_fused:
+        # The guarded static router already emitted final int64 DeepEP IDs and,
+        # when num_token_non_padded exists, padded -1 rows. Recording is
+        # excluded by admission, so do not remap or mask a second time.
+        recorder_topk_ids = topk_ids
+    elif _is_cuda:
         # LP path: solve LP outside torch.compile (the solver contains an
         # EP all-reduce that can't run inside compiled regions).
         log2phy_prob = None
@@ -1732,6 +1786,11 @@ def _post_process_topk_ids(
             # Per-rank shared-slot remap later adds shared slots to the topk ID
             # space, so keep the routed physical ids separately for statistics.
             recorder_topk_ids = routed_cols
+        elif padded_region_already_masked:
+            # The unified Triton router already wrote -1 for CUDA-graph padded
+            # rows. Selection guards require identity expert placement here, so
+            # there is no logical-to-physical remap left to perform.
+            assert expert_location_dispatch_info is None
         else:
             topk_ids = _biased_grouped_topk_postprocess(
                 topk_ids, expert_location_dispatch_info, num_token_non_padded
@@ -1762,7 +1821,9 @@ def _post_process_topk_ids(
 
     _aiter_append = num_fused_shared_experts > 0 and _use_aiter
 
-    if _aiter_append and use_per_rank_shared_slots:
+    if static_placement_already_fused:
+        pass
+    elif _aiter_append and use_per_rank_shared_slots:
         # Fused path: append shared experts AND apply the per-rank shared-slot
         # remap in a single Triton kernel. This replaces the original
         # fused_append_shared_experts() + eager per-rank shared-slot remap pair,
@@ -1871,6 +1932,79 @@ def select_experts(
 
     scoring_func = topk_config.scoring_func
 
+    # This is deliberately narrower than the kernel capability.  Skipping the
+    # post-router mask is only valid when the exact JIT router path is selected,
+    # no later benchmark override replaces its IDs, and no observer needs the
+    # historical pre-mask values.
+    router_pad_mask_eligible = bool(
+        _is_cuda
+        and num_token_non_padded is not None
+        and expert_location_dispatch_info is None
+        and get_global_experts_capturer() is None
+        and use_grouped_topk
+        and correction_bias is not None
+        and scoring_func == "sigmoid"
+        and num_expert_group == 1
+        and topk_group == 1
+        and num_fused_shared_experts == 0
+        and 1 < top_k <= 8
+        and router_logits.shape[1] == 256
+        and not _use_aiter
+        and not envs.SGLANG_SIMULATE_UNIFORM_EXPERTS.get()
+        and not envs.SGLANG_SIMULATE_ROUND_ROBIN_EXPERTS.get()
+    )
+    router_deepep_ids_fused = bool(
+        router_pad_mask_eligible
+        and envs.SGLANG_GLM52_ROUTER_DEEPEP_IDS_FUSION.get()
+        and get_moe_a2a_backend().is_deepep()
+    )
+    router_pad_mask_fused = bool(
+        router_pad_mask_eligible
+        and (
+            envs.SGLANG_GLM52_ROUTER_PAD_MASK_FUSION.get()
+            or router_deepep_ids_fused
+        )
+    )
+    if router_deepep_ids_fused:
+        _log_router_deepep_ids_fusion_selected()
+    elif router_pad_mask_fused:
+        _log_router_pad_mask_fusion_selected()
+
+    static_placement_fused = False
+    static_router_kwargs = {}
+    if (
+        _is_cuda
+        and envs.SGLANG_GLM52_ROUTER_STATIC_PLACEMENT_FUSION.get()
+        and get_moe_a2a_backend().is_deepep()
+        and expert_location_dispatch_info is not None
+        and expert_location_dispatch_info.ep_dispatch_algorithm == "static"
+        and expert_location_dispatch_info.partial_logical_to_rank_dispatch_physical_map
+        is not None
+        and not get_server_args().enable_eplb
+        and get_server_args().expert_distribution_recorder_mode is None
+        and not get_server_args().enable_expert_distribution_metrics
+        and get_global_experts_capturer() is None
+        and use_grouped_topk
+        and correction_bias is not None
+        and scoring_func == "sigmoid"
+        and num_expert_group == 1
+        and topk_group == 1
+        and num_fused_shared_experts == 0
+        and top_k == 8
+        and router_logits.shape[1] == 256
+        and get_parallel().moe_ep_size == 8
+        and not _use_aiter
+        and not envs.SGLANG_SIMULATE_UNIFORM_EXPERTS.get()
+        and not envs.SGLANG_SIMULATE_ROUND_ROBIN_EXPERTS.get()
+    ):
+        num_physical_routed = expert_location_dispatch_info.num_physical_experts
+        if num_physical_routed == 256:
+            static_router_kwargs = dict(
+                logical_to_physical_map=expert_location_dispatch_info.partial_logical_to_rank_dispatch_physical_map,
+            )
+            static_placement_fused = True
+            _log_router_static_placement_fusion_selected()
+
     # Set by the fused-gating+pack branch below; None everywhere else.
     packed_topk = None
 
@@ -1914,6 +2048,15 @@ def select_experts(
                 num_fused_shared_experts=num_fused_shared_experts,
                 routed_scaling_factor=routed_scaling_factor,
                 apply_routed_scaling_factor_on_output=apply_routed_scaling_factor_on_output,
+                num_token_non_padded=(
+                    num_token_non_padded
+                    if router_pad_mask_fused or static_placement_fused
+                    else None
+                ),
+                output_ids_int64=(
+                    router_deepep_ids_fused or static_placement_fused
+                ),
+                **static_router_kwargs,
             )
     elif torch_native and custom_routing_function is None:
         assert (
@@ -2074,6 +2217,8 @@ def select_experts(
         num_token_non_padded=num_token_non_padded,
         layer_id=layer_id,
         expert_location_dispatch_info=expert_location_dispatch_info,
+        padded_region_already_masked=router_pad_mask_fused,
+        static_placement_already_fused=static_placement_fused,
     )
 
     get_global_expert_distribution_recorder().on_select_experts(

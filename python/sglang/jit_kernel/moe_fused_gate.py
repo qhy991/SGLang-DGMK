@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING, Optional, Tuple
 
 import torch
 import triton
@@ -90,8 +90,10 @@ def moe_fused_gate_jit(
 def _router_triton_kernel(
     scores_ptr,  # [M, N] fp32, GEMM output (raw logits)
     bias_ptr,  # [N]    fp32
+    num_token_non_padded_ptr,  # optional CUDA int32 scalar
     out_weights_ptr,  # [M, K] fp32
     out_indices_ptr,  # [M, K] int32
+    logical_to_physical_ptr,  # [N] int64, optional static expert map
     M,
     routed_scaling_factor,
     moe_softcapping,
@@ -109,6 +111,8 @@ def _router_triton_kernel(
     HAS_SOFTCAP: tl.constexpr,  # tanh softcapping (softmax only)
     RENORMALIZE: tl.constexpr,
     APPLY_SCALE: tl.constexpr,  # apply_routed_scaling_factor_on_output
+    MASK_PADDED_IDS: tl.constexpr,
+    HAS_STATIC_MAP: tl.constexpr,
     USE_PDL: tl.constexpr,
     stride_sm,
     stride_sn,
@@ -240,6 +244,28 @@ def _router_triton_kernel(
     if APPLY_SCALE:
         selected_vals = selected_vals * routed_scaling_factor
 
+    # Static placement still chooses experts in logical ID space. Convert only
+    # routed columns to the physical IDs consumed by DeepEP. Shared experts are
+    # deliberately outside this path: GLM-5.2 executes them as a separate MLP.
+    if HAS_STATIC_MAP:
+        map_mask = mask_m[:, None] & mask_k_routed[None, :]
+        physical_idx = tl.load(
+            logical_to_physical_ptr + selected_idx,
+            mask=map_mask,
+            other=0,
+        ).to(tl.int32)
+        selected_idx = tl.where(mask_k_routed[None, :], physical_idx, selected_idx)
+
+    # Decode CUDA graphs pad the row dimension to their captured batch size.
+    # When requested, fold the separate post-router mask into this store.  Only
+    # IDs are masked: this is byte-for-byte equivalent to mask_topk_ids(), which
+    # intentionally leaves the padded weights untouched.
+    if MASK_PADDED_IDS:
+        num_token_non_padded = tl.load(num_token_non_padded_ptr).to(tl.int32)
+        selected_idx = tl.where(
+            offs_m[:, None] < num_token_non_padded, selected_idx, -1
+        )
+
     out_w_ptr = (
         out_weights_ptr + offs_m[:, None] * stride_wm + offs_k[None, :] * stride_wk
     )
@@ -264,14 +290,19 @@ def moe_fused_gate(
     moe_softcapping: float = 0.0,
     num_expert_group: int = 1,
     topk_group: int = 1,
+    num_token_non_padded: Optional[torch.Tensor] = None,
+    output_ids_int64: bool = False,
+    logical_to_physical_map: Optional[torch.Tensor] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """Triton fused router: scoring + bias + topk + (optional) renorm/scale.
 
     Mirrors the semantics of :func:`moe_fused_gate_jit` (the CUDA JIT kernel).
     With ``num_expert_group > 1`` it performs DeepSeek-V3 grouped routing
     (per-group top-2-sum group scores, keep ``topk_group`` groups, then top-k
-    within). The first argument is named ``scores`` (raw GEMM logits) to match
-    the existing call sites.
+    within). ``output_ids_int64`` lets a guarded DeepEP low-latency path write
+    the dispatch ABI directly and avoid a separate int32-to-int64 copy. The
+    first argument is named ``scores`` (raw GEMM logits) to match the existing
+    call sites.
     """
     scoring_func_int = _SCORING_FUNC_MAP.get(scoring_func.lower())
     assert (
@@ -287,10 +318,26 @@ def moe_fused_gate(
     assert bias.ndim == 1, "bias must be 1D"
     assert scores.size(1) == bias.size(0), "scores and bias must have same num_experts"
     assert topk > num_fused_shared_experts, "topk must be > num_fused_shared_experts"
+    if num_token_non_padded is not None:
+        assert num_token_non_padded.is_cuda, "num_token_non_padded must be on CUDA"
+        assert num_token_non_padded.dtype == torch.int32, (
+            "num_token_non_padded must be int32"
+        )
+        assert num_token_non_padded.numel() == 1, (
+            "num_token_non_padded must be a scalar"
+        )
     if routed_scaling_factor is None:
         routed_scaling_factor = 1.0
 
+    if logical_to_physical_map is not None:
+        assert logical_to_physical_map.is_cuda
+        assert logical_to_physical_map.dtype == torch.int64
+        assert logical_to_physical_map.is_contiguous()
+        assert logical_to_physical_map.ndim == 1
+
     M, N = scores.shape
+    if logical_to_physical_map is not None:
+        assert logical_to_physical_map.shape == (N,)
     K = topk
     K_routed = topk - num_fused_shared_experts
     if num_expert_group > 1:
@@ -300,7 +347,11 @@ def moe_fused_gate(
     BLOCK_G = triton.next_power_of_2(num_expert_group)
 
     weights = torch.empty((M, K), dtype=torch.float32, device=scores.device)
-    indices = torch.empty((M, K), dtype=torch.int32, device=scores.device)
+    indices = torch.empty(
+        (M, K),
+        dtype=torch.int64 if output_ids_int64 else torch.int32,
+        device=scores.device,
+    )
 
     BLOCK_N = triton.next_power_of_2(N)  # 256 -> 256, 384 -> 512
     BLOCK_K = triton.next_power_of_2(K)  # 6 -> 8, 8 -> 8
@@ -316,8 +367,10 @@ def moe_fused_gate(
     _router_triton_kernel[grid](
         scores,
         bias,
+        num_token_non_padded if num_token_non_padded is not None else bias,
         weights,
         indices,
+        logical_to_physical_map if logical_to_physical_map is not None else bias,
         M,
         float(routed_scaling_factor),
         float(moe_softcapping),
@@ -335,6 +388,8 @@ def moe_fused_gate(
         HAS_SOFTCAP=bool(moe_softcapping != 0.0),
         RENORMALIZE=bool(renormalize),
         APPLY_SCALE=bool(apply_routed_scaling_factor_on_output),
+        MASK_PADDED_IDS=num_token_non_padded is not None,
+        HAS_STATIC_MAP=logical_to_physical_map is not None,
         USE_PDL=use_pdl,
         stride_sm=scores.stride(0),
         stride_sn=scores.stride(1),
