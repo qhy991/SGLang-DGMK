@@ -74,7 +74,7 @@ decode 实际走 FlashInfer `trtllm_batch_decode_with_kv_cache_mla`
 
 侧写文件（推荐）避免 DP worker 丢 env，默认：
 
-`/home/ubuntu/wwxq/cache/sglang/glm52_opt.env`  
+`<glm52-cache>/glm52_opt.env`
 或仓库内 `glm52_opt/runtime.env`，由 `SGLANG_GLM52_ENV_FILE` 指定。
 
 | 变量 | 含义 |
@@ -216,7 +216,7 @@ third_party/deepgemm_glm52/
 ## 8. Serving-native 通信算子测试
 
 旧 24-task suite 保持冻结，避免改变历史分数；新测试位于
-`/home/qinhaiyan/Kernel-Harness/serving_native/`，只针对已验证的 B200
+`<kernel-harness>/serving_native/`，只针对已验证的 B200
 单机 TP8/DP8/EP8 balanced 部署。固定测试点如下：
 
 - decode：每 DP rank 固定覆盖 `M=16`、`M=32` 两个 production bucket
@@ -228,7 +228,7 @@ third_party/deepgemm_glm52/
 - decode DeepEP：low-latency `dispatch + combine`，FP8/packed UE8M0
 
 ```bash
-cd /home/qinhaiyan/Kernel-Harness
+cd <kernel-harness>
 serving_native/run.sh --list
 
 # 8 卡 SGLang AllGather

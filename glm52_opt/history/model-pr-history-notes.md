@@ -4,7 +4,7 @@ Query date: 2026-07-22
 
 History source queried:
 
-- `/home/qinhaiyan/AI-Infra-Auto-Driven-SKILLS/model-pr-optimization-history/sglang/glm5-glm51/README.en.md`
+- `<internal-history-repo>/model-pr-optimization-history/sglang/glm5-glm51/README.en.md`
 
 Relevant prior work:
 
