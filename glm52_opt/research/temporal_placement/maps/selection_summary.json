@@ -1,0 +1,557 @@
+{
+  "fallback_layers": [
+    0,
+    1,
+    2,
+    4,
+    6,
+    8,
+    9,
+    12,
+    13,
+    15,
+    16,
+    17,
+    18,
+    21,
+    24,
+    25,
+    26,
+    28,
+    29,
+    30,
+    31,
+    33,
+    35,
+    36,
+    38,
+    39,
+    40,
+    41,
+    42,
+    44,
+    45,
+    47,
+    48,
+    49,
+    51,
+    52,
+    53,
+    54,
+    55,
+    56,
+    59,
+    60,
+    62,
+    63,
+    65,
+    66,
+    70,
+    72,
+    73,
+    74,
+    75,
+    76,
+    77
+  ],
+  "holdout": {
+    "passed": true,
+    "read_after_solution_frozen": true,
+    "results": [
+      {
+        "name": "holdout_odd:scalar:compute_mean",
+        "passed": true,
+        "percent_change": -1.0443270223674412,
+        "tolerance_pct": 0.0
+      },
+      {
+        "name": "holdout_odd:scalar:compute_p50",
+        "passed": true,
+        "percent_change": -1.1946436343189955,
+        "tolerance_pct": 0.0
+      },
+      {
+        "name": "holdout_odd:scalar:compute_p90",
+        "passed": true,
+        "percent_change": -0.6628283908383139,
+        "tolerance_pct": 0.0
+      },
+      {
+        "name": "holdout_odd:scalar:max_channel_p50",
+        "passed": true,
+        "percent_change": -0.5512155259039696,
+        "tolerance_pct": 0.05
+      },
+      {
+        "name": "holdout_odd:scalar:max_channel_p90",
+        "passed": true,
+        "percent_change": -0.49718361897070995,
+        "tolerance_pct": 0.05
+      },
+      {
+        "name": "holdout_odd:scalar:unique_sends_per_token",
+        "passed": true,
+        "percent_change": -0.00950491000245858,
+        "tolerance_pct": 0.05
+      },
+      {
+        "name": "holdout_odd:scalar:remote_unique_sends_per_token",
+        "passed": true,
+        "percent_change": 0.0016507622746021549,
+        "tolerance_pct": 0.05
+      },
+      {
+        "candidate_max": 102.03606943997013,
+        "name": "holdout_odd:rank_max:source_compute_mean",
+        "passed": true,
+        "percent_change": -0.8578233586679196,
+        "reference_max": 102.91893207984259,
+        "tolerance_pct": 0.1
+      },
+      {
+        "candidate_max": 97.85530160781366,
+        "name": "holdout_odd:rank_max:source_compute_p50",
+        "passed": true,
+        "percent_change": -1.0934351841380918,
+        "reference_max": 98.93711483155296,
+        "tolerance_pct": 0.1
+      },
+      {
+        "candidate_max": 28394282.0,
+        "name": "holdout_odd:rank_max:source_unique_sends",
+        "passed": true,
+        "percent_change": -0.021133591480981817,
+        "reference_max": 28400284.0,
+        "tolerance_pct": 0.1
+      },
+      {
+        "candidate_max": 24801177.0,
+        "name": "holdout_odd:rank_max:source_remote_unique_sends",
+        "passed": true,
+        "percent_change": -0.004983386092316522,
+        "reference_max": 24802413.0,
+        "tolerance_pct": 0.1
+      },
+      {
+        "candidate_max": 40090384.0,
+        "name": "holdout_odd:rank_max:destination_compute",
+        "passed": true,
+        "percent_change": 0.037015087753000664,
+        "reference_max": 40075550.0,
+        "tolerance_pct": 0.1
+      },
+      {
+        "candidate_max": 27303987.0,
+        "name": "holdout_odd:rank_max:destination_channels",
+        "passed": true,
+        "percent_change": 0.054893899217356434,
+        "reference_max": 27289007.0,
+        "tolerance_pct": 0.1
+      }
+    ]
+  },
+  "inputs": {
+    "layer_summary": {
+      "artifact_id": "private://v5/seed-1/layer-statistics",
+      "sha256": "bd8abb72babb950675b9c624e236a1edb188687e6e24cf0e15dfda08d5f96823"
+    },
+    "proposal_map": {
+      "artifact_id": "private://v5/proposal-map/v2",
+      "sha256": "cdb994821bb32ba82ed357598af8d48c288221c89d851982af2aa714e9cb8ad5"
+    },
+    "reference_map": {
+      "path": "../../../glm52_100k_x11_static_expert_map.json",
+      "sha256": "36d13233672288317fd69495d4cedb46844b8ae99033d184d84aff0c99c68f09"
+    }
+  },
+  "optimization": {
+    "holdout_tolerances_pct": {
+      "compute_mean_p50_p90": 0.0,
+      "rank_maxima": 0.1,
+      "send_and_channel_scalars": 0.05
+    },
+    "holdout_used_by_solver": false,
+    "objective": -0.01980119332124702,
+    "objective_weights": {
+      "compute_mean": 0.5,
+      "compute_p50": 1.0,
+      "compute_p90": 0.25
+    },
+    "rank_constraints": [
+      "source_compute_mean",
+      "source_compute_p50",
+      "source_unique_sends",
+      "source_remote_unique_sends",
+      "destination_compute",
+      "destination_channels"
+    ],
+    "selection_split": "train_even",
+    "solver": "scipy.optimize.milp",
+    "solver_message": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
+    "solver_status": 0
+  },
+  "output_map": "glm52_100k_x11_seed1_p50_rank_v5.json",
+  "output_map_sha256": "570e58026ae890bfd294a34786a095142ca71d14747c87606a536b20c415620a",
+  "primitive": "whole-layer proposal selection with reference fallback",
+  "selected_layer_count": 25,
+  "selected_layers": [
+    3,
+    5,
+    7,
+    10,
+    11,
+    14,
+    19,
+    20,
+    22,
+    23,
+    27,
+    32,
+    34,
+    37,
+    43,
+    46,
+    50,
+    57,
+    58,
+    61,
+    64,
+    67,
+    68,
+    69,
+    71
+  ],
+  "selection_constraints": [
+    {
+      "name": "train_even:scalar:compute_mean",
+      "normalized_upper_bound": 0.0,
+      "normalized_value": -0.010727592325810938,
+      "passed": true
+    },
+    {
+      "name": "train_even:scalar:compute_p50",
+      "normalized_upper_bound": 0.0,
+      "normalized_value": -0.01203946074940068,
+      "passed": true
+    },
+    {
+      "name": "train_even:scalar:compute_p90",
+      "normalized_upper_bound": 0.0,
+      "normalized_value": -0.009591745635763437,
+      "passed": true
+    },
+    {
+      "name": "train_even:scalar:max_channel_p50",
+      "normalized_upper_bound": 0.0,
+      "normalized_value": -0.005649334509844346,
+      "passed": true
+    },
+    {
+      "name": "train_even:scalar:max_channel_p90",
+      "normalized_upper_bound": 0.0,
+      "normalized_value": -0.005633393287770764,
+      "passed": true
+    },
+    {
+      "name": "train_even:scalar:unique_sends_per_token",
+      "normalized_upper_bound": 0.0,
+      "normalized_value": -1.5815829497134416e-06,
+      "passed": true
+    },
+    {
+      "name": "train_even:scalar:remote_unique_sends_per_token",
+      "normalized_upper_bound": 0.0,
+      "normalized_value": -5.070393852101896e-06,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:source_compute_mean:rank0",
+      "normalized_upper_bound": 0.045589666528240716,
+      "normalized_value": -0.019872834784954888,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:source_compute_mean:rank1",
+      "normalized_upper_bound": 0.04950996379041748,
+      "normalized_value": -0.008715004888985717,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:source_compute_mean:rank2",
+      "normalized_upper_bound": 0.10238493865182706,
+      "normalized_value": -0.005497624144866713,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:source_compute_mean:rank3",
+      "normalized_upper_bound": 0.09348330842337878,
+      "normalized_value": -0.010613913921592576,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:source_compute_mean:rank4",
+      "normalized_upper_bound": 0.017745411950689727,
+      "normalized_value": -0.006822488861445513,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:source_compute_mean:rank5",
+      "normalized_upper_bound": 0.0,
+      "normalized_value": -0.015671147616768882,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:source_compute_mean:rank6",
+      "normalized_upper_bound": 0.08676440592737364,
+      "normalized_value": -0.006903962321795665,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:source_compute_mean:rank7",
+      "normalized_upper_bound": 0.10130115877613778,
+      "normalized_value": -0.0066061588622258645,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:source_compute_p50:rank0",
+      "normalized_upper_bound": 0.0354455811754511,
+      "normalized_value": -0.015160382921370622,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:source_compute_p50:rank1",
+      "normalized_upper_bound": 0.005510201869637004,
+      "normalized_value": -0.0084273019497638,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:source_compute_p50:rank2",
+      "normalized_upper_bound": 0.06432333383032177,
+      "normalized_value": -0.009198773697383363,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:source_compute_p50:rank3",
+      "normalized_upper_bound": 0.052201373519415874,
+      "normalized_value": -0.013748551648016015,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:source_compute_p50:rank4",
+      "normalized_upper_bound": 0.0,
+      "normalized_value": -0.012285241355950542,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:source_compute_p50:rank5",
+      "normalized_upper_bound": 0.007933031364351162,
+      "normalized_value": -0.013691082237461932,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:source_compute_p50:rank6",
+      "normalized_upper_bound": 0.0368574166093231,
+      "normalized_value": -0.008668467167440503,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:source_compute_p50:rank7",
+      "normalized_upper_bound": 0.06205367138001181,
+      "normalized_value": -0.0036377364640145706,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:source_unique_sends:rank0",
+      "normalized_upper_bound": 0.11945469299189693,
+      "normalized_value": 0.001639580986570694,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:source_unique_sends:rank1",
+      "normalized_upper_bound": 0.0,
+      "normalized_value": -0.0002883371016824785,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:source_unique_sends:rank2",
+      "normalized_upper_bound": 0.12313070335436722,
+      "normalized_value": -0.0007250569357699949,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:source_unique_sends:rank3",
+      "normalized_upper_bound": 0.12052108308384912,
+      "normalized_value": -0.0003566970358317707,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:source_unique_sends:rank4",
+      "normalized_upper_bound": 0.11963529633020673,
+      "normalized_value": -0.0014177999627223762,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:source_unique_sends:rank5",
+      "normalized_upper_bound": 0.11717331236879083,
+      "normalized_value": 0.002270961797837655,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:source_unique_sends:rank6",
+      "normalized_upper_bound": 0.11750515972883312,
+      "normalized_value": -0.0006400579821621627,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:source_unique_sends:rank7",
+      "normalized_upper_bound": 0.1247171638825544,
+      "normalized_value": -0.0004939145196655639,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:source_remote_unique_sends:rank0",
+      "normalized_upper_bound": 0.11928675762040895,
+      "normalized_value": 0.0017762470954536848,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:source_remote_unique_sends:rank1",
+      "normalized_upper_bound": 0.0,
+      "normalized_value": -7.649848579673957e-05,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:source_remote_unique_sends:rank2",
+      "normalized_upper_bound": 0.12102463076653656,
+      "normalized_value": -0.0004656538010608242,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:source_remote_unique_sends:rank3",
+      "normalized_upper_bound": 0.11882395425198145,
+      "normalized_value": -0.0003952481150178074,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:source_remote_unique_sends:rank4",
+      "normalized_upper_bound": 0.11741780020355652,
+      "normalized_value": -0.0015964916875149092,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:source_remote_unique_sends:rank5",
+      "normalized_upper_bound": 0.11386997359608621,
+      "normalized_value": 0.00201546965420511,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:source_remote_unique_sends:rank6",
+      "normalized_upper_bound": 0.11396614006705287,
+      "normalized_value": -0.00038683933874951166,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:source_remote_unique_sends:rank7",
+      "normalized_upper_bound": 0.12089265573561382,
+      "normalized_value": -0.0009073639680017559,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:destination_compute:rank0",
+      "normalized_upper_bound": 0.0,
+      "normalized_value": -0.0005939042579585282,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:destination_compute:rank1",
+      "normalized_upper_bound": 0.0014756624179891075,
+      "normalized_value": 0.00026527163631261,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:destination_compute:rank2",
+      "normalized_upper_bound": 0.0006965742492883845,
+      "normalized_value": -0.0017472561555628833,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:destination_compute:rank3",
+      "normalized_upper_bound": 0.0006888524208107244,
+      "normalized_value": -0.0009061600711714633,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:destination_compute:rank4",
+      "normalized_upper_bound": 0.0058533092875750065,
+      "normalized_value": 0.001407379058611128,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:destination_compute:rank5",
+      "normalized_upper_bound": 0.009156058970041054,
+      "normalized_value": 0.0015062231288825662,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:destination_compute:rank6",
+      "normalized_upper_bound": 0.0053288081707676535,
+      "normalized_value": -0.0008333275983398769,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:destination_compute:rank7",
+      "normalized_upper_bound": 0.010939148142346193,
+      "normalized_value": 0.0009017742592264474,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:destination_channels:rank0",
+      "normalized_upper_bound": 0.0,
+      "normalized_value": -2.4163241948043203e-05,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:destination_channels:rank1",
+      "normalized_upper_bound": 0.008869001918861745,
+      "normalized_value": -0.0009741745454307173,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:destination_channels:rank2",
+      "normalized_upper_bound": 0.01613264991858216,
+      "normalized_value": -0.00014876775656994467,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:destination_channels:rank3",
+      "normalized_upper_bound": 0.015096463211259362,
+      "normalized_value": -4.3889730431050306e-05,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:destination_channels:rank4",
+      "normalized_upper_bound": 0.02331281869541428,
+      "normalized_value": -7.610738636177445e-05,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:destination_channels:rank5",
+      "normalized_upper_bound": 0.025735217829578428,
+      "normalized_value": -2.2695700417300722e-05,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:destination_channels:rank6",
+      "normalized_upper_bound": 0.024823669765750338,
+      "normalized_value": -0.0008238027318387981,
+      "passed": true
+    },
+    {
+      "name": "train_even:rank_max:destination_channels:rank7",
+      "normalized_upper_bound": 0.031298497128260126,
+      "normalized_value": 0.002101178183295527,
+      "passed": true
+    }
+  ],
+  "status": "ADMITTED_FOR_FULL_REPLAY"
+}

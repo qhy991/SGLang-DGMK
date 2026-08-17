@@ -1,0 +1,42 @@
+--- a/run_glm52_100k_attention_backend_sm_host.sh
++++ b/run_glm52_100k_attention_backend_sm_host.sh
+@@ -29,6 +29,7 @@
+ GLOBAL_CHUNKED_PREFILL_SIZE=${GLM52_GLOBAL_CHUNKED_PREFILL_SIZE:-80384}
+ ENFORCE_SHARED_EXPERT_FUSION=${GLM52_ENFORCE_SHARED_EXPERT_FUSION:-0}
+ RECORD_EXPERT_DISTRIBUTION=${GLM52_RECORD_EXPERT_DISTRIBUTION:-0}
++EXPERT_DISTRIBUTION_RECORDER_MODE=${GLM52_EXPERT_DISTRIBUTION_RECORDER_MODE:-stat}
+ STATIC_EXPERT_MAP=${GLM52_STATIC_EXPERT_MAP:-}
+ ROUTER_STATIC_PLACEMENT_FUSION=${GLM52_ROUTER_STATIC_PLACEMENT_FUSION:-0}
+ MOK_PREFILL=${GLM52_MOK_PREFILL:-0}
+@@ -108,6 +109,13 @@
+     exit 2
+     ;;
+ esac
++case "$EXPERT_DISTRIBUTION_RECORDER_MODE" in
++  stat|stat_approx|per_pass|per_token) ;;
++  *)
++    echo "[ERR] GLM52_EXPERT_DISTRIBUTION_RECORDER_MODE must be stat, stat_approx, per_pass, or per_token" >&2
++    exit 2
++    ;;
++esac
+ if [[ -n "$STATIC_EXPERT_MAP" && ! -f "$STATIC_EXPERT_MAP" ]]; then
+   echo "[ERR] static expert map does not exist: $STATIC_EXPERT_MAP" >&2
+   exit 2
+@@ -530,6 +539,8 @@
+   grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "$ENV_FILE"
+   if [[ "$RECORD_EXPERT_DISTRIBUTION" == 1 ]]; then
+     printf 'SGLANG_EXPERT_DISTRIBUTION_RECORDER_DIR=%s\n' \
+       "$SGLANG_EXPERT_DISTRIBUTION_RECORDER_DIR"
++    printf 'GLM52_EXPERT_DISTRIBUTION_RECORDER_MODE=%s\n' \
++      "$EXPERT_DISTRIBUTION_RECORDER_MODE"
+   fi
+   printf 'MOK_SGLANG_PREFILL=%s\n' "$MOK_SGLANG_PREFILL"
+@@ -609,7 +620,7 @@
+ fi
+ if [[ "$RECORD_EXPERT_DISTRIBUTION" == 1 ]]; then
+   launch_args+=(
+-    --expert-distribution-recorder-mode stat
++    --expert-distribution-recorder-mode "$EXPERT_DISTRIBUTION_RECORDER_MODE"
+     --expert-distribution-recorder-buffer-size 256
+   )
+ fi
