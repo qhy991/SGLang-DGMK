@@ -105,7 +105,7 @@ v5 必须建立在已恢复的 N6 anchor 上，同一 affinity、同一镜像、
 2. candidate v5 map；
 3. control N6；
 4. 检查 control drift；
-5. correctness 使用 seed1 train、seed0 holdout、seed2 external exact replay 的既有合同；
+5. 先复核既有离线 placement 合同：seed1 用于选择，seed0 作独立 holdout，seed2 作解冻结后的 external exact replay；模型 correctness 另按两个 reference 比较 generated tokens 与 logprob；
 6. 五对与独立 holdout；
 7. matched Nsys 验证 notify tail 与 progress signal 是否复现。
 
