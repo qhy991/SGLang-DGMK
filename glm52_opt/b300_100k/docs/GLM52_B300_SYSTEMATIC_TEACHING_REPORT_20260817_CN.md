@@ -26,13 +26,14 @@
 | P90 TTFT | 3035.39 ms | 2891.13 ms | -4.75% |
 | 总 token 吞吐 | 452544.29 token/s | 486640.21 token/s | +7.53% |
 
-独立 holdout 再次得到：
+独立 correctness probe 相对两个 reference 的 generated tokens 完全一致。随后，独立 client seed=20260813 的 no-profiler holdout 再次得到：
 
 - P50 -5.46%；
 - P90 -6.73%；
 - 吞吐 +7.40%；
-- P50 为 5/5 paired wins；
-- 输出 token 完全一致。
+- P50 为 5/5 paired wins。
+
+correctness probe 与 holdout 是两组独立证据，不能把 holdout 的性能样本误写成逐请求 token comparison。
 
 因此 N6 同时满足正确性、重复性和历史绝对性能门槛，是这个冻结 workload cell 的当前 accepted baseline/candidate；尚不能外推为所有部署 workload 的 production replacement。
 
@@ -52,11 +53,11 @@
 
 ### 0.3 最重要的技术认识
 
-1. 本项目真正影响端到端时间的主要不是某一个 CUDA 计算 kernel，而是：
+1. 本项目观测到的关键 E2E 风险与瓶颈维度主要不是某一个 CUDA 计算 kernel，而是：
    - 不必要的 MoE 通信轮次；
    - expert placement 造成的跨 rank 到达偏斜；
    - DeepEP notify/dispatch/combine 等待长尾；
-   - CPU 进程调度与 affinity。
+   - CPU frequency-domain 与进程调度。cpuset-safe affinity 是已验证的鲁棒性 primitive，但其独立性能增量尚未建立。
 2. FlashMLA、QKV、MoE 等 leaf kernel 可以明显变快，但如果它们不在关键路径上，端到端 TTFT 可能不变甚至变差。
 3. 最早的 chunk 修复取得 3.3× 到 6.56×，本质是“删除多余通信轮次”；这比单纯让某个 kernel 快 10% 更有价值。
 4. 当前最近的正式测试是 **prefill/TTFT**，不是 decode；历史上另有一组独立 decode/MTP 测试取得约 1.32×。
@@ -476,7 +477,7 @@ N4 原子组合 screen：
 - arm-median throughput 478593.75 → 465113.32，下降 2.82%；
 - paired throughput 的中位方向曾为 +2.03%，与 arm median 相矛盾，暴露出非平稳噪声。
 
-profile 还显示每 GPU 删除了约 316 到 466 次 post-router padded-ID mask，但减少小 kernel 次数本身不是晋级依据。
+后续 **N6 三项组合** 的 matched profile 观察到每 GPU 删除约 316 到 466 次 post-router padded-ID mask；它为 physical-ID 路径提供结构性支持，但不是 N4 standalone profile，也不能用于隔离 N4 的性能贡献。减少小 kernel 次数本身也不是晋级依据。
 
 因此 **N4 被拒绝作为当时的独立候选**：吞吐回退超过允许范围。reviewed 原子实现被保留，随后只增加 DeepEP120，形成 N6 重新正式测量。N4 的 E2E 数字不能归因于 physical-ID router 单项。
 
@@ -809,7 +810,7 @@ Control A/C drift：
 - v5 缩短的是跨 rank 到达与控制等待长尾；
 - FlashMLA per-call 分布几乎不变，不支持“attention 单次 kernel 变快是主要原因”的解释；调用排布和 overlap 仍需通过 timeline 一并判断。
 
-因此没有针对 v5 进行无目标的 NCU 采集：当前假设不在单 kernel 内部。其他历史 kernel 候选仍保留了 NCU reports。
+因此没有针对 v5 进行无目标的 NCU 采集：当前假设不在单 kernel 内部。历史 raw NCU 若仍在迁移主机归档，也不属于当前 compact；本地只保留已列明的派生 CSV，不能重新打开 raw report。
 
 ---
 
@@ -839,24 +840,31 @@ Control A/C drift：
 
 并不相同，所以不能把参考 kernel 直接复制后宣称服务收益。
 
-## 6.2 KDA/clustered MQA 状态
+## 6.2 Clustered-MQA/KDA 的源码审查状态
 
-clustered MQA 的想法是让相邻 query CTA 共享同一个 KV tile，减少重复 KV 读取。迁移版本针对 GLM 的 H32/D128、page64 和 Q16/Q32 cluster 做了专用实现。
+clustered MQA 的想法是让相邻 query CTA 共享同一个 KV tile，减少重复 KV 读取。归档中保留了针对 GLM H32/D128、page64、Q16/Q32 cluster 的研究实现、原始但缺对象的 KDA 来源 bundle、11 份 patch，以及经实际 clone/fsck 验证且最终源码树等价的 recovery bundle；这证明迁移设计与最终代码状态可以恢复，但 recovery history 不保留原 base 之前的 ancestry。当前本地证据也没有一组同合同 formal E2E 数字可以把它晋级为 GLM 服务优化。
 
-在真实 M=10048、context=100K 的 direct-paged leaf 测试中：
+## 6.3 N22：direct-paged DeepGEMM MQA index-score substitution
+
+N22 与 clustered-MQA 是不同 treatment。它把现有 direct-paged DeepGEMM MQA admission 的 M 上限从 2048 扩到 10048，对比：
+
+- control：stock Triton page gather + DeepGEMM ragged logits + 同一 top-k；
+- candidate：stock DeepGEMM direct-paged logits + 同一 top-k。
+
+该实验明确以 `no clustered-MQA kernel` 为 non-goal。在真实 M=10048、context=100K 的 leaf 测试中：
 
 | 顺序 | Stock | Candidate | 结果 |
 |---|---:|---:|---:|
 | 顺序一 | 5.764 ms | 6.907 ms | candidate 慢约 19.8% |
 | 顺序二 | 5.806 ms | 6.843 ms | candidate 慢约 17.9% |
 
-selected-score multiset 正确，但 candidate 明显更慢。可能原因包括额外 shared-memory、寄存器、cluster 调度或 KV 复用不足；由于没有针对该候选运行 targeted NCU，不能把回退归因于其中任何一项。按照当时的 Amdahl 估算，它需要约 28% 的 leaf 降幅才值得进入服务，而实测方向相反。
+selected-score multiset 正确，但 candidate 明显更慢。没有针对该候选运行 targeted NCU，因此现有证据只能确认 substitution 方向回退，不能把原因归给具体 CUDA 资源或调度机制。按照当时的 Amdahl 估算，它需要约 28% 的 leaf 降幅才值得进入服务，而实测方向相反。
 
 ### 决策
 
 **REVERT, KEEP REFERENCE**
 
-教训是：可以迁移优化原理，不能照搬为另一种 head/layout/并行合同设计的物理 kernel。
+教训是：可以迁移优化原理，但必须把源码研究、数据布局 substitution 和真实 clustered kernel 分成不同候选，不能共享一组性能数字。
 
 ---
 
@@ -1105,7 +1113,8 @@ send16/20 在退化 host 上出现过相对 P50 信号，但 control anchor 漂�
 2. **后续 exact-fill equal-chunk all-gather**
    - 只处理八个 rank 行数完全相同的情况；
    - CPU admission test 通过；
-   - 在线路径实际没有 material change，表现为 no-op。
+   - model correctness 与 source contract 通过；
+   - 当前 compact 缺 equalAG 专属 path-hit marker 与 no-profiler E2E 样本。
 
 以下原理和实现主要描述第二个候选。
 
@@ -1155,11 +1164,11 @@ MoE 下游会读取整个 global buffer。如果各 rank 行数之和没有精�
 - attention TP=1，使 78 层 attention→MLP 边界的相关通信已经接近 trivial；
 - 剩余 DP gather 主要只在 1-token terminal LM-head/logits 边界。
 
-也就是说，即使 equal all-gather 本身完全正确，它在该 workload 中的调用频率和关键路径占比也接近零。实际运行没有形成 material path change，表现为 no-op/equivalence，没有可申报服务收益。
+静态审计因此认为它在该 workload 中的机会很小。不过，本地 `hit_gate.json` 只记录 FlashMLA marker，并不能证明 equalAG 是否命中；当前也没有专属 collective trace 或 no-profiler E2E 样本。因此可以确认的是“正确性/实现合同通过，但没有可申报服务收益”，不能由现有 compact 独立复核“在线 no-op”的更强归因。
 
 ### 决策
 
-**REVERT / NO E2E EFFECT**
+**NOT PROMOTED / E2E EVIDENCE MISSING**
 
 ---
 
@@ -1378,7 +1387,7 @@ chunk 128  → 约 8 倍 forward/MoE 轮次
 
 speculative decoding 使用一个 draft 路径一次预测多个 token，再由主模型验证。若接受率高，主模型每次昂贵 forward 可以提交多个 token。
 
-### 配置
+### 配置与证据边界
 
 - 64K context；
 - batch=8；
@@ -1388,17 +1397,19 @@ speculative decoding 使用一个 draft 路径一次预测多个 token，再由�
 - Top-K=1；
 - 2 draft tokens。
 
+本地 JSONL 直接记录了 batch=8、input=65536、output=512、throughput 与 candidate `acc_length=1.87`；EAGLE、1 speculative step、Top-K=1 和 draft=2 来自历史 handoff metadata，当前 compact 没有完整 launch command，因此这些参数应视为待恢复的运行合同，而不是由 JSONL 单独证明。
+
 ### 结果
 
 | 指标 | Baseline | MTP | 变化 |
 |---|---:|---:|---:|
 | TPOT | 32.15 ms | 24.33 ms | 改善 |
 | throughput | 248 token/s | 329 token/s | +约 32% |
-| acceptance length | 1 | 1.87 | 相对单 token 提交 +87% |
+| acceptance length | 1（普通 decode 的语义基准） | 1.87 | 相对单 token 提交 +87% |
 
 E2E 约 1.32×。
 
-最大 draft token 数为 2，因此 acceptance ratio 约为 1.87/2=93.5%；这里的 93.5% 是两枚 draft 的接受比例，不是相对 baseline 的“额外 token 百分比”。
+baseline JSONL 的原始 `acc_length=-1`（未记录/不适用）；表中的 1 是普通 decode 每次 forward 提交 1 token 的概念基准。若 handoff 中“最大 draft token 数为2”的合同得到恢复，则 acceptance ratio 约为 1.87/2=93.5%；这里的93.5%是两枚 draft 的接受比例，不是相对 baseline 的“额外 token 百分比”。
 
 ### 决策
 
@@ -1419,17 +1430,20 @@ E2E 约 1.32×。
 
 ### 结果
 
-- leaf 约 2.4×；
-- bit-exact；
-- decode E2E TPOT 33.26 → 34.44 ms，基本无收益且略退化。
+本地可审计的两组 decode development 小样本方向冲突：
 
-历史 trace 呈现明显的通信主导现象，但跨 GPU/stream 的累计 kernel duration 不能当作 critical-path 占比，也不能据此计算可靠的 Amdahl 比例。leaf 约 2.4×、E2E TPOT 却从 33.26 ms 变为 34.44 ms，已经足以证明局部收益没有转化。
+- `nsys_fqa_ablation`：opt0 33.259 ms，candidate 34.438 ms，candidate 更慢；
+- `e2e_serving_safe_single`：opt0 23.814 ms，candidate 20.512 ms，candidate 更快且 HIT=234。
+
+两组都只有2 waves、没有 warmup，第一组还位于 Nsys capture 流程中；revision/runtime 合同不足以把它们合并成一个稳定结论。历史材料曾记录“leaf 约2.4×、bit-exact”的正信号，但当前本地 compact 没有定位到其 operator contract、raw summary 与 correctness 权威载体，因此不能把它写成已复核事实。
+
+另一个独立的 Infini prefill fused-QKV 实验目标为 M4096，但 serving 实际多为 M1024、未 HIT，TTFT 1.276→1.313 s（约慢2.9%）；它不是上述 decode M16 treatment。
 
 ### 决策
 
-**LEAF WIN, E2E REVERT**
+**NO FORMAL DECISION / NOT PROMOTED**
 
-这是 Amdahl 定律最典型的例子。
+它仍是“leaf 方向信号不能替代冻结 E2E”的教学案例，但不能从冲突小样本中选择一个方向作为最终裁决。
 
 ## 12.4 MoE masked alignment 128 → 16
 
@@ -1507,6 +1521,8 @@ PTX 是更低层的 NVIDIA GPU 中间指令。手写 PTX 可以精细控制 load
 - x12：120/120 稳定；
 - x16：160/160 稳定。
 
+这是 screening-level progress/stability 证据：相邻 arm 的 framework random seed 未完全冻结，多数性能点只有一个样本；11/11 token exact 的 correctness screen 通过，但 logprob 阈值没有预先声明，因此不是 formal numerical correctness 或 performance promotion。
+
 ### 性能和资源
 
 - x10 P50 恶化约 8.40%，throughput -14.42%；
@@ -1519,7 +1535,7 @@ PTX 是更低层的 NVIDIA GPU 中间指令。手写 PTX 可以精细控制 load
 
 ### 决策
 
-**STABILITY/DEBUG SUCCESS, PERFORMANCE REVERT**
+**SCREENING-LEVEL STABILITY/DEBUG SUCCESS, PERFORMANCE REVERT**
 
 ## 12.8 其他 reviewed N-series 候选
 
@@ -1624,7 +1640,7 @@ candidate 明显更慢，未进入 server。通用库不一定适合 GLM 当前 
 | SGLang-DGMK-router-fusion-reviewed | static placement + physical router path | 进入 N6 组合，accepted |
 | router-fusion-cpuset-reviewed | N6 + cpuset-safe affinity | source contract/test 通过，research |
 | flashmla-prefill-band-reviewed | 八个生产 M 的 B3+B5 FlashMLA | leaf admitted，未 E2E 晋级 |
-| flashmla-equal-allgather-reviewed | equal-chunk gather | no-op/equivalence，拒绝 |
+| flashmla-equal-allgather-reviewed | equal-chunk gather | correctness/source contract通过；缺专属HIT与E2E，未晋级 |
 | dp-gatherv | variable-length DP gather | 有实现探索，无正式晋级 |
 | dp-sync-single-d2h | N2 single-D2H 控制读取 | throughput -5.94%、1/5，拒绝 |
 | m10048-base/q256/b2/indexbuf3/contig-swiglu | M≈10048 attention/index/融合变体 | 叶子/实现探索，无 formal promotion |
@@ -1646,7 +1662,7 @@ candidate 明显更慢，未进入 server。通用库不一定适合 GLM 当前 
 | 候选 | 正确性 | 局部性能 | E2E | 决策 |
 |---|---|---|---|---|
 | N1 balanced placement | permutation/组合正确性通过 | 负载比显著均衡 | P50赢但P90+9.20% | REVERT AS SINGLE |
-| N4 balanced+physical-ID原子组合 | 通过 | 删除padded-ID mask | P50赢但吞吐arm median回退 | REVERT AS CANDIDATE |
+| N4 balanced+physical-ID原子组合 | 通过 | 后续N6组合profile支持mask删除，非N4独立归因 | P50赢但吞吐arm median回退 | REVERT AS CANDIDATE |
 | N6 三项组合 | 通过 | 有方向证据 | 正式+holdout通过 | **PROMOTE IN CELL** |
 | N2 single-D2H | 可运行 | 减少control read假设 | throughput -5.94%，1/5 | REVERT |
 | N3 local control broadcast | exact | 删除重复control假设 | P50/P90/throughput均退化 | REVERT |
@@ -1654,12 +1670,12 @@ candidate 明显更慢，未进入 server。通用库不一定适合 GLM 当前 
 | N11 explicit flashmla_sparse | 可运行 | backend显式路径 | P50 +10.55%、thr -10.74% | REVERT |
 | N12 ninth-route shared expert | 路径可运行 | 扩大route边界 | 明显慢于balanced nonfused | REVERT |
 | N15 Top-K workspace reuse | 静态可行 | 机会仅0.002462ms/75层 | Amdahl前置拒绝 | REVERT |
-| v1 temporal | 通过开发门槛 | proxy改善 | P50/P90/吞吐均退化 | REVERT |
-| v2 communication-safe | 通过开发门槛 | proxy改善 | P50退化、绝对失败 | REVERT |
+| v1 temporal | 离线候选生成完成 | proxy改善 | development P50/P90/吞吐均退化 | REVERT |
+| v2 communication-safe | 离线候选生成完成 | proxy改善 | development P50退化、绝对失败 | REVERT |
 | v5 P50/rank constrained | 11/11 exact，logprob通过 | replay proxy改善 | 退化host相对大胜，绝对失败 | CONTINUE |
-| KDA clustered MQA | selected score正确 | leaf慢17.9%–19.8% | 未进入服务 | REVERT |
+| N22 direct-paged MQA substitution | selected score正确 | leaf慢17.9%–19.8% | 未进入服务 | REVERT |
 | N23 exact-M10048 | output/LSE bit-exact | leaf -8.85% | P50仅-0.949%，差门槛0.051pp | REVERT/ITERATE |
-| N24 indexer-Q256 | operator/model通过 | indexer -26.5%到-29.1% | formal 1/3，early-stop | REVERT |
+| N24=N23 exact-M10048+N7 indexer-Q256 | operator/model通过 | isolated indexer -26.5%到-29.1% | 组合 formal 1/3，early-stop | REVERT |
 | N35 NoPE stagger | bit-exact | leaf再改善 | bracket drift 3.060% | NO DECISION |
 | N36 3-stage未对齐 | 失败 | 无合法性能值 | 未进入E2E | REVERT |
 | N38 3-stage对齐 | bit-exact | leaf改善 | P50 +0.068%更慢 | REVERT |
@@ -1667,18 +1683,18 @@ candidate 明显更慢，未进入 server。通用库不一定适合 GLM 当前 
 | N40 contig SwiGLU+FP8 | zero-M guard后通过 | leaf +59.1% | P50/P90/thr均退化 | REVERT |
 | FlashMLA B3+B5 band | output/LSE bit-exact | 8.82%–12.49% | 无健康formal win | CONTINUE |
 | DeepEP send16 | leaf正确 | dispatch有小幅收益 | anchor漂移/绝对失败 | REVERT |
-| Equal all-gather | 单测通过 | 理论减少无用reduce | 实际no-op | REVERT |
+| Equal all-gather | model/unit/source contract通过 | 理论减少无用reduce | 专属HIT与no-profiler E2E缺失 | NOT PROMOTED |
 | Native SBO | 11/11 exact | overlap假设 | P50/P90均退化 | REVERT |
 | Overlap scheduler | 可运行 | 未证明有效重叠 | P50/吞吐大幅退化 | REVERT |
 | Prefill delayer | 可运行 | 尾部有信号 | P50退化 | REVERT |
 | cpuset-safe affinity | 单测/审计通过 | 调度更安全 | 绝对门槛失败 | CONTINUE |
 | Chunk division fix | 通过 | 删除重复轮次 | 历史cell 3.3×–6.56× | POSITIVE HISTORICAL CELL |
 | Decode MTP | token路径有效 | acceptance≈1.87 | decode约1.32× | POSITIVE HISTORICAL CELL |
-| Fused QKV-A | bit-exact | leaf≈2.4× | TPOT不升反降 | REVERT |
+| Fused QKV-A | 历史leaf正信号缺本地权威载体 | 两组decode development方向冲突 | 无formal | NO FORMAL DECISION |
 | MoE align16 global | 局部正确 | decode leaf 1.13× | prefill严重退化 | REVERT/GUARD |
 | 手写 PTX | 存在错误 | 慢于参考 | 未进入E2E | ABANDON |
 | MoE PSUM | 可运行 | 未形成可靠win | 慢1.7%–2.3% | REVERT |
-| MoK megakernel | 稳定性修复后可长跑 | 大边界/大workspace | P50、吞吐、KV容量均退化 | REVERT |
+| MoK megakernel | screening token-exact/progress修复 | 大边界/大workspace | P50、吞吐、KV容量均退化 | STABILITY ONLY |
 
 ---
 
