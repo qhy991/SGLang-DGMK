@@ -199,8 +199,27 @@ def pad_dsa_cache_seqlens(forward_batch: "ForwardBatch", dsa_cache_seqlens):
     return dsa_cache_seqlens
 
 
+def dsa_in_seq_cp_extend_lens_are_segment_aligned(
+    extend_seq_lens_cpu: List[int], cp_size: int
+) -> bool:
+    """Return whether every real extend length fills whole zigzag segments.
+
+    In-sequence DSA CP partitions every sequence into ``2 * cp_size`` pieces.
+    Padding the global batch makes collective tensor sizes legal, but it does
+    not turn padding rows into valid DSA query/KV rows. A non-divisible real
+    extend length therefore takes the ordinary non-CP path for that batch.
+    """
+
+    segment_count = cp_size * 2
+    return segment_count > 0 and all(
+        int(length) > 0 and int(length) % segment_count == 0
+        for length in extend_seq_lens_cpu
+    )
+
+
 def can_dsa_cp_split(seq_len: int, cp_size: int, use_dsa: bool, forward_batch):
-    if is_dsa_prefill_cp_round_robin_split():
+    round_robin = is_dsa_prefill_cp_round_robin_split()
+    if round_robin:
         cur_cp_seq_len = seq_len // cp_size
         assert (
             seq_len % cp_size == 0
@@ -210,6 +229,10 @@ def can_dsa_cp_split(seq_len: int, cp_size: int, use_dsa: bool, forward_batch):
         # Note: (self.cp_size * 2) To achieve load balancing for seq computation,
         # the seq data needs to be divided and recombined at twice the size of cp_size.
         cur_cp_seq_len = seq_len // (cp_size * 2)
+        if not dsa_in_seq_cp_extend_lens_are_segment_aligned(
+            forward_batch.extend_seq_lens_cpu, cp_size
+        ):
+            return False
     if (
         cur_cp_seq_len != 0
         and cp_size > 1

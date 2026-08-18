@@ -18,6 +18,7 @@ from sglang.srt.configs.model_config import get_dsa_index_topk, is_deepseek_dsa
 from sglang.srt.runtime_context import get_parallel
 
 logger = logging.getLogger(__name__)
+_dsa_cp_local_flashmla_metadata_logged = False
 from sglang.srt.environ import envs
 from sglang.srt.layers.attention.base_attn_backend import AttentionBackend
 from sglang.srt.layers.attention.dsa.dequant_k_cache import dequantize_k_cache_paged
@@ -2376,13 +2377,45 @@ class DeepseekSparseAttnBackend(
             indices.shape[-1] == self.dsa_index_topk
         )  # requirement of FlashMLA decode kernel
 
+        # Zigzag DSA CP shards query rows after eager metadata is built. The
+        # top-k page table already follows local rows, while FlashMLA metadata
+        # can still describe the global rows. Rebuild only on this explicit CP
+        # mismatch; ordinary non-CP mismatches remain fail-closed in FlashMLA.
+        flashmla_metadata = metadata.flashmla_metadata
+        local_q_rows = q_input.shape[0]
+        if is_dsa_enable_prefill_cp() and (
+            cache_seqlens.numel() != local_q_rows
+            or flashmla_metadata.num_splits.numel() != local_q_rows + 1
+        ):
+            local_cache_seqlens = (indices[:, 0, :] >= 0).sum(
+                dim=-1, dtype=torch.int32
+            )
+            if local_cache_seqlens.numel() != local_q_rows:
+                raise RuntimeError(
+                    "DSA CP local FlashMLA cache lengths do not match local q rows: "
+                    f"cache_rows={local_cache_seqlens.numel()} q_rows={local_q_rows}"
+                )
+            flashmla_metadata = self._compute_flashmla_metadata(
+                cache_seqlens=local_cache_seqlens,
+                seq_len_q=1,
+            )
+            cache_seqlens = local_cache_seqlens
+            global _dsa_cp_local_flashmla_metadata_logged
+            if not _dsa_cp_local_flashmla_metadata_logged:
+                logger.info(
+                    "DSA CP rebuilt FlashMLA metadata for local query rows: "
+                    f"q_rows={local_q_rows} "
+                    f"num_splits={flashmla_metadata.num_splits.numel()}"
+                )
+                _dsa_cp_local_flashmla_metadata_logged = True
+
         o, _ = flash_mla_with_kvcache(
             q=q_input,
             k_cache=kv_cache,
             cache_seqlens=cache_seqlens,
             head_dim_v=v_head_dim,
-            tile_scheduler_metadata=metadata.flashmla_metadata.flashmla_metadata,
-            num_splits=metadata.flashmla_metadata.num_splits,
+            tile_scheduler_metadata=flashmla_metadata.flashmla_metadata,
+            num_splits=flashmla_metadata.num_splits,
             softmax_scale=sm_scale,
             indices=indices,
             # doc says it is not used, but if pass in None then error
