@@ -1,5 +1,7 @@
 # 全实验证据覆盖、排除与缺口说明
 
+> 口径说明（2026-08-18）：本页的 350 目录、20,752 文件和 7,056 compact 文件只描述 2026-08-16 冻结的退役快照。之后新增的 true attention-CP8 / EP8 实验已另存为 `private-archive:true_cp8_20260818`，并在 GitHub 的 [`../true_cp8/`](../true_cp8/) 发布脱敏证据；它不应被加进下面已经闭合的历史清单数字。
+
 ## 1. 覆盖结论
 
 私有 `all_experiments/evidence/by_experiment` 与源端 inventory 生成的 allowlist 精确一致：

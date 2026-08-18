@@ -1,0 +1,214 @@
+{
+  "schema_version": 1,
+  "title": "GLM-5.2 true attention-CP8 plus EP8 combined-indexer evidence",
+  "measured_on": "2026-08-18",
+  "status": "RESEARCH_WINNER_INSIDE_TRUE_CP8_NOT_ARCHITECTURE_PROMOTED",
+  "claim": "The combined-indexer treatment improves the frozen true-CP8 cell, but true CP8 does not replace the previously accepted CP1/DP-attention N6 cell.",
+  "workload": {
+    "model": "GLM-5.2-FP8",
+    "accelerators": "8 x NVIDIA B300",
+    "tensor_parallel_size": 8,
+    "data_parallel_size": 1,
+    "attention_context_parallel_size": 8,
+    "attention_tensor_parallel_size": 1,
+    "expert_parallel_size": 8,
+    "prefill_cp_mode": "zigzag/in-sequence",
+    "logical_shared_prefix_tokens": 90000,
+    "radix_cache_hit_tokens": 89984,
+    "suffix_tokens": 10000,
+    "real_extend_tokens": 10016,
+    "output_tokens": 1,
+    "page_size_tokens": 64,
+    "deep_ep_normal_sms": 120,
+    "overlap_schedule": false,
+    "cuda_graph": false,
+    "input_contract": "exact input_ids; no decode-to-text-to-retokenize round trip"
+  },
+  "treatment": {
+    "name": "combine two zigzag CP indexer halves",
+    "stock_per_layer": "two 626-row DeepGEMM MQA calls plus two fused top-k calls",
+    "candidate_per_layer": "one 1252-row DeepGEMM MQA call plus one fused top-k call",
+    "admission": [
+      "explicitly enabled",
+      "NVIDIA CUDA e4m3fn",
+      "DSA attention CP size 8",
+      "zigzag/in-sequence split",
+      "32 query heads and head dimension 128",
+      "overlap schedule disabled",
+      "exactly 1252 local query rows"
+    ],
+    "fallback": "Every shape outside the reviewed M1252 cell retains the stock two-call path.",
+    "frozen_runtime_commit": "1571b72db014603ebfaad6d59cbbde1740b23b3e",
+    "frozen_dsa_indexer_sha256": "9eddd376384b05ae97f64dd3f4cba1ebce85fa30c5b134a9c5c6fcccc8b43021",
+    "frozen_runtime_contract_sha256": "9a017e29dfc8b3036def9802486a5ddc7c55ca537e9622e28229b1fb51e50e18"
+  },
+  "leaf": {
+    "deepgemm_mqa_median_reduction_pct": 23.523932954718646,
+    "valid_logits_exact_all_ranks": true,
+    "selected_score_mismatch_rows": 57,
+    "selected_score_rows_total": 10016,
+    "selected_score_max_abs_error": 0.00003113597631454468,
+    "selected_score_mean_abs_error_max": 4.029517002638427e-09,
+    "minimum_per_row_topk_id_overlap": 0.9931640625,
+    "decision": "ADMIT_FOR_INDEPENDENT_MODEL_CORRECTNESS_ONLY"
+  },
+  "no_profiler_x1_five_pairs": {
+    "pair_order": ["AB", "BA", "AB", "BA", "AB"],
+    "requests_per_arm": 10,
+    "concurrency": 1,
+    "excluded_stabilization_requests": 40,
+    "paired_wins": {
+      "p50_ttft": 5,
+      "p90_ttft": 4,
+      "total_token_throughput": 4
+    },
+    "median_paired_improvement_pct": {
+      "p50_ttft": 2.498216792587104,
+      "p90_ttft": 2.4347793082913096,
+      "total_token_throughput": 2.7016017352235626
+    },
+    "control_range_pct": {
+      "p50_ttft": 0.9029799003267163,
+      "p90_ttft": 1.5699090085346732,
+      "total_token_throughput": 1.2632472079779742
+    },
+    "arm_medians": {
+      "control": {
+        "p50_ttft_ms": 351.9933894276619,
+        "p90_ttft_ms": 357.2111759567633,
+        "total_token_throughput": 283298.30943308974
+      },
+      "candidate": {
+        "p50_ttft_ms": 343.01198506727815,
+        "p90_ttft_ms": 349.2252771742642,
+        "total_token_throughput": 289013.7910537662
+      }
+    },
+    "correctness": {
+      "requests": 11,
+      "tokens_exact": true,
+      "max_logprob_abs_error": 0.00011275617725914344,
+      "mean_logprob_abs_error": 0.00002457489273927587
+    }
+  },
+  "no_profiler_x11_five_pairs": {
+    "pair_order": ["AB", "BA", "AB", "BA", "AB"],
+    "requests_per_arm": 110,
+    "concurrency": 11,
+    "excluded_stabilization_requests": 44,
+    "successful_requests_every_arm": 110,
+    "paired_wins": {
+      "p50_ttft": 5,
+      "p90_ttft": 5,
+      "total_token_throughput": 5
+    },
+    "median_paired_improvement_pct": {
+      "p50_ttft": 3.301678871199851,
+      "p90_ttft": 3.3161637961944295,
+      "total_token_throughput": 3.194217446291856
+    },
+    "control_range_pct": {
+      "p50_ttft": 1.3969624432969185,
+      "p90_ttft": 2.995354621573828,
+      "total_token_throughput": 1.6508990964548724
+    },
+    "arm_medians": {
+      "control": {
+        "p50_ttft_ms": 3755.5737639777362,
+        "p90_ttft_ms": 3797.8532664245,
+        "total_token_throughput": 291299.62980742776
+      },
+      "candidate": {
+        "p50_ttft_ms": 3634.0592125197873,
+        "p90_ttft_ms": 3664.882682543248,
+        "total_token_throughput": 302172.48057909874
+      }
+    },
+    "correctness": {
+      "requests": 11,
+      "tokens_exact": true,
+      "max_logprob_abs_error": 0.00015754095511510968,
+      "mean_logprob_abs_error": 0.00003452044275449721
+    },
+    "path_audit": {
+      "candidate_hit_all_eight_ranks": true,
+      "candidate_shape": 1252,
+      "attention_cp_size": 8,
+      "data_parallel_size": 1,
+      "expert_parallel_size": 8,
+      "affinity_audit": "PASS"
+    }
+  },
+  "causal_nsys": {
+    "scope": "causal kernel composition only; profiled latency is not promotion evidence",
+    "control_and_candidate_coverage_anchors": {
+      "sparse_attention_calls_each": 6240,
+      "dense_fp8_gemm_calls_each": 44880,
+      "deep_ep_combine_calls_each": 6000
+    },
+    "indexer_deepgemm_mqa": {
+      "control_calls": 3360,
+      "candidate_calls": 1680,
+      "call_reduction_pct": 50.0,
+      "aggregate_kernel_duration_reduction_pct": 24.395306247945364
+    },
+    "indexer_fused_topk": {
+      "control_calls": 3360,
+      "candidate_calls": 1680,
+      "call_reduction_pct": 50.0,
+      "aggregate_kernel_duration_reduction_pct": 14.603035297725132
+    },
+    "sparse_attention_aggregate_duration_change_pct": -0.01005766742528123,
+    "ncu_run": false,
+    "ncu_reason": "The mechanism is cross-call launch elimination, not an unexplained single-kernel efficiency change."
+  },
+  "architecture_comparison_x11": {
+    "warning": "The treatment wins inside CP8, but the CP8 architecture is slower than the accepted CP1/DP-attention N6 in this cell.",
+    "accepted_n6_cp1_dp_attention": {
+      "p50_ttft_ms": 1933.67,
+      "p90_ttft_ms": 2891.13,
+      "total_token_throughput": 486640.21
+    },
+    "true_cp8_candidate": {
+      "p50_ttft_ms": 3634.0592125197873,
+      "p90_ttft_ms": 3664.882682543248,
+      "total_token_throughput": 302172.48057909874
+    },
+    "decision": "DO_NOT_REPLACE_ACCEPTED_N6_WITH_TRUE_CP8_FOR_THIS_WORKLOAD"
+  },
+  "rejected_or_unpromoted": {
+    "combined_mqa_sm_sweep": {
+      "best_sms": 112,
+      "leaf_reduction_pct_vs_148_sms": 2.420648319873103,
+      "estimated_ttft_upper_bound_pct": 0.2777133669172028,
+      "decision": "REJECT_AT_LEAF_AMDAHL_GATE"
+    },
+    "packed_kv_all_gather": {
+      "mla_kv_leaf_direction": "about 1.96x faster",
+      "indexer_k_leaf_direction": "about 0.85x, slower",
+      "service_result": "no stable end-to-end win",
+      "decision": "REJECT_OR_NEUTRAL"
+    }
+  },
+  "source_artifact_sha256": {
+    "x1_paired_summary": "31b715d37d79e8352ae0b8d95635ad4c55eb6f2fc7f150834d78dd870b88be10",
+    "x1_correctness": "2d6c73faa0a6f6b123741ae5c6bcbbfdc6950b0a267f08093f74b966b36447ac",
+    "x11_paired_summary": "4730526e6294d7d5fc4d8cd90f1aab13c1a8d1afc06b694c1ef3aa56da17ea97",
+    "x11_correctness": "4a270912e5fea0fe0509eaf437a2a29b259d6b36f47e48079516d40737a3e65f",
+    "leaf_result": "94f5596e7c267b661f192f809b800ba6d291c357fa225d0a01ab85eb79638c64",
+    "sm_sweep_result": "80f856eceac0c6b984d14f8466341d8993d800fec53cc7a3880750b890abf125",
+    "causal_comparison": "e388dbb7a38d2359b7b738d8ca4da3a8ed53f4919d428a79c7e8d4ff5064b746"
+  },
+  "release_boundary": {
+    "frozen_runtime_e2e_revalidated": true,
+    "current_main_surgical_port_default_off": true,
+    "current_main_port_base_commit": "9e439b4a9bdb6339a9ede363b19d18d4f3192b8f",
+    "current_main_port_patch_sha256": "1f4f6e3e748886cf1754d4f73b52c9f919de01466b2d67290fc73f273e37eeca",
+    "current_main_b300_container_import_smoke": true,
+    "current_main_cpu_segment_alignment_tests": "2 of 2 passed",
+    "current_main_default_off_check": true,
+    "current_main_revalidated_on_b300": false,
+    "deployment_wide_promotion": false,
+    "raw_profiler_and_server_logs_in_public_repository": false
+  }
+}

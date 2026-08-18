@@ -2,6 +2,8 @@
 
 本页列出 private compact archive 中全部 188 份 Markdown 报告、README、EXPERIMENT、runbook 与决策文档。它们保留历史原文，因此可能含过时结论、不同 workload 或内部路径；本页只负责导航，不是性能事实源。冻结合同看 `../workload_contract.json`，N 编号/阶段/裁决看原始 NATIVE 决策表，性能与正确性看对应 samples/summary/correctness 文件。`private-archive:` 标识不是仓库内链接。
 
+> 188 份是 2026-08-16 冻结 compact archive 的闭合计数。后续 true attention-CP8 / EP8 文档单独发布在 [GLM52_TRUE_CP8_OPTIMIZATION_20260818_CN.md](GLM52_TRUE_CP8_OPTIMIZATION_20260818_CN.md) 与 [`../true_cp8/`](../true_cp8/)，不回填并破坏历史索引计数。
+
 ## 阶段一：早期 prefill、通信基线与复现（2026-07-24 至 07-26）
 
 - `HANDOFF_PACK_20260725/GLM52_COMM_TEST_HANDOFF.md` (`private-archive:evidence/by_experiment/HANDOFF_PACK_20260725/GLM52_COMM_TEST_HANDOFF.md`) — 14.90 KiB; `other_or_unclassified`

@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "status": "REJECT_AT_LEAF_AMDAHL_GATE",
+  "source_result": "private-archive:glm52_cp8_combined_indexer_sms/20260818T_sweep/result.json",
+  "source_result_sha256": "80f856eceac0c6b984d14f8466341d8993d800fec53cc7a3880750b890abf125",
+  "correctness": "all valid logits exact for every CP rank and every tested SM count",
+  "baseline_sms": 148,
+  "best_sms": 112,
+  "slowest_rank_leaf_ms": {
+    "sm148": 0.5353919863700867,
+    "sm112": 0.5224320292472839,
+    "reduction_pct": 2.420648319873103
+  },
+  "amdahl_upper_bound": {
+    "saved_ms_per_layer": 0.0129599571228028,
+    "active_indexer_layers": 75,
+    "saved_ms_per_request": 0.97199678421021,
+    "representative_ttft_ms": 350.0,
+    "ttft_reduction_upper_bound_pct": 0.2777133669172028
+  },
+  "reason": "The predicted end-to-end effect is far below the predeclared 1% TTFT gate. Overlap scheduling is disabled, so freeing SMs does not supply a demonstrated concurrent-resource benefit.",
+  "service_test_run": false,
+  "promotion_claim": false
+}

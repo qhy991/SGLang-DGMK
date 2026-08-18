@@ -26,6 +26,21 @@ This is an accepted result only for the frozen cell described in
 [`workload_contract.json`](workload_contract.json). It is not evidence for
 decode, arbitrary context lengths, or deployment-wide replacement.
 
+## True attention-CP8 follow-up
+
+The follow-up experiment changed the architecture to TP8 / DP1 / true
+attention-CP8 / EP8. Inside that frozen cell, combining two 626-row zigzag
+indexer calls into one 1252-row call produced five out of five P50, P90, and
+throughput pair wins at concurrency 11: median paired improvements were
+3.30%, 3.32%, and 3.19%, respectively. Model tokens were exact and Nsys
+confirmed that DeepGEMM MQA and fused top-k call counts were halved.
+
+This is a research win inside CP8, not an architecture promotion. The true-CP8
+candidate had arm-median P50 3634.06 ms and throughput 302172 token/s, versus
+the accepted CP1/DP-attention N6 cell at 1933.67 ms and 486640 token/s. N6
+therefore remains the accepted result for this workload. Start with the
+Chinese beginner entry at [`true_cp8/README_CN.md`](true_cp8/README_CN.md).
+
 The router implementation in this publication is a source-reviewed port from
 the frozen accepted runtime and remains default-off. The formal numbers are
 pinned to that frozen runtime revision; this newer `main` integration has not
@@ -45,6 +60,9 @@ If you are new to CUDA or distributed inference, read in this order:
 4. [`docs/MAIN_CODE_CHANGE_WALKTHROUGH_CN.md`](docs/MAIN_CODE_CHANGE_WALKTHROUGH_CN.md):
    accepted code path, invariants, tests, and default-off admission.
 5. [`REPRODUCTION.md`](REPRODUCTION.md): the normative N6 rerun contract.
+6. [`docs/GLM52_TRUE_CP8_OPTIMIZATION_20260818_CN.md`](docs/GLM52_TRUE_CP8_OPTIMIZATION_20260818_CN.md):
+   the true attention-CP8 follow-up, combined-indexer change, failures, paired
+   evidence, causal Nsys result, and architecture-level decision.
 
 ## Layout
 
@@ -60,6 +78,8 @@ If you are new to CUDA or distributed inference, read in this order:
 - [`REPRODUCTION.md`](REPRODUCTION.md): exact N6 treatment, host-health gate, safe rerun order, and stop rules.
 - [`evidence/n6/`](evidence/n6/): formal, holdout, correctness, and causal summaries.
 - [`evidence/v5/`](evidence/v5/): research-only correctness, A-B-A, and Nsys-derived evidence.
+- [`true_cp8/`](true_cp8/): true attention-CP8 beginner guide, machine-readable
+  evidence, rerun order, frozen runtime contract, and port status.
 - [`../glm52_100k_x11_static_expert_map.json`](../glm52_100k_x11_static_expert_map.json): accepted N6 map.
 - [`../research/temporal_placement/`](../research/temporal_placement/): frozen v5 map and offline analysis tools; not promoted.
 
@@ -81,3 +101,9 @@ entries prefixed with `private-archive:` identify that recovery source; they are
 not broken GitHub links. This boundary preserves all experiment history without
 publishing internal paths or treating profiler artifacts as official E2E
 measurements.
+
+Those 350/7,056 counts are the closed 2026-08-16 snapshot. The later true-CP8
+campaign is stored separately as `private-archive:true_cp8_20260818`; it keeps
+the source worktree and compact result evidence while intentionally excluding
+raw Nsys/SQLite and logs. Its public, sanitized SSOT is this repository's
+[`true_cp8/`](true_cp8/) tree.

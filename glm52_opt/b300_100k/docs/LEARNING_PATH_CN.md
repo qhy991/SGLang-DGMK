@@ -14,6 +14,8 @@ N6 是三个相互作用的修改：
 
 正式数字只证明三项组合，不能把三项的局部百分比相加，也不能声称每一项分别贡献了多少。
 
+2026-08-18 的后续实验又真正建立了 TP8/DP1/attention-CP8/EP8 单元，并把每层两个 626 行 indexer 调用合成一个 1252 行调用。这个 treatment 在 CP8 内部的 concurrency=11 五对实验中，P50/P90/吞吐分别 5/5 胜，中位改善 3.30%/3.32%/3.19%；但 CP8 candidate 的 P50 仍约 3.63 秒、吞吐约 302k token/s，未超过上面的 CP1/DP-attention N6。先学会区分“优化了某个架构”和“这个架构战胜当前最佳方案”，是这轮最重要的新课程。
+
 ## 2. 三种阅读路线
 
 ### 2.1 只用 30 分钟
@@ -41,6 +43,7 @@ N6 是三个相互作用的修改：
 4. [结果文档索引](ALL_RESULT_DOCUMENTS_INDEX.md)：定位私有 compact archive 中的历史结果文件。
 5. [归档覆盖与缺口](ARCHIVE_COVERAGE_AND_GAPS_CN.md)：理解哪些证据进入 GitHub、哪些只保留在私有归档，以及为什么。
 6. [下一台 B300 的复验计划](NEXT_B300_VALIDATION_PLAN_CN.md)：学习如何把旧结论安全迁移到新硬件和当前 `main`。
+7. [真 CP8 / EP8 教学报告](GLM52_TRUE_CP8_OPTIMIZATION_20260818_CN.md)：从 token 分段、indexer、kernel launch、局部回退、配对测试和 Nsys 因果证据，理解为什么 CP8 内部优化成功却没有替换 N6。
 
 ## 3. 先建立正确的 GPU 心智模型
 
@@ -179,4 +182,5 @@ GitHub 保存：
 - accepted 只适用于冻结 100K cached-prefill cell；不能外推到 decode、continuous batching、其他 context、其他 EP size 或真实 attention CP8。
 - 当前 `main` 是从冻结 runtime 做的 source-reviewed port，尚未在新的健康 B300 上重新跑正式 A/B。
 - v5、cpuset-safe affinity 和 FlashMLA band 都是 research candidates，不替代 N6。
-- 若下一轮目标仍是 CP8/EP8，应新建真实 `attn_cp_size=8` 合同，重新建立 baseline、正确性与性能门。
+- true attention CP8 / EP8 已建立独立合同并完成内部优化，但当前服务结果仍慢于 accepted N6；它是 research cell，不替代 N6。
+- true-CP8 最小代码已 default-off 移植到当前 `main`，但这个新 `main` 端口尚未在 B300 上重跑；不能把冻结 runtime 的通过状态自动转移到新 revision。

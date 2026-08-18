@@ -98,9 +98,20 @@ v5 matched Nsys：dispatch progress +15.87%，dispatch notify P90/P99 -27.81%/-6
 | MoE align16/32 | 大 M prefill 明显增加无效计算 | REVERT；decode 小 M 假设不适用 |
 | MoK megakernel | screening-level progress修复后 x10/x12/x16 均可完成；x10 P50 +8.40%/吞吐 -14.42%，x12 +7.55%/-8.36%；内存约109.45→207 GiB/rank | token-exact screen通过但seed/阈值未formal冻结；稳定性成功、性能REVERT；MoK不是MTP |
 
-## 9. 总决策
+## 9. true attention CP8 / EP8 后续实验
+
+| 候选 | 修改 | 结果 | 决策 |
+|---|---|---|---|
+| true CP8 baseline | TP8/DP1/attention CP8/attention TP1/EP8；zigzag切10,016真实extend token | x11 arm-median P50/P90/吞吐为3755.57/3797.85 ms/291300 token/s | 新研究cell；未超过N6 |
+| combined-indexer | 每层两次626-row MQA/top-k合成一次1252-row；范围外fallback | x1 P50 5/5，paired median -2.50%；x11三指标全5/5，-3.30%/-3.32%/+3.19%；11/11 token exact；Nsys调用数减半 | **CP8内部 research winner；不替换N6** |
+| combined MQA SM112 | 在合并后把 MQA SM 148→112 | 最慢rank leaf -2.42%，Amdahl E2E上限约0.28% | leaf门拒绝，不跑server |
+| packed KV all-gather | 先pack再传输 | MLA KV leaf约1.96×，indexer-K约0.85×更慢；x11无稳定E2E收益 | REJECT/NEUTRAL |
+
+完整解释见 [true CP8教学报告](GLM52_TRUE_CP8_OPTIMIZATION_20260818_CN.md)。这里的3.30%只比较CP8 candidate与CP8 control；CP8 candidate绝对P50约3634.06 ms、吞吐约302172 token/s，仍慢于accepted N6的1933.67 ms与486640 token/s。
+
+## 10. 总决策
 
 - Accepted：只有 N6，且只针对冻结 100K cached-prefill cell。
-- 下一优先级：健康 host 上复验 v5。
-- 可作为局部 primitive 继续研究：FlashMLA 8-shape band、cpuset-safe affinity。
+- 下一优先级：健康 host 上复验 v5，并在不同 suffix 长度/并发下寻找 CP8 是否存在架构交叉点。
+- 可作为局部 primitive 继续研究：FlashMLA 8-shape band、cpuset-safe affinity、true-CP8 combined-indexer。
 - 其余候选保留负结果和因果知识，不保留为 main 中的并行 runtime path。

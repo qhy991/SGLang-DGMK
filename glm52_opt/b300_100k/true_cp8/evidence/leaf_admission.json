@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "status": "ADMIT_FOR_MODEL_CORRECTNESS_ONLY",
+  "source_result": "private-archive:glm52_cp8_combined_indexer_leaf/20260818T_repaired_topk_delta/result.json",
+  "source_result_sha256": "94f5596e7c267b661f192f809b800ba6d291c357fa225d0a01ab85eb79638c64",
+  "shape": {
+    "cp_size": 8,
+    "queries_per_half": 626,
+    "queries_combined": 1252,
+    "cached_prefix": 89984,
+    "real_extend": 10016
+  },
+  "observed": {
+    "valid_logits_exact_all_ranks": true,
+    "selected_score_multiset_exact": false,
+    "selected_score_max_abs": 0.00003113597631454468,
+    "selected_score_mean_abs_max": 4.029517002638427e-09,
+    "selected_score_mismatch_rows": 57,
+    "rows_total": 10016,
+    "topk_id_overlap_row_min": 0.9931640625,
+    "deepgemm_leaf_reduction_median_pct": 23.523932954718646
+  },
+  "admission_bounds": {
+    "valid_logits_must_be_exact": true,
+    "selected_score_max_abs_max": 0.00005,
+    "topk_id_overlap_row_min": 0.99,
+    "model_tokens_must_be_exact": true,
+    "model_logprob_max_abs_max": 0.001,
+    "model_logprob_mean_abs_max": 0.0001
+  },
+  "reason": "The fused top-k launch shape changes a small number of boundary tie choices. Operator evidence is sufficient only to run, not pass, the independent model-level correctness gate.",
+  "promotion_claim": false
+}

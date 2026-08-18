@@ -1,8 +1,8 @@
 # GLM-5.2 / B300 全部实验系统报告
 
-日期：2026-08-17
+日期：2026-08-18
 
-范围：B300 退役快照中 `bench_results` 的完整文件级清单，以及已经发布到 GitHub 的精选代码与紧凑证据
+范围：B300 退役快照中 `bench_results` 的完整文件级清单、已经发布到 GitHub 的精选代码与紧凑证据，以及 2026-08-18 新增的 true attention-CP8 / EP8 实验
 
 报告目标：不只解释最终 N6，而是保存从早期 prefill、decode、kernel、MoK、N1–N40 到 temporal placement、profiling 和主机诊断的完整实验知识
 
@@ -13,6 +13,7 @@
 1. **历史上最大的 prefill 收益**来自修复 chunk 被 DP8 二次除法的问题：full-8192 TTFT 从 79.05 s 降到 15.86 s；叠加该历史 cell 的 DeepEP 24 SM 后降到 12.05 s。这个 4.98×–6.56× 的收益来自删除重复执行与通信轮次，不是把某个 CUDA kernel 加速六倍。
 2. **历史 decode 的正结果**包括 MTP/EAGLE（TPOT 32.15→24.33 ms、吞吐 248→329 token/s，约 1.32×）以及一组 S=32768、BS128 的组合 winner（ITL median 33.116→31.243 ms，约 5.66%）。它们都不是当前 output=1 的 prefill/TTFT 结果。
 3. **冻结 100K cached-prefill cell 的唯一正式 accepted 方案**是 N6：balanced static expert placement + router 直接输出 physical expert ID + DeepEP normal dispatch/combine 136→120 SM。正式 P50 -5.31%、P90 -4.75%、吞吐 +7.53%；独立 holdout 为 -5.46%/-6.73%/+7.40%。
+4. **后续 true attention-CP8 实验**在 TP8/DP1/CP8/EP8 单元内，把每层两个 626-row indexer 调用合成一个 1252-row 调用。x11 五对的 P50/P90/吞吐全部 5/5 胜，paired median 改善 3.30%/3.32%/3.19%；但 CP8 candidate 的绝对 P50 约 3.63 秒、吞吐约 302k token/s，仍慢于 N6 的 1.93 秒与 486.6k token/s。因此它优化了 CP8，却没有让 CP8 取代 N6。
 
 后续 FlashMLA、DeepEP chunk、overlap、PrefillDelayer、MoK、temporal placement 和 cpuset 都产生了有价值的局部或因果证据，但没有在健康主机、相同冻结合同下取代 N6。尤其要记住：**kernel 快，不等于服务快；profile 能解释原因，不等于可以替代无 profiler E2E。**
 
@@ -81,8 +82,9 @@ MoE 又增加了一个特殊问题。每个 token 只去少量 expert，但不�
 | F1 N-series | 08-13 至 08-14 | 8×B300；TP8/DP8/EP8；attention TP1、`attn_cp_size=1`；90K+10K；output1；x11/110；per-rank M≤10048 | 冻结 100K cached-prefill 的正式优化 |
 | F2 degraded-host | 08-15 至 08-16 | 名义上沿用 F1，但 CPU 大片频域约500MHz | 只可解释相对 A-B-A、causal profile 和 host diagnosis |
 | M1 current main | 08-17 | 从冻结 runtime surgical port 的默认关闭代码与 compact evidence | 源码是否可审查；尚不能声称复现 F1 性能 |
+| F3 true attention CP8 | 08-17 至 08-18 | TP8/DP1/attention CP8/attention TP1/EP8；90K+10K；output1；zigzag；x1与x11；DeepEP120 | CP8 路径能否正确运行、combined-indexer 能否减少调用，以及 CP8 是否应替换 N6 |
 
-“CP=8”在本次历史口径中容易产生误解。正式记录是 TP8/DP8/EP8，但 `attn_cp_size=1`；8 路是 DP-attention/上下文分发 rank，不是已验证的 attention context parallel size 8。
+“CP=8”在早期历史口径中容易产生误解。F1 正式记录是 TP8/DP8/EP8，但 `attn_cp_size=1`；8 路是 DP-attention/上下文分发 rank。只有 F3 才是真正已执行的 `attn_cp_size=8`。
 
 ## 5. 阶段一：先找系统性浪费，而不是先写 CUDA
 
@@ -263,6 +265,24 @@ real-shape send16 leaf probe 中，最慢rank dispatch median -2.45%、wall -1.5
 
 但 degraded-host single arm 仍未过门：all-siblings P50/P90/吞吐=2716.96/2899.52 ms/412371.30，physical-only=2752.50/2851.30/412677.09。它证明隔离 primitive 更正确，却没有修复平台频域故障；而且 treatment 同时含 v5+cpuset+topology，不能估算 affinity 的独立收益。
 
+### 9.5 true attention CP8 与 combined-indexer
+
+这轮不再把 DP-attention 误称为 CP8，而是建立独立的 F3 cell：TP8/DP1/attention CP8/attention TP1/EP8。90,000 logical prefix 只能命中 89,984 个完整 64-token page，所以真实 extend 是 10,016。zigzag CP8 把它切成 16 段，每段 626 token；每个 rank 负责前后各一段，本地 indexer M 为 1,252。
+
+stock 每层分别执行两次 626-row DeepGEMM MQA 和两次 fused top-k。candidate 利用逐行 KV 终点，把前后两段合成一次 1252-row MQA 和一次 top-k。它只 admit CP8/H32/D128/M1252/overlap-off，其他 shape 走 stock fallback；真实 extend 不能整除 `2×CP` 时局部回退非 CP，避免 padding 行越界。
+
+证据链如下：
+
+- leaf：DeepGEMM 子步骤中位快 23.52%，有效 logits exact；top-k 有57/10016行边界 tie，最大 selected-score 差3.11e-5，所以只允许进入模型 correctness；
+- x1 五对：P50 5/5、P90 4/5、吞吐4/5，paired median -2.50%/-2.43%/+2.70%；
+- x11 五对：三指标全部5/5，paired median -3.30%/-3.32%/+3.19%；
+- 模型：11/11 generated tokens exact，x11 max/mean logprob error 1.58e-4/3.45e-5；
+- Nsys：MQA 和 top-k 调用数分别3360→1680，sparse attention、dense GEMM、DeepEP combine覆盖锚点相等。
+
+但更高层比较不能省略：F3 candidate 的 x11 arm-median P50/P90/吞吐为3634.06/3664.88 ms/302172 token/s；F1 accepted N6 为1933.67/2891.13 ms/486640 token/s。当前约10K重算长度、并发11更适合请求级DP-attention，而不是8卡共同切一条请求。后一句是符合数据的机制假设，尚未隔离全部架构开销。
+
+所以 combined-indexer 是 **CP8 内部 research winner**，true CP8 本身没有晋级，N6保持 accepted。完整教学见 [true CP8报告](GLM52_TRUE_CP8_OPTIMIZATION_20260818_CN.md)。
+
 ## 10. Profiling 的正确使用方式
 
 本档保留 Nsys/NCU 的派生 JSON/CSV，不保留 raw `.nsys-rep/.sqlite/.ncu-rep`。这样仍可复核 kernel call、分位数、scheduler sync、NVTX 和 NCU counter，但不能重新打开完整 timeline 做任意新查询。
@@ -281,10 +301,10 @@ real-shape send16 leaf probe 中，最慢rank dispatch median -2.45%、wall -1.5
 |---|---|---|
 | F1 accepted | N6 | 只在冻结 100K cached-prefill cell 通过 correctness、重复性、绝对门和 holdout；尚非所有 workload 的 production replacement |
 | 历史正结果 | chunk fix、DeepEP24组合、decode MTP、decode BS128 winners | 各自在自己的 H1/H2 cell 有效；不得与 N6 数字相加 |
-| research priority | temporal v5、FlashMLA 8-shape band、cpuset-safe affinity | 已有 correctness/leaf/relative causal 信号；需健康主机重新完成无 profiler E2E |
+| research priority | temporal v5、FlashMLA 8-shape band、cpuset-safe affinity、true-CP8 combined-indexer | 前三者需健康主机重新完成无 profiler E2E；combined-indexer 已在冻结 CP8 cell 获得配对/正确性/因果证据，但 CP8 架构仍慢于 N6 |
 | stability/debug | MoK fix | 稳定性显著修复，但性能和内存/KV容量失败 |
 | E2E promotion未获准/被拒 | N1–N5、N7–N40除N6，以及早期大量kernel/overlap/通信候选 | 很多候选在static、ABI、correctness或leaf层停止；正向leaf/research证据仍逐项保留，不能统称“全是负结果” |
-| current main | default-off N6 runtime port + maps/tools/docs | source-reviewed；未在 B300 main HEAD 上复现旧数字 |
+| current main | default-off N6 runtime port + true-CP8最小端口 + maps/tools/docs | source-reviewed，CP8 segment predicate 已在 B300容器做 CPU-only 单测；两条 current-main 端口都未在 B300 main HEAD 上重跑完整 E2E |
 
 ## 12. 下一台健康 B300 的最小复验顺序
 
@@ -294,6 +314,7 @@ real-shape send16 leaf probe 中，最慢rank dispatch median -2.45%、wall -1.5
 4. 在 current `main` 单独做 source-port correctness和同合同性能复现，不能用旧 revision的数字替代。
 5. 以 N6 为 control，先测 v5 同 affinity A-B-A+correctness；再测 FlashMLA band。cpuset patch先做process-tree audit，再作为固定环境，不与候选同时变化。
 6. 只有 Systems 把回退缩小到一个具体 kernel 后，才用 NCU；否则继续分析 rank progress、notify tail、stream/event和host launch。
+7. true CP8 单独作为 F3 复验，不与 F1 数字混在同一 baseline；先确认它是否在不同 suffix 长度和并发下出现架构交叉点，再讨论扩大 combined-indexer admission。
 
 ## 13. 如何继续查阅
 

@@ -2,6 +2,8 @@
 
 > 本文是教学型阶段计划；机器可执行的冻结参数、candidate treatment、promotion gate 与停止规则以 [`../workload_contract.json`](../workload_contract.json) 和 [`../REPRODUCTION.md`](../REPRODUCTION.md) 为唯一规范来源。
 
+> 进度更新（2026-08-18）：第 8 节提出的真实 attention CP8 新单元已经建立并完成第一轮优化。完整结果见 [`GLM52_TRUE_CP8_OPTIMIZATION_20260818_CN.md`](GLM52_TRUE_CP8_OPTIMIZATION_20260818_CN.md)；N6/v5 在当前 `main` 和新健康机器上的复验仍未完成。
+
 ## 0. 目标与非目标
 
 目标是把“冻结 runtime 上 accepted 的 N6”和“退化 host 上有强信号的 v5”迁移到当前 main，并得到健康机器上的可重复 E2E 结论。
@@ -123,19 +125,20 @@ v5 必须建立在已恢复的 N6 anchor 上，同一 affinity、同一镜像、
 
 Leaf 8.82%–12.49% 只是先验；晋级仍要求 P50 和服务门槛。
 
-## 8. 真实 attention CP8 是新 cell
+## 8. 真实 attention CP8 新 cell：已执行
 
-如果下一步仍要求“CP=8、EP=8”，应明确建立新的 attention CP8 合同，而不是继续沿用本报告的 DP-attention 口径。需要重新冻结：
+本阶段后来明确建立为：TP8 / DP1 / attention CP8 / attention TP1 / EP8，保留 N6 map、physical-ID router 与 DeepEP120。90K logical prefix 的实际 cache hit 是 89,984，10K suffix 因页尾 16 token 重算而形成 10,016 个真实 extend token；zigzag CP8 让每个 rank 获得两个 626-token block。
 
-- CP group 与 TP/DP/EP 的重叠关系；
-- KV 分片与 attention collective；
-- 每 rank Q/KV shape；
-- cache ownership；
-- chunk 和 memory capacity；
-- 正确性 reference；
-- baseline 绝对门槛。
+在这个新单元里，combined-indexer 把每层两次 626-row DeepGEMM MQA/top-k 合成一次 1252-row 调用：
 
-现有 N6 map/router primitive可能可复用，但 100K TTFT 数字必须重新测。
+- concurrency=1 五对：P50 5/5 胜，paired median -2.50%；
+- concurrency=11 五对：P50/P90/吞吐全部 5/5 胜，paired median -3.30%/-3.32%/+3.19%；
+- 11/11 generated tokens exact；
+- Nsys 看到 MQA 与 top-k 调用数都精确减半。
+
+但 true-CP8 candidate 的 x11 arm-median P50 约 3.63 秒、吞吐约 302k token/s，仍慢于 accepted CP1/DP-attention N6 的 1.93 秒和 486.6k token/s。因此它只晋级为 **CP8 内部 research winner**，没有替换 N6。
+
+当前 `main` 已获得 default-off 最小移植和 CPU-only segment-alignment 单测，但尚未做新的 B300 完整 E2E。后续复验入口见 [`../true_cp8/repro/README_CN.md`](../true_cp8/repro/README_CN.md)。
 
 ## 9. 停止规则
 

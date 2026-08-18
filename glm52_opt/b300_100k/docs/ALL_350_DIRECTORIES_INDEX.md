@@ -2,6 +2,8 @@
 
 本索引逐项覆盖 B300 退役快照中的 `bench_results`：350 个顶层目录，另将根级文件记作一个审计条目 `__root_files__`。它不是把每个目录都当成一次可比较 benchmark；一个目录可能是正式 E2E、leaf probe、正确性门、Nsys 派生表、失败启动、handoff 或参考实现。是否可以引用性能数字，应回到该目录的 workload、阶段和证据级别判断。
 
+> 这 350 个目录是 2026-08-16 的冻结快照。2026-08-18 新增的 true attention-CP8 / EP8 实验不改写本索引的闭合计数；其入口是 [true CP8 教学报告](GLM52_TRUE_CP8_OPTIMIZATION_20260818_CN.md) 和 `private-archive:true_cp8_20260818`。
+
 - `原始` 是远端目录在盘点时的文件数和字节数。
 - `compact` 是私有归档中逐字节复制的小型结果证据；完整排除账标识为 `private-archive:inventory/excluded_files.tsv`。
 - `关键证据` 最多列三个私有归档 ID；目录的其他 compact 文件位于 `private-archive:evidence/by_experiment/`。

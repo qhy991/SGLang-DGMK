@@ -1,0 +1,198 @@
+{
+  "contract_version": 1,
+  "captured_at": "2026-08-18T11:31:24+08:00",
+  "expected_git_commit": "1571b72db014603ebfaad6d59cbbde1740b23b3e",
+  "scope": "Critical active runtime sources for the GLM-5.2 true attention CP8 + EP8 combined-indexer development cell: TP8, DP1, attention CP8, MoE EP8, zigzag prefill CP, N6 static placement/router fusion and DeepEP120. This extends the frozen N6 contract with the CP group, sharding, communicator, scheduler and model-runner sources, an explicit CP-local FlashMLA metadata rebuild, a local non-CP fallback for non-segment-aligned real DSA lengths, and a default-off request-boundary treatment that combines the two 626-row zigzag indexer halves into one 1252-row DeepGEMM/top-k call; every listed file must match byte-for-byte.",
+  "files": [
+    {
+      "path": "python/sglang/srt/models/deepseek_v2.py",
+      "sha256": "1609c86d6145de9148a7c48f9c101d0e54e6a035955694fedc1ed1bcaad7475b",
+      "role": "GLM MoE forward, shared-expert overlap and routed-output scaling"
+    },
+    {
+      "path": "python/sglang/srt/layers/moe/token_dispatcher/deepep.py",
+      "sha256": "61d645885f86d1da9c6f61b206b17a9e56cbaaeedcf6422677bdd639ccc72cca",
+      "role": "native DeepEP normal dispatch/combine"
+    },
+    {
+      "path": "python/sglang/srt/layers/moe/topk.py",
+      "sha256": "f1c7462672c788603d05ee246743ce94b6627b5e5aeaed8dfca04abfde707e6b",
+      "role": "reviewed router Top-K admission and single-pass static-placement mapping"
+    },
+    {
+      "path": "python/sglang/jit_kernel/moe_fused_gate.py",
+      "sha256": "f36d870fe63e22eb5eca14877f0cf1440fa571a920619e62ca836fce96ce8441",
+      "role": "reviewed GLM fused router: mapped int64 IDs and optional padded-row mask; no unexecuted shared-slot surface"
+    },
+    {
+      "path": "python/sglang/srt/environ.py",
+      "sha256": "1b38117b02a0b7c52dcd43372df05e9332e385503740ffa230a5c55b7b3ffee1",
+      "role": "environment switch definitions consumed before worker startup"
+    },
+    {
+      "path": "python/sglang/srt/layers/attention/dsa_backend.py",
+      "sha256": "cd685a38e12820831cd1233ef54b77d80c3644974a96bff38e0d133f30a8d089",
+      "role": "DSA backend, prefill workspace lifecycle and fail-closed CP-local FlashMLA metadata rebuild"
+    },
+    {
+      "path": "python/sglang/srt/layers/attention/dsa/dsa_indexer.py",
+      "sha256": "9eddd376384b05ae97f64dd3f4cba1ebce85fa30c5b134a9c5c6fcccc8b43021",
+      "role": "cached-prefix DSA index-score plus default-off CP8 combined-zigzag-half treatment"
+    },
+    {
+      "path": "python/sglang/jit_kernel/glm52/__init__.py",
+      "sha256": "aaad937757ef969a705c1f62fcd9ba1cd0cc1cd3199f763e4038918c0b5ee89e",
+      "role": "untracked GLM-5.2 JIT package imported by the active DSA prefill path"
+    },
+    {
+      "path": "python/sglang/jit_kernel/glm52/paged_prefill_mqa.py",
+      "sha256": "5b40043fd9db5c8d996f2cfc7f9966aeb2a3d03353bdb3991e05c3d115d3ea64",
+      "role": "untracked DeepGEMM paged-MQA adapter selected by the active DSA prefill path"
+    },
+    {
+      "path": "python/sglang/jit_kernel/glm52/clustered_mqa_logits.py",
+      "sha256": "17e56655ebfeab9761ff4e7aa5d9f3c47edef5ad7382c7ec272838c2c9a0762e",
+      "role": "untracked SM103 clustered-MQA Python adapter and JIT loader"
+    },
+    {
+      "path": "python/sglang/jit_kernel/csrc/glm52/clustered_mqa_logits/v2_binding.cpp",
+      "sha256": "35742948936aa270eb9e7b5b8d3e64e5b9f2bed8eefa8903685e1f49f6902930",
+      "role": "untracked clustered-MQA extension binding compiled at runtime"
+    },
+    {
+      "path": "python/sglang/jit_kernel/csrc/glm52/clustered_mqa_logits/v2_kernel.cu",
+      "sha256": "f794527b95e25f8386bcba6b5550980f5f78c73255540f3632f7197071ebff4b",
+      "role": "untracked clustered-MQA CUDA translation unit compiled at runtime"
+    },
+    {
+      "path": "python/sglang/jit_kernel/csrc/glm52/clustered_mqa_logits/v2_mqa_logits_layout.cuh",
+      "sha256": "4fc8c38fd261c982cd131c8e45ac7d9630861534a7ea94674b38f9a9788d0214",
+      "role": "untracked clustered-MQA tensor-layout dependency compiled at runtime"
+    },
+    {
+      "path": "python/sglang/jit_kernel/csrc/glm52/clustered_mqa_logits/v2_sm100_mqa_logits.cuh",
+      "sha256": "bc038d1d09d402caef97da87f94241606d29b11fc11c9df05d7ec4720e53453a",
+      "role": "untracked clustered-MQA SM100/SM103 kernel dependency compiled at runtime"
+    },
+    {
+      "path": "python/sglang/jit_kernel/csrc/glm52/clustered_mqa_logits/v2_sm100_paged_mqa_logits.cuh",
+      "sha256": "11dc8df1fcd826e13ff4b2b007650e124647decb2d9c64a59a03bd93c2f432b3",
+      "role": "untracked clustered paged-MQA kernel dependency compiled at runtime"
+    },
+    {
+      "path": "python/sglang/srt/layers/glm52_opt/config.py",
+      "sha256": "65c43c7c6ec2d529968373fe3c0d008c83cbf8a857ed42f178b707956d7fa888",
+      "role": "GLM-5.2 optimization admission and profile logic"
+    },
+    {
+      "path": "python/sglang/srt/batch_overlap/single_batch_overlap.py",
+      "sha256": "1318de31c5d285fa26cd67c1b5ecf93a9b12f639dcb3c64c67aa5d49f756785c",
+      "role": "SBO source contract; the frozen launch requires SBO disabled"
+    },
+    {
+      "path": "python/sglang/srt/batch_overlap/two_batch_overlap.py",
+      "sha256": "3f7372a541682c39cf3c33142b37f91d4821273407b2750c8b35511674455810",
+      "role": "TBO source contract; the frozen launch requires TBO disabled"
+    },
+    {
+      "path": "python/sglang/srt/server_args.py",
+      "sha256": "d3bd8a4eae762b403396e99ed1a524c245e83e87f713a2bbce5c6e3aa64ed4e9",
+      "role": "server argument defaults and validation"
+    },
+    {
+      "path": "python/sglang/srt/managers/schedule_batch.py",
+      "sha256": "ce3697e201bc73e2f9651f25671fa89e828a99003b61a1e1a55b6c908f79e5bc",
+      "role": "ScheduleBatch sideband carrier used by candidate I; clean at the frozen commit in all four saved run snapshots"
+    },
+    {
+      "path": "python/sglang/srt/managers/scheduler_components/dp_attn.py",
+      "sha256": "7c3b800a7ebf338f1785267b3c6c5119953fa45eca8bb9d5f72cf1889ea5bf50",
+      "role": "existing seven-int DP all-gather reused by candidate I for token counts and arm consensus"
+    },
+    {
+      "path": "python/sglang/srt/model_executor/forward_batch_info.py",
+      "sha256": "7195534220f9affd1d05eaa53c6cee749fc29aa3e9ee3319c9cee68a9b724a61",
+      "role": "ForwardBatch construction path used to carry candidate I scheduler plan into model execution"
+    },
+    {
+      "path": "python/sglang/srt/arg_groups/overrides.py",
+      "sha256": "55ab47c5b326618a57c48d62a516007937fa5ea41cb6d68145cff964675c8009",
+      "role": "DeepSeek/GLM DSA prefill-CP parameter derivation and DP1/CP8/EP8 overrides"
+    },
+    {
+      "path": "python/sglang/srt/distributed/parallel_state.py",
+      "sha256": "cf5cde5870fc3a5ac6b84cf91dadf815fc9accde96606bc171e8336bc20eb100",
+      "role": "attention CP, attention TP, MoE EP and CP-to-MoE process groups"
+    },
+    {
+      "path": "python/sglang/srt/runtime_context.py",
+      "sha256": "91d7d15b97296cf4c7a4166831783ea9bca69171f782548fa69f005a88816688",
+      "role": "resolved runtime context used by CP path helpers"
+    },
+    {
+      "path": "python/sglang/srt/layers/cp/__init__.py",
+      "sha256": "fef93024570eebcfb78444c297d309267fbc830ea9f6d5bd9838c63641bda1b2",
+      "role": "prefill CP strategy package entrypoint"
+    },
+    {
+      "path": "python/sglang/srt/layers/cp/base.py",
+      "sha256": "ac449cbbffb0402cb5528fdd88e324aca000fa446339f9de4ef7a9e8a924d137",
+      "role": "prefill CP strategy interface and shared invariants"
+    },
+    {
+      "path": "python/sglang/srt/layers/cp/utils.py",
+      "sha256": "93d9567ad8778507198118e0a55bf9a4b9446657f8792feff8a17915c4e2b4c7",
+      "role": "prefill CP token layout utilities"
+    },
+    {
+      "path": "python/sglang/srt/layers/cp/zigzag.py",
+      "sha256": "bca852b6ae71dc86b20f9efd128e65a28c55ce903aa05b7cd45f1b62c915e4cc",
+      "role": "zigzag sequence sharding used by the CP8 smoke cell"
+    },
+    {
+      "path": "python/sglang/srt/layers/communicator.py",
+      "sha256": "2d4120be8be9157d5b8c9c049bb2e42bc4a95232d59bf1faec3885935a98dbf7",
+      "role": "attention-to-MoE scatter/all-gather policy under CP8 and EP8"
+    },
+    {
+      "path": "python/sglang/srt/layers/communicator_dsa_cp.py",
+      "sha256": "b1c011dce9ec8b7d2811d5a9e36aac1cf95cbcee064faa4e98b82e5c75c1b1ae",
+      "role": "DSA-specific context-parallel communicator"
+    },
+    {
+      "path": "python/sglang/srt/layers/attention/dsa/utils.py",
+      "sha256": "0ba75ed60f9a2bfdf17f0ce06bd45e13599adbcd3aa3a38ba015d7bf9af1e2a1",
+      "role": "DSA CP mode selection, split/padding helpers and segment-alignment local fallback"
+    },
+    {
+      "path": "python/sglang/srt/layers/utils/cp_utils.py",
+      "sha256": "71a16c6f76a807f1cfab5fb5a3cee6c0eabd59b24f93d64bdf9cf0f42e3c6912",
+      "role": "CP padding alignment helpers shared with ForwardBatch"
+    },
+    {
+      "path": "python/sglang/srt/layers/dp_attention.py",
+      "sha256": "0a1f67739ed94f2e2f04debf1401bd8e85db0badf8d1239d0128e15070f8c68d",
+      "role": "attention DP/CP coordination primitives; DP world size is one in this cell"
+    },
+    {
+      "path": "python/sglang/srt/managers/scheduler.py",
+      "sha256": "9ad401d5377d914ff5f4bbbe49386fa2a2261fb2d2c778a154631125d24f4300",
+      "role": "scheduler construction of context-parallel extend batches"
+    },
+    {
+      "path": "python/sglang/srt/managers/scheduler_components/request_receiver.py",
+      "sha256": "4b3d329d502b4a463285f7337ac6198826eeacfd55c517ba44976caa8ee78d23",
+      "role": "request ingress and CP-aware scheduling metadata"
+    },
+    {
+      "path": "python/sglang/srt/model_executor/model_runner.py",
+      "sha256": "c4a308b7104e3279966380e0798378134444789cb3252d9e1a3c4c63107183c3",
+      "role": "model-runner CP group initialization and forward execution"
+    }
+  ],
+  "known_inactive_dirty_sources": [
+    "python/sglang/srt/layers/glm52_opt/swiglu_quant.py",
+    "python/sglang/srt/layers/glm52_opt/swiglu_quant_cuda.py"
+  ],
+  "inactive_reason": "The frozen serving_safe profile does not arm moe_swiglu_quant; no SGLANG_OPT_MOE_SWIGLU_QUANT_VARIANT is set. These files must be added to the contract before enabling that path."
+}
