@@ -125,7 +125,7 @@ write_env() {
         echo "SGLANG_GLM52_OPT_PROFILE=combined_winners"
         # e2e-proven only — no fused_qkv_a, no dsa_prefill
         local ops="flashmla_sparse_decode,o_proj,index_q_upproj,moe_gate_proj,moe_up_proj,moe_down_proj,moe_swiglu_quant"
-        echo "SGLANG_OPT_MOE_SWIGLU_QUANT_VARIANT=cuda_valid_cta"
+        echo "SGLANG_OPT_MOE_SWIGLU_QUANT_VARIANT=cuda_grid_stride"
         if [[ "$mode" == "shared_fused" ]]; then
           echo "SGLANG_GLM52_SHARED_EXPERT_SWIGLU_QUANT=1"
         else

@@ -4232,20 +4232,6 @@ class ServerArgs:
                 # The "dsa" attention fill moved to the override registry
                 # (arg_groups/overrides.py: _deepseek_family_overrides).
 
-                index_topk_freq = getattr(hf_config, "index_topk_freq", 1) or 1
-                index_topk_pattern = getattr(hf_config, "index_topk_pattern", None)
-                if self.enable_two_batch_overlap and (
-                    index_topk_freq > 1
-                    or (index_topk_pattern is not None and "S" in index_topk_pattern)
-                ):
-                    raise ValueError(
-                        "--enable-two-batch-overlap is not supported with DSA "
-                        "index-topk sharing (index_topk_freq > 1 or an "
-                        "index_topk_pattern containing shared layers): the TBO op "
-                        "path does not propagate topk indices across layers, so "
-                        "shared layers would run sparse attention without indices."
-                    )
-
                 if not is_npu() and not is_xpu():  # CUDA or ROCm GPU
                     if self.enable_prefill_cp:
                         # The DSA CP field declarations moved to the override

@@ -808,10 +808,20 @@ class _DeepEPDispatcherImplLowLatency(_DeepEPDispatcherImplBase):
             ctx = torch.cuda.stream(overlap_args.stream)
 
             if is_blackwell():
-                overlap_args_dict = dict(
-                    overlap=overlap_args.overlap,
-                    src_signals=overlap_args.signal,
-                    src_signal_expect_value=overlap_args.threshold,
+                # The shared-expert-only SBO path needs the alternate combine
+                # stream but not DeepEP's down-GEMM signal ABI.  Older host
+                # DeepEP wheels do not accept the newer `overlap` keyword at
+                # all, so only pass signal arguments when overlap is actually
+                # requested.  The true compute/communication overlap path
+                # remains fail-closed against an incompatible wheel.
+                overlap_args_dict = (
+                    dict(
+                        overlap=True,
+                        src_signals=overlap_args.signal,
+                        src_signal_expect_value=overlap_args.threshold,
+                    )
+                    if overlap_args.overlap
+                    else {}
                 )
             else:
                 overlap_args_dict = dict(

@@ -951,6 +951,11 @@ class Envs:
     # B300 experiment: additionally write the masked top-k IDs as int64, which
     # is the direct DeepEP dispatch ABI, eliminating its per-layer dtype copy.
     SGLANG_GLM52_ROUTER_DEEPEP_IDS_FUSION = EnvBool(False)
+    # B300 GLM-5.2 static-placement experiment: fold logical->physical expert
+    # remap, DeepEP per-rank shared-slot insertion, padded-ID masking, and the
+    # int64 dispatch ABI into the unified Triton router's output store.  The
+    # selector fails closed unless the exact static EP placement contract holds.
+    SGLANG_GLM52_ROUTER_STATIC_PLACEMENT_FUSION = EnvBool(False)
 
     # TopK
     SGLANG_OPT_USE_FUSED_HASH_TOPK = EnvBool(True)
@@ -1052,6 +1057,15 @@ class Envs:
     SGLANG_GLM52_MANIFEST = EnvStr("")
     SGLANG_GLM52_DEEPGEMM_VARIANT = EnvStr("")
     SGLANG_GLM52_ENV_FILE = EnvStr("")
+    # Experimental GLM-5.2 DSA prefill-CP cache path derived from the
+    # DeepSeek-V4 Huge v8/v12 communication rewrite.  Quantize each rank's
+    # row-owned indexer/MLA K locally, exchange the final packed cache bytes,
+    # and write those bytes directly instead of AllGathering BF16 first.
+    SGLANG_GLM52_CP8_PACKED_KV_COMM = EnvBool(False)
+    # Follow-up to CP8_PACKED_KV_COMM: multicast the final packed rows into
+    # zigzag-global order, deleting NCCL rank-major AllGather and rerange.
+    # Strict B300/CP8/bs1/eager admission raises instead of falling back.
+    SGLANG_GLM52_CP8_DIRECT_PACKED_KV_COMM = EnvBool(False)
     # infini fused residual-add + RMSNorm + per-token-group UE8M0 FP8 quant (sm100).
     # Supplies the NVIDIA backend for the fused-norm-quant seam communicator.py
     # already dispatches for ROCm gfx95. Default off.

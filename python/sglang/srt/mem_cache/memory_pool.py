@@ -2914,6 +2914,44 @@ class MLATokenToKVPool(KVCache):
             cache_k_rope,
         )
 
+    def set_mla_kv_buffer_packed(
+        self,
+        layer: RadixAttention,
+        loc: torch.Tensor,
+        packed_kv: torch.Tensor,
+    ) -> None:
+        """Write the final CUDA DSA FP8 cache ABI without re-quantizing.
+
+        ``packed_kv`` has one uint8 row per token: 512 FP8 latent bytes, four
+        FP32 scales (16 bytes), and 64 BF16 RoPE values (128 bytes).
+        """
+
+        maybe_detect_oob(
+            loc, 0, self.size + self.page_size, "set_mla_kv_buffer_packed (MLA)"
+        )
+        if (
+            not self.dsa_kv_cache_store_fp8
+            or packed_kv.dtype is not torch.uint8
+            or packed_kv.ndim != 2
+            or packed_kv.shape[1] != 656
+            or packed_kv.shape[0] != loc.shape[0]
+        ):
+            raise ValueError(
+                "packed MLA KV requires CUDA DSA FP8 uint8[M,656] matching loc; "
+                f"got dtype={packed_kv.dtype} shape={tuple(packed_kv.shape)} "
+                f"loc={tuple(loc.shape)}"
+            )
+
+        layer_id = layer.layer_id
+        nope = packed_kv[:, :528].unsqueeze(1)
+        rope = packed_kv[:, 528:].unsqueeze(1)
+        set_mla_kv_buffer_triton(
+            self.kv_buffer[layer_id - self.start_layer],
+            loc,
+            nope,
+            rope,
+        )
+
     def get_mla_kv_buffer(
         self,
         layer: RadixAttention,

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Fair decode TPOT A/B: compare one candidate inside the existing decode winners.
-# Supports valid-CTA SwiGLU plus order-bracketed FlashMLA and router/DeepEP runs.
+# Supports route-complete SwiGLU plus order-bracketed FlashMLA and router/DeepEP runs.
 #
 # Workload: S=32k KV, global BS ∈ {128,256} (local_M=16/32, DP=8).
 # Each measured run asks one_batch_server to build the exact per-request KV
@@ -24,16 +24,41 @@ S=${S:-32768}
 OUT_LEN=${OUT_LEN:-48}
 N_RUNS=${N_RUNS:-3}
 GLOBAL_BS_LIST=${GLOBAL_BS_LIST:-"128"}
-LABELS=${LABELS:-"winners swiglu"}
+LABELS=${LABELS:-"winners_before swiglu winners_after"}
 FLASHMLA_R2A_SO=${FLASHMLA_R2A_SO:-}
 # Opt in for dense repeated measurements after one audited prefix-cache build.
 # The default preserves the historical, independently flushed protocol.
 FIXED_KV_SERIES=${FIXED_KV_SERIES:-0}
 FIXED_KV_WARMUP_RUNS=${FIXED_KV_WARMUP_RUNS:-2}
+# Optional compact uint32 plan built from real ShareGPT conversations.  Empty
+# preserves the deterministic random-ID protocol used by historical campaigns.
+FIXED_KV_TOKEN_PLAN=${FIXED_KV_TOKEN_PLAN:-}
+# Non-series provenance cross-check.  This calls SGLang's built-in benchmark
+# module directly instead of the historical long-timeout copy under ROOT.
+BUILTIN_ONE_BATCH_SERVER=${BUILTIN_ONE_BATCH_SERVER:-0}
+# Optional answer-quality gate.  This reuses SGLang's built-in GSM8K evaluator
+# while retaining all 50 per-question responses for an A/B/A comparison.  It is
+# deliberately separate from the 32K fixed-KV performance protocol.
+GSM8K_EVAL=${GSM8K_EVAL:-0}
+GSM8K_DATA_PATH=${GSM8K_DATA_PATH:-}
+GSM8K_NUM_EXAMPLES=${GSM8K_NUM_EXAMPLES:-50}
+GSM8K_NUM_SHOTS=${GSM8K_NUM_SHOTS:-5}
+GSM8K_START_OFFSET=${GSM8K_START_OFFSET:-0}
+GSM8K_NUM_THREADS=${GSM8K_NUM_THREADS:-50}
+GSM8K_MAX_TOKENS=${GSM8K_MAX_TOKENS:-512}
+GSM8K_ENABLE_THINKING=${GSM8K_ENABLE_THINKING:-0}
+# Diagnostic-only escape hatch for repeating one arm after the required A/B/A
+# run.  The default remains the three-arm quality gate.
+GSM8K_SINGLE_ARM=${GSM8K_SINGLE_ARM:-0}
 # Start, capture and audit selection without constructing the expensive KV
 # prefix or recording latency. Useful for clean-artifact serving ABI smoke.
 VALIDATE_ONLY=${VALIDATE_ONLY:-0}
 MEM_FRACTION_STATIC=${MEM_FRACTION_STATIC:-0.83}
+# Keep the service-side seed identical across independently launched A/B/A
+# arms.  Greedy distributed inference can still show floating-point drift, so
+# the full output-ID gate below remains required; the seed removes avoidable
+# sampling/runtime RNG differences from that comparison.
+SGLANG_RANDOM_SEED=${SGLANG_RANDOM_SEED:-42}
 # Need 32 for global BS=256 (local_M=32).
 SGLANG_CUDA_GRAPH_MAX_BS=${SGLANG_CUDA_GRAPH_MAX_BS:-32}
 # DP attention divides this by DP.  2048 -> 256 tokens/rank preserves enough
@@ -47,6 +72,9 @@ OUT=$ROOT/bench_results/$RUN_ID
 SERVER_LAUNCHER=${SERVER_LAUNCHER:-$REPO/glm52_opt/scripts/run_b300_repo_server.sh}
 FIXED_KV_RUNNER=${FIXED_KV_RUNNER:-$REPO/glm52_opt/scripts/run_fixed_kv_decode_series.py}
 FIXED_KV_ABA_ANALYZER=${FIXED_KV_ABA_ANALYZER:-$REPO/glm52_opt/scripts/analyze_fixed_kv_aba.py}
+FIXED_KV_OUTPUT_ANALYZER=${FIXED_KV_OUTPUT_ANALYZER:-$REPO/glm52_opt/scripts/analyze_fixed_kv_output_ids.py}
+GSM8K_RUNNER=${GSM8K_RUNNER:-$REPO/glm52_opt/scripts/run_gsm8k_subset_eval.py}
+GSM8K_ANALYZER=${GSM8K_ANALYZER:-$REPO/glm52_opt/scripts/analyze_gsm8k_aba.py}
 ENV_BACKUP=$OUT/original_glm52_opt.env
 ENV_ABSENT_MARKER=$OUT/original_glm52_opt.env.absent
 ACTIVE_SERVER_PID_FILE=$OUT/active_server_pid.txt
@@ -70,6 +98,51 @@ if [[ "$VALIDATE_ONLY" != 0 && "$VALIDATE_ONLY" != 1 ]]; then
   echo "[ERR] VALIDATE_ONLY must be 0 or 1; got $VALIDATE_ONLY" >&2
   exit 2
 fi
+if [[ "$BUILTIN_ONE_BATCH_SERVER" != 0 && "$BUILTIN_ONE_BATCH_SERVER" != 1 ]]; then
+  echo "[ERR] BUILTIN_ONE_BATCH_SERVER must be 0 or 1; got $BUILTIN_ONE_BATCH_SERVER" >&2
+  exit 2
+fi
+if [[ "$GSM8K_EVAL" != 0 && "$GSM8K_EVAL" != 1 ]]; then
+  echo "[ERR] GSM8K_EVAL must be 0 or 1; got $GSM8K_EVAL" >&2
+  exit 2
+fi
+if [[ "$GSM8K_ENABLE_THINKING" != 0 && "$GSM8K_ENABLE_THINKING" != 1 ]]; then
+  echo "[ERR] GSM8K_ENABLE_THINKING must be 0 or 1; got $GSM8K_ENABLE_THINKING" >&2
+  exit 2
+fi
+if [[ "$GSM8K_SINGLE_ARM" != 0 && "$GSM8K_SINGLE_ARM" != 1 ]]; then
+  echo "[ERR] GSM8K_SINGLE_ARM must be 0 or 1; got $GSM8K_SINGLE_ARM" >&2
+  exit 2
+fi
+if [[ "$GSM8K_EVAL" == 1 ]]; then
+  [[ "$FIXED_KV_SERIES" == 0 && "$BUILTIN_ONE_BATCH_SERVER" == 0 ]] || {
+    echo "[ERR] GSM8K_EVAL is a separate quality protocol" >&2
+    exit 2
+  }
+  [[ -f "$GSM8K_DATA_PATH" ]] || {
+    echo "[ERR] GSM8K_EVAL requires GSM8K_DATA_PATH" >&2
+    exit 2
+  }
+  [[ -f "$GSM8K_RUNNER" && -f "$GSM8K_ANALYZER" ]] || {
+    echo "[ERR] missing GSM8K runner or analyzer" >&2
+    exit 2
+  }
+  if [[ "$GSM8K_SINGLE_ARM" == 0 ]]; then
+    [[ "$LABELS" == "winners_before swiglu winners_after" ]] || {
+      echo "[ERR] GSM8K_EVAL requires A/B/A labels: winners_before swiglu winners_after" >&2
+      exit 2
+    }
+  else
+    [[ "$LABELS" == "winners_before" || "$LABELS" == "swiglu" || "$LABELS" == "winners_after" ]] || {
+      echo "[ERR] diagnostic GSM8K single arm requires exactly one known label" >&2
+      exit 2
+    }
+  fi
+fi
+if [[ "$FIXED_KV_SERIES" == 1 && "$BUILTIN_ONE_BATCH_SERVER" == 1 ]]; then
+  echo "[ERR] BUILTIN_ONE_BATCH_SERVER is only a non-series cross-check" >&2
+  exit 2
+fi
 if [[ "$FIXED_KV_WARMUP_RUNS" -lt 0 ]]; then
   echo "[ERR] FIXED_KV_WARMUP_RUNS must be non-negative" >&2
   exit 2
@@ -78,11 +151,30 @@ if [[ "$FIXED_KV_SERIES" == 1 && ! -f "$FIXED_KV_RUNNER" ]]; then
   echo "[ERR] missing fixed-KV series runner: $FIXED_KV_RUNNER" >&2
   exit 2
 fi
+if [[ -n "$FIXED_KV_TOKEN_PLAN" ]]; then
+  [[ "$FIXED_KV_SERIES" == 1 ]] || {
+    echo "[ERR] FIXED_KV_TOKEN_PLAN requires FIXED_KV_SERIES=1" >&2
+    exit 2
+  }
+  [[ -f "$FIXED_KV_TOKEN_PLAN" && -f "$FIXED_KV_TOKEN_PLAN.json" ]] || {
+    echo "[ERR] missing token plan or metadata: $FIXED_KV_TOKEN_PLAN{,.json}" >&2
+    exit 2
+  }
+fi
 if [[ "$FIXED_KV_SERIES" == 1 \
       && ( "$LABELS" == "p1_before r2a p1_after" \
-        || "$LABELS" == "router_before router_ids router_after" ) \
+        || "$LABELS" == "router_before router_ids router_after" \
+        || "$LABELS" == "winners_before swiglu winners_after" ) \
       && ! -f "$FIXED_KV_ABA_ANALYZER" ]]; then
   echo "[ERR] missing fixed-KV A-B-A analyzer: $FIXED_KV_ABA_ANALYZER" >&2
+  exit 2
+fi
+if [[ "$FIXED_KV_SERIES" == 1 \
+      && ( "$LABELS" == "p1_before r2a p1_after" \
+        || "$LABELS" == "router_before router_ids router_after" \
+        || "$LABELS" == "winners_before swiglu winners_after" ) \
+      && ! -f "$FIXED_KV_OUTPUT_ANALYZER" ]]; then
+  echo "[ERR] missing fixed-KV output analyzer: $FIXED_KV_OUTPUT_ANALYZER" >&2
   exit 2
 fi
 if ss -ltn 2>/dev/null | grep -q ":${PORT} "; then
@@ -100,11 +192,40 @@ exec > >(tee -a "$LOG") 2>&1
 echo "======== decode TPOT N=$N_RUNS S=$S BS={$GLOBAL_BS_LIST} $(date -Is) ========"
 echo "OUT=$OUT LABELS=$LABELS graph_max_bs=$SGLANG_CUDA_GRAPH_MAX_BS mem=$MEM_FRACTION_STATIC"
 echo "FIXED_KV_SERIES=$FIXED_KV_SERIES FIXED_KV_WARMUP_RUNS=$FIXED_KV_WARMUP_RUNS"
+echo "FIXED_KV_TOKEN_PLAN=${FIXED_KV_TOKEN_PLAN:-<deterministic-random-ids>}"
+echo "SGLANG_RANDOM_SEED=$SGLANG_RANDOM_SEED"
+echo "BUILTIN_ONE_BATCH_SERVER=$BUILTIN_ONE_BATCH_SERVER"
+echo "GSM8K_EVAL=$GSM8K_EVAL GSM8K_DATA_PATH=${GSM8K_DATA_PATH:-<disabled>}"
+echo "GSM8K_NUM_EXAMPLES=$GSM8K_NUM_EXAMPLES GSM8K_NUM_SHOTS=$GSM8K_NUM_SHOTS GSM8K_NUM_THREADS=$GSM8K_NUM_THREADS GSM8K_MAX_TOKENS=$GSM8K_MAX_TOKENS GSM8K_ENABLE_THINKING=$GSM8K_ENABLE_THINKING"
+echo "GSM8K_START_OFFSET=$GSM8K_START_OFFSET"
+echo "GSM8K_SINGLE_ARM=$GSM8K_SINGLE_ARM"
 echo "VALIDATE_ONLY=$VALIDATE_ONLY"
 cd "$REPO"
 git rev-parse --short HEAD | tee "$OUT/git_rev.txt"
 git branch --show-current | tee -a "$OUT/git_rev.txt"
 git log -1 --oneline | tee -a "$OUT/git_rev.txt"
+if [[ "$BUILTIN_ONE_BATCH_SERVER" == 1 ]]; then
+  "$PY" - "$OUT/builtin_one_batch_server_provenance.json" <<'PY'
+import hashlib
+import importlib.util
+import json
+import sys
+from pathlib import Path
+
+spec = importlib.util.find_spec("sglang.benchmark.one_batch_server")
+if spec is None or spec.origin is None:
+    raise SystemExit("cannot resolve sglang.benchmark.one_batch_server")
+path = Path(spec.origin).resolve()
+payload = {
+    "module": "sglang.benchmark.one_batch_server",
+    "path": str(path),
+    "size_bytes": path.stat().st_size,
+    "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+}
+Path(sys.argv[1]).write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+print(json.dumps(payload, sort_keys=True))
+PY
+fi
 test -f "$PROVIDER" || { echo "[ERR] missing $PROVIDER"; exit 1; }
 cd "$ROOT"
 
@@ -117,7 +238,8 @@ cat > "$OUT/README.md" <<MD
 - MoE gate/up/down via \`SGLANG_GLM52_INFINI_MOE_ALIGN=1\`
 
 ## Optional candidates
-- \`swiglu\`: same winners stack plus the valid-CTA masked activation
+- \`winners_before swiglu winners_after\`: restart the same winners baseline on
+  both sides of the route-complete candidate so service drift is observable
 - \`r2a\`: same winners stack with only FlashMLA P1 replaced by r2a;
   requires \`FLASHMLA_R2A_SO\`
 - \`p1_before r2a p1_after\`: brackets r2a with two independently started
@@ -132,10 +254,14 @@ cat > "$OUT/README.md" <<MD
 ## Protocol
 - Per label: one serve (cuda_graph_max_bs=${SGLANG_CUDA_GRAPH_MAX_BS})
 - DeepEP mode: ${SGLANG_DEEPEP_MODE:-auto}; chunked prefill=${CHUNKED_PREFILL_SIZE}; max prefill tokens=${MAX_PREFILL_TOKENS}; mem fraction=${MEM_FRACTION_STATIC}
+- Server random seed held constant across all arms: ${SGLANG_RANDOM_SEED}
 - Fixed-KV series mode: ${FIXED_KV_SERIES}; decode-shaped warmup runs excluded from statistics: ${FIXED_KV_WARMUP_RUNS}
 - Validate-only mode: ${VALIDATE_ONLY}; when enabled, stop after graph capture and all-rank module selection proof
 - When fixed-KV series mode is 0, every run independently flushes stale radix state and rebuilds the same deterministic random-id prefixes
 - When fixed-KV series mode is 1, every label/BS cell flushes once, builds the deterministic ${S}-64-token prefixes once, and then sends paired requests whose unique 64-token tails prevent measured-suffix cache reuse
+- Optional natural-token plan: ${FIXED_KV_TOKEN_PLAN:-disabled}; when enabled, exact ShareGPT-derived prefix/suffix bytes and their SHA256 replace synthetic random IDs while retaining distinct suffix branches
+- Built-in one-batch cross-check: ${BUILTIN_ONE_BATCH_SERVER}; this is a single-row provenance check and does not replace fixed-KV series promotion
+- GSM8K retained quality gate: ${GSM8K_EVAL}; dataset ${GSM8K_DATA_PATH:-disabled}, first ${GSM8K_NUM_EXAMPLES} questions after ${GSM8K_NUM_SHOTS} frozen few-shot rows, temperature 0, single-arm diagnostic ${GSM8K_SINGLE_ARM}
 - Required measured cache-hit rate: at least 0.99 (target: 0.998); multi-batch mode is disabled so TTFT/ITL remain valid
 - Runs per label and global BS: **${N_RUNS}**
 - Metric: TPOT/ITL = (latency − last_ttft) / output_len × 1000 (ms)
@@ -158,14 +284,14 @@ write_env() {
         echo "SGLANG_GLM52_OPT=0"
         echo "SGLANG_GLM52_OPT_PROFILE=serving_safe"
         ;;
-      winners|swiglu|p1_before|p1_after|r2a|router_before|router_ids|router_after)
+      winners|winners_before|winners_after|swiglu|p1_before|p1_after|r2a|router_before|router_ids|router_after)
         echo "SGLANG_GLM52_OPT=1"
         echo "SGLANG_GLM52_OPT_PROFILE=combined_winners"
         # e2e-proven only — no fused_qkv_a, no dsa_prefill
         local ops="flashmla_sparse_decode,o_proj,index_q_upproj,moe_gate_proj,moe_up_proj,moe_down_proj"
         if [[ "$mode" == "swiglu" ]]; then
           ops="$ops,moe_swiglu_quant"
-          echo "SGLANG_OPT_MOE_SWIGLU_QUANT_VARIANT=cuda_valid_cta"
+          echo "SGLANG_OPT_MOE_SWIGLU_QUANT_VARIANT=cuda_grid_stride"
         fi
         echo "SGLANG_GLM52_OPT_OPS=$ops"
         echo "SGLANG_GLM52_OPT_M_BUCKETS=dsa_decode_attn:16|32,o_proj:16|32,index_q_upproj:16|32"
@@ -297,7 +423,7 @@ launch_serve() {
     unset GLM52_FLASHMLA_USE_PREBUILT GLM52_FLASHMLA_DECODE_STACK
     unset GLM52_FLASHMLA_PREBUILT_SO
     mkdir -p "$SGLANG_DG_CACHE_DIR" "$TMPDIR"
-    export SGLANG_EXTRA_SERVE_ARGS="--mem-fraction-static ${MEM_FRACTION_STATIC}"
+    export SGLANG_EXTRA_SERVE_ARGS="--mem-fraction-static ${MEM_FRACTION_STATIC} --random-seed ${SGLANG_RANDOM_SEED}"
     ROOT="$ROOT" REPO="$REPO" MODEL="$MODEL" exec setsid bash "$SERVER_LAUNCHER"
   ) > "$OUT/serve_${label}.log" 2>&1 &
   echo $! > "$ACTIVE_SERVER_PID_FILE"
@@ -336,7 +462,11 @@ run_decode_once() {
   local lm=$((gbs / DP))
   local RATE
   RATE=$("$PY" -c "print(max(0.0, ($S - 64) / float($S)))")
-  "$PY" "$ROOT/run_one_batch_server_longtimeout.py" \
+  local runner=("$PY" "$ROOT/run_one_batch_server_longtimeout.py")
+  if [[ "$BUILTIN_ONE_BATCH_SERVER" == 1 ]]; then
+    runner=("$PY" -m sglang.benchmark.one_batch_server)
+  fi
+  "${runner[@]}" \
     --model None \
     --base-url "http://127.0.0.1:$PORT" \
     --local-tokenizer-path "$MODEL" \
@@ -415,10 +545,12 @@ run_label() {
   fi
   echo "[VALID] router DeepEP-ID label=$label selection_count=$router_ids_selection_count"
   if [[ "$label" == "swiglu" ]]; then
-    local graph_buckets=(1 2 4 8 12 16)
-    if [[ "$SGLANG_CUDA_GRAPH_MAX_BS" -ge 32 ]]; then
-      graph_buckets+=(32)
-    fi
+    local graph_buckets=() candidate_bucket
+    for candidate_bucket in 1 2 4 8 12 16 32; do
+      if [[ "$SGLANG_CUDA_GRAPH_MAX_BS" -ge "$candidate_bucket" ]]; then
+        graph_buckets+=("$candidate_bucket")
+      fi
+    done
     local bucket selection_count
     for bucket in "${graph_buckets[@]}"; do
       selection_count=$(grep -F -c \
@@ -442,12 +574,41 @@ run_label() {
     return 0
   fi
 
+  if [[ "$GSM8K_EVAL" == 1 ]]; then
+    local thinking_args=()
+    if [[ "$GSM8K_ENABLE_THINKING" == 1 ]]; then
+      thinking_args=(--enable-thinking)
+    fi
+    "$PY" "$GSM8K_RUNNER" \
+      --base-url "http://127.0.0.1:$PORT" \
+      --data-path "$GSM8K_DATA_PATH" \
+      --output "$OUT/gsm8k_${label}.json" \
+      --label "$label" \
+      --num-examples "$GSM8K_NUM_EXAMPLES" \
+      --num-shots "$GSM8K_NUM_SHOTS" \
+      --start-offset "$GSM8K_START_OFFSET" \
+      --num-threads "$GSM8K_NUM_THREADS" \
+      --max-tokens "$GSM8K_MAX_TOKENS" \
+      --temperature 0 \
+      --top-p 1 \
+      "${thinking_args[@]}"
+    if [ -f "$HIT_FILE" ]; then
+      cp -f "$HIT_FILE" "$OUT/hits_${label}_gsm8k.json"
+    fi
+    cleanup_ours
+    return 0
+  fi
+
   for gbs in $GLOBAL_BS_LIST; do
     local lm=$((gbs / DP))
     echo "---- $label global_bs=$gbs local_M=$lm N=$N_RUNS ----"
     local outp="$OUT/decode_${label}_bs${gbs}.jsonl"
     : > "$outp"
     if [[ "$FIXED_KV_SERIES" == 1 ]]; then
+      local token_plan_args=()
+      if [[ -n "$FIXED_KV_TOKEN_PLAN" ]]; then
+        token_plan_args=(--token-plan "$FIXED_KV_TOKEN_PLAN")
+      fi
       "$PY" "$FIXED_KV_RUNNER" \
         --base-url "http://127.0.0.1:$PORT" \
         --model-path "$MODEL" \
@@ -459,7 +620,8 @@ run_label() {
         --output-len "$OUT_LEN" \
         --runs "$N_RUNS" \
         --warmup-runs "$FIXED_KV_WARMUP_RUNS" \
-        --seed 42
+        --seed 42 \
+        "${token_plan_args[@]}"
       "$PY" - "$outp" "$label" "$gbs" "$N_RUNS" <<'PY'
 import json
 import sys
@@ -632,6 +794,7 @@ if labels:
 if fixed_kv_series and labels:
     lines += ["", "## Fixed-KV request pairing", ""]
     summary["fixed_kv_request_pairing"] = {}
+    summary["fixed_kv_output_correctness"] = {}
     for gbs in batch_sizes:
         reference_key = f"{labels[0]}_bs{gbs}"
         reference_ids = series.get(reference_key, {}).get("prompt_ids", [])
@@ -653,6 +816,70 @@ if fixed_kv_series and labels:
             f"- BS={gbs}: all {len(reference_ids)} measured prompt sets match exactly "
             f"across {' -> '.join(labels)} by protocol hash."
         )
+        correctness_records = []
+        for label in labels:
+            correctness_path = out / (
+                f"decode_{label}_bs{gbs}.jsonl.correctness.json"
+            )
+            if not correctness_path.exists():
+                raise SystemExit(
+                    f"missing fixed-KV output correctness record: {correctness_path}"
+                )
+            record = json.loads(correctness_path.read_text())
+            if record.get("protocol") != "fixed-kv-decode-series-v1":
+                raise SystemExit(
+                    f"invalid correctness protocol in {correctness_path}"
+                )
+            if record.get("label") != label:
+                raise SystemExit(
+                    f"invalid correctness label in {correctness_path}: "
+                    f"{record.get('label')!r}"
+                )
+            if record.get("batch_size") != gbs:
+                raise SystemExit(
+                    f"invalid correctness batch in {correctness_path}: "
+                    f"{record.get('batch_size')!r}"
+                )
+            correctness_records.append(record)
+        correctness_prompt_ids = {
+            record["prompt_set_id"] for record in correctness_records
+        }
+        correctness_hashes = {
+            record["output_token_ids_sha256"]
+            for record in correctness_records
+        }
+        if len(correctness_prompt_ids) != 1:
+            raise SystemExit(
+                f"fixed-KV correctness prompt mismatch across A/B/A arms for BS={gbs}"
+            )
+        output_token_count = correctness_records[0]["output_token_count"]
+        exact_outputs = len(correctness_hashes) == 1
+        output_hashes_by_label = {
+            label: record["output_token_ids_sha256"]
+            for label, record in zip(labels, correctness_records)
+        }
+        correctness_summary = {
+            "exact": exact_outputs,
+            "labels": labels,
+            "prompt_set_id": correctness_records[0]["prompt_set_id"],
+            "output_token_count_per_label": output_token_count,
+            "output_token_ids_sha256_by_label": output_hashes_by_label,
+            "diagnostic_path": str(out / f"OUTPUT_ID_DIFF_bs{gbs}.json"),
+        }
+        if exact_outputs:
+            output_hash = correctness_records[0]["output_token_ids_sha256"]
+            correctness_summary["output_token_ids_sha256"] = output_hash
+            lines.append(
+                f"- BS={gbs}: all {output_token_count} greedy output token IDs "
+                f"match exactly across {' -> '.join(labels)} "
+                f"(sha256={output_hash})."
+            )
+        else:
+            lines.append(
+                f"- **OUTPUT GATE FAILED** BS={gbs}: A/B/A hashes differ; "
+                f"see OUTPUT_ID_DIFF_bs{gbs}.json for token-level localization."
+            )
+        summary["fixed_kv_output_correctness"][str(gbs)] = correctness_summary
 
 if labels == ["p1_before", "r2a", "p1_after"]:
     lines += ["", "## P1/r2a/P1 drift bracket", ""]
@@ -709,6 +936,74 @@ if labels == ["p1_before", "r2a", "p1_after"]:
                 f"positive {sum(value > 0 for value in paired_reductions)}/{len(paired_reductions)}."
             )
 
+if labels == ["winners_before", "swiglu", "winners_after"]:
+    lines += ["", "## Winners/SwiGLU/winners drift bracket", ""]
+    summary["swiglu_aba_bracket"] = {}
+    for gbs in batch_sizes:
+        before = summary["cells"].get(
+            f"winners_before_bs{gbs}", {}
+        ).get("itl_ms")
+        candidate = summary["cells"].get(f"swiglu_bs{gbs}", {}).get("itl_ms")
+        after = summary["cells"].get(
+            f"winners_after_bs{gbs}", {}
+        ).get("itl_ms")
+        if not before or not candidate or not after:
+            lines.append(f"- BS={gbs}: incomplete")
+            continue
+        bracket_mid = (before["median"] + after["median"]) / 2.0
+        reduction = bracket_mid - candidate["median"]
+        reduction_pct = reduction / bracket_mid * 100.0
+        speedup = bracket_mid / candidate["median"]
+        drift = after["median"] - before["median"]
+        lower_than_both = candidate["median"] < min(
+            before["median"], after["median"]
+        )
+        before_series = series[f"winners_before_bs{gbs}"]["itls"]
+        candidate_series = series[f"swiglu_bs{gbs}"]["itls"]
+        after_series = series[f"winners_after_bs{gbs}"]["itls"]
+        paired_reductions = [
+            (left + right) / 2.0 - middle
+            for left, middle, right in zip(
+                before_series, candidate_series, after_series
+            )
+        ]
+        paired = stats(paired_reductions)
+        summary["swiglu_aba_bracket"][str(gbs)] = {
+            "winners_before_median_itl_ms": before["median"],
+            "swiglu_median_itl_ms": candidate["median"],
+            "winners_after_median_itl_ms": after["median"],
+            "winners_bracket_midpoint_median_itl_ms": bracket_mid,
+            "winners_drift_ms": drift,
+            "swiglu_reduction_ms": reduction,
+            "swiglu_reduction_pct": reduction_pct,
+            "swiglu_speedup": speedup,
+            "swiglu_lower_than_both_winners_brackets": lower_than_both,
+            "paired_winners_midpoint_minus_swiglu_itl_ms": paired,
+            "paired_positive_fraction": (
+                sum(value > 0 for value in paired_reductions)
+                / len(paired_reductions)
+                if paired_reductions
+                else None
+            ),
+        }
+        lines.append(
+            f"- **BS={gbs}**: winners {before['median']:.3f} -> "
+            f"SwiGLU {candidate['median']:.3f} -> winners "
+            f"{after['median']:.3f} ms; midpoint {bracket_mid:.3f} ms, "
+            f"candidate **{speedup:.4f}x** ({reduction:+.3f} ms, "
+            f"{reduction_pct:+.2f}%), baseline drift {drift:+.3f} ms, "
+            f"lower-than-both={str(lower_than_both).lower()}"
+        )
+        if paired:
+            positive = sum(value > 0 for value in paired_reductions)
+            lines.append(
+                "  Paired per-prompt winners-midpoint minus SwiGLU: "
+                f"mean {paired['mean']:+.4f} ms, median "
+                f"{paired['median']:+.4f} ms, p10/p90 "
+                f"{paired['p10']:+.4f}/{paired['p90']:+.4f} ms; "
+                f"positive {positive}/{len(paired_reductions)}."
+            )
+
 (out / "TPOT_SUMMARY.md").write_text("\n".join(lines) + "\n")
 (out / "TPOT_SUMMARY.json").write_text(json.dumps(summary, indent=2) + "\n")
 print("\n".join(lines))
@@ -726,18 +1021,37 @@ if [[ "$VALIDATE_ONLY" == 1 ]]; then
   exit 0
 fi
 
+if [[ "$GSM8K_EVAL" == 1 ]]; then
+  if [[ "$GSM8K_SINGLE_ARM" == 0 ]]; then
+    "$PY" "$GSM8K_ANALYZER" \
+      --before "$OUT/gsm8k_winners_before.json" \
+      --candidate "$OUT/gsm8k_swiglu.json" \
+      --after "$OUT/gsm8k_winners_after.json" \
+      --output "$OUT/GSM8K_ABA_SUMMARY.json"
+    cat "$OUT/GSM8K_ABA_SUMMARY.md"
+  fi
+  echo "======== GSM8K QUALITY DONE $(date -Is) OUT=$OUT ========"
+  ls -lah "$OUT" | head -40
+  exit 0
+fi
+
 summarize
 if [[ "$FIXED_KV_SERIES" == 1 \
       && ( "$LABELS" == "p1_before r2a p1_after" \
-        || "$LABELS" == "router_before router_ids router_after" ) ]]; then
+        || "$LABELS" == "router_before router_ids router_after" \
+        || "$LABELS" == "winners_before swiglu winners_after" ) ]]; then
   if [[ "$LABELS" == "p1_before r2a p1_after" ]]; then
     aba_before=p1_before
     aba_candidate=r2a
     aba_after=p1_after
-  else
+  elif [[ "$LABELS" == "router_before router_ids router_after" ]]; then
     aba_before=router_before
     aba_candidate=router_ids
     aba_after=router_after
+  else
+    aba_before=winners_before
+    aba_candidate=swiglu
+    aba_after=winners_after
   fi
   for gbs in $GLOBAL_BS_LIST; do
     "$PY" "$FIXED_KV_ABA_ANALYZER" \
@@ -750,6 +1064,24 @@ if [[ "$FIXED_KV_SERIES" == 1 \
       --candidate-label "$aba_candidate" \
       --after-label "$aba_after"
   done
+  output_gate_failed=0
+  for gbs in $GLOBAL_BS_LIST; do
+    if ! "$PY" "$FIXED_KV_OUTPUT_ANALYZER" \
+      --before "$OUT/decode_${aba_before}_bs${gbs}.jsonl.correctness.json" \
+      --candidate "$OUT/decode_${aba_candidate}_bs${gbs}.jsonl.correctness.json" \
+      --after "$OUT/decode_${aba_after}_bs${gbs}.jsonl.correctness.json" \
+      --output "$OUT/OUTPUT_ID_DIFF_bs${gbs}.json" \
+      --before-label "$aba_before" \
+      --candidate-label "$aba_candidate" \
+      --after-label "$aba_after" \
+      --require-exact; then
+      output_gate_failed=1
+    fi
+  done
+  if [[ "$output_gate_failed" == 1 ]]; then
+    echo "[ERR] fixed-KV output-ID gate failed; performance evidence is diagnostic only" >&2
+    exit 1
+  fi
 fi
 echo "======== ALL DONE $(date -Is) OUT=$OUT ========"
 ls -lah "$OUT" | head -40

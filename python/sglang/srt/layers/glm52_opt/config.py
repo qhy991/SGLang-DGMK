@@ -45,6 +45,24 @@ _GLM52_ENV_KEYS = frozenset(
         "SGLANG_GLM52_INDEX_Q_UPPROJ_GRAPH_ONLY",
         "SGLANG_GLM52_FLASHMLA_GRAPH_ONLY",
         "SGLANG_GLM52_DSA_PREFILL_GRAPH_ONLY",
+        # Explicit, default-off E2E prefill migration.  This currently enables
+        # the GLM ragged-indexer output fast path; it is kept separate from the
+        # historical serving/decode profiles so old A/B commands do not change.
+        "SGLANG_GLM52_E2E_PREFILL_INDEXER",
+        # Reuse one model-runner-owned [M, index_topk] scratch across the
+        # sequential GLM layers.  Kept separate from the output fast path so
+        # allocation reuse can be measured and rolled back independently.
+        "SGLANG_GLM52_E2E_PREFILL_WORKSPACE",
+        # Cluster two CTAs across Q16 groups for the GLM DSA index-score MQA.
+        # Uses the GLM-native H32 specialization of the migrated DSV4 SM103
+        # kernel and falls back unless every request segment is Q16 aligned.
+        "SGLANG_GLM52_E2E_PREFILL_CLUSTERED_MQA",
+        # Use DeepGEMM's native SM100 paged-MQA kernel directly for validated
+        # ordinary-prefill shapes, removing the paged-to-contiguous KV gather.
+        "SGLANG_GLM52_E2E_PREFILL_PAGED_MQA",
+        # Emit exact fail-closed reasons for the experimental paged-prefill
+        # admission path. This is debug-only and remains disabled by default.
+        "SGLANG_GLM52_E2E_PREFILL_DIAGNOSTICS",
     }
 )
 
@@ -138,6 +156,43 @@ def ensure_glm52_env() -> None:
 def is_enabled() -> bool:
     ensure_glm52_env()
     return _truthy("SGLANG_GLM52_OPT")
+
+
+@lru_cache(maxsize=1)
+def e2e_prefill_indexer_enabled() -> bool:
+    """Enable the explicit GLM-5.2 ragged-indexer prefill fast path.
+
+    Requiring both the global optimizer switch and a dedicated switch keeps
+    this migration out of every existing profile until its E2E TTFT result is
+    validated on the target workload.
+    """
+
+    ensure_glm52_env()
+    return is_enabled() and _truthy("SGLANG_GLM52_E2E_PREFILL_INDEXER")
+
+
+@lru_cache(maxsize=1)
+def e2e_prefill_workspace_enabled() -> bool:
+    """Enable the strict, non-overlapped GLM prefill top-k scratch cache."""
+
+    ensure_glm52_env()
+    return is_enabled() and _truthy("SGLANG_GLM52_E2E_PREFILL_WORKSPACE")
+
+
+@lru_cache(maxsize=1)
+def e2e_prefill_clustered_mqa_enabled() -> bool:
+    """Enable the B300-only Q16/Q32 clustered GLM index-score kernel."""
+
+    ensure_glm52_env()
+    return is_enabled() and _truthy("SGLANG_GLM52_E2E_PREFILL_CLUSTERED_MQA")
+
+
+@lru_cache(maxsize=1)
+def e2e_prefill_paged_mqa_enabled() -> bool:
+    """Enable the validated SM100 direct-paged GLM prefill indexer path."""
+
+    ensure_glm52_env()
+    return is_enabled() and _truthy("SGLANG_GLM52_E2E_PREFILL_PAGED_MQA")
 
 
 def profile_name() -> str:
@@ -425,10 +480,10 @@ def swiglu_quant_variant() -> str | None:
     variant = variant.strip()
     if not variant:
         return None
-    if variant != "cuda_valid_cta":
+    if variant != "cuda_grid_stride":
         raise ValueError(
             "SGLANG_OPT_MOE_SWIGLU_QUANT_VARIANT must be "
-            f"'cuda_valid_cta', got {variant!r}"
+            f"'cuda_grid_stride', got {variant!r}"
         )
     return variant
 

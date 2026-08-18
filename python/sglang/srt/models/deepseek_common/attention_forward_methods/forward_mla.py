@@ -632,11 +632,29 @@ class DeepseekMLAForwardMixin:
             dsa_prefill_cp=dsa_prefill_cp,
             fuse_rope_for_trtllm_mla=fuse_rope_for_trtllm_mla,
         )
+        kv_cache_prestored = False
         if (dsa_prefill_cp or mla_prefill_cp) and not defer_kv_gather_until_after_rope:
-            # support allgather+rerrange
-            k_nope, k_pe = self.rebuild_cp_kv_cache(
-                latent_cache, forward_batch, k_nope, k_pe
-            )
+            if hasattr(self, "rebuild_cp_kv_cache_direct_packed"):
+                kv_cache_prestored = self.rebuild_cp_kv_cache_direct_packed(
+                    forward_batch, k_nope, k_pe
+                )
+            if not kv_cache_prestored and hasattr(
+                self, "rebuild_cp_kv_cache_packed"
+            ):
+                kv_cache_prestored = self.rebuild_cp_kv_cache_packed(
+                    forward_batch, k_nope, k_pe
+                )
+            if kv_cache_prestored:
+                # The attention backend reads the just-written paged cache; do
+                # not retain global BF16 tensors or ask it to quantize/store a
+                # second time.
+                k_nope = None
+                k_pe = None
+            else:
+                # Stock allgather+rerrange.
+                k_nope, k_pe = self.rebuild_cp_kv_cache(
+                    latent_cache, forward_batch, k_nope, k_pe
+                )
 
         # all_gather q_pe, q_nope_out,take tp8 as an example， q_pe [B, H, ROPE_DIM], q_nope_out [B, H, NOPE_DIM] gathered to [B, H * dcp_world_size, ROPE_DIM] [B, H * dcp_world_size, NOPE_DIM] for decode batch, and all gather k_pe, k_nope for extend batch.
         if get_parallel().dcp_enabled:
@@ -675,6 +693,7 @@ class DeepseekMLAForwardMixin:
             topk_indices,
             llama_4_scaling,
             fusion_plan,
+            kv_cache_prestored,
         )
 
     def forward_absorb_core(
@@ -689,9 +708,10 @@ class DeepseekMLAForwardMixin:
         topk_indices,
         llama_4_scaling,
         fusion_plan: Optional[MlaBmmFusionPlan] = None,
+        kv_cache_prestored: bool = False,
     ):
         global _infini_v_apply_quant_logged
-        save_kv_cache = True
+        save_kv_cache = not kv_cache_prestored
 
         if self.current_attention_backend in FORWARD_ABSORB_CORE_ATTENTION_BACKENDS:
             if self._skip_rope_for_dsa_tilelang_fused() and self.rotary_emb is not None:

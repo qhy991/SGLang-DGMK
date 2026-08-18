@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import os
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
@@ -54,6 +55,46 @@ from sglang.srt.utils import (
 from sglang.srt.utils.custom_op import register_custom_op
 
 logger = logging.getLogger(__name__)
+
+
+def _set_glm52_prefill_plan_cache(
+    attn_metadata: Any, field_name: str, value: object
+) -> None:
+    """Cache a GLM prefill plan on SGLang's frozen DSAMetadata.
+
+    DSAMetadata is immutable at the Python API boundary, but SGLang already
+    populates lazy per-forward caches with object.__setattr__.  Keep these GLM
+    caches consistent with that contract instead of using normal assignment,
+    which raises FrozenInstanceError in a real serving request.
+    """
+
+    object.__setattr__(attn_metadata, field_name, value)
+
+
+def _get_glm52_prefill_topk_transform_args(
+    metadata: BaseIndexerMetadata,
+    q_offset: int,
+    device: torch.device,
+) -> Optional[Tuple[Optional[torch.Tensor], Optional[torch.Tensor], Optional[torch.Tensor]]]:
+    """Resolve both stock PAGED and RAGGED top-k transform ABIs.
+
+    FlashMLA-KV ordinary prefill uses the PAGED transform and intentionally has
+    no ``topk_indices_offset``.  The RAGGED backend supplies that offset.  The
+    migrated logits kernels must preserve whichever layout SGLang selected.
+    """
+
+    global_topk_offset = metadata.attn_metadata.topk_indices_offset
+    if global_topk_offset is not None:
+        if global_topk_offset.shape[0] < q_offset:
+            return None
+        return None, None, global_topk_offset[:q_offset]
+
+    token_to_batch_idx = metadata.get_token_to_batch_idx()
+    if token_to_batch_idx is None or token_to_batch_idx.shape[0] < q_offset:
+        return None
+    cu_seqlens_q = torch.ones(q_offset, dtype=torch.int32, device=device)
+    return cu_seqlens_q, token_to_batch_idx[:q_offset], None
+
 
 global _use_multi_stream
 _is_cuda = is_cuda()
@@ -317,6 +358,11 @@ class BaseIndexerMetadata(ABC):
         Return: batch idx for each token.
         """
 
+    def get_prefill_topk_workspace(self) -> Optional[torch.Tensor]:
+        """Optional per-forward output scratch shared by sequential layers."""
+
+        return None
+
     @abstractmethod
     def topk_transform(
         self,
@@ -390,6 +436,40 @@ class Indexer(MultiPlatformOp):
         self.index_topk = index_topk
         self.q_lora_rank = q_lora_rank
         self.layer_id = layer_id
+        self.glm52_e2e_prefill_indexer = False
+        self.glm52_e2e_prefill_clustered_mqa = False
+        self.glm52_e2e_prefill_paged_mqa = False
+        self.glm52_cp8_combine_indexer_halves = False
+        self.glm52_cp8_combine_indexer_halves_arm_file = ""
+        self.glm52_e2e_prefill_diagnostics = False
+        if config is not None and "GlmMoeDsaForCausalLM" in tuple(
+            getattr(config, "architectures", ()) or ()
+        ):
+            # Import lazily so generic DSA models do not acquire GLM optimizer
+            # state.  The optimization is additionally gated inside config by
+            # SGLANG_GLM52_OPT=1 and an explicit, default-off E2E switch.
+            from sglang.srt.layers.glm52_opt import config as glm52_opt_config
+
+            self.glm52_e2e_prefill_indexer = (
+                glm52_opt_config.e2e_prefill_indexer_enabled()
+            )
+            self.glm52_e2e_prefill_clustered_mqa = (
+                glm52_opt_config.e2e_prefill_clustered_mqa_enabled()
+            )
+            self.glm52_e2e_prefill_paged_mqa = (
+                glm52_opt_config.e2e_prefill_paged_mqa_enabled()
+            )
+            # The GLM config import above loads SGLANG_GLM52_ENV_FILE inside
+            # spawned DP workers. Read the debug-only switch afterwards.
+            self.glm52_e2e_prefill_diagnostics = get_bool_env_var(
+                "SGLANG_GLM52_E2E_PREFILL_DIAGNOSTICS"
+            )
+            self.glm52_cp8_combine_indexer_halves = get_bool_env_var(
+                "SGLANG_GLM52_CP8_COMBINE_INDEXER_HALVES"
+            )
+            self.glm52_cp8_combine_indexer_halves_arm_file = os.environ.get(
+                "SGLANG_GLM52_CP8_COMBINE_INDEXER_HALVES_ARM_FILE", ""
+            ).strip()
         self.use_dsa_indexer_fusion = (
             _is_cuda
             and not envs.SGLANG_DISABLE_DSA_INDEXER_FUSION.get()
@@ -397,12 +477,69 @@ class Indexer(MultiPlatformOp):
         )
         self.alt_stream = alt_stream
         self.dsa_enable_prefill_cp = is_dsa_enable_prefill_cp()
+        if self.glm52_e2e_prefill_clustered_mqa:
+            if not _is_cuda or _is_hip or _is_fp8_fnuz:
+                raise ValueError(
+                    "SGLANG_GLM52_E2E_PREFILL_CLUSTERED_MQA=1 requires "
+                    "NVIDIA e4m3fn CUDA"
+                )
+            if self.n_heads != 32 or self.head_dim != 128:
+                raise ValueError(
+                    "GLM clustered MQA requires indexer H32/D128, got "
+                    f"H{self.n_heads}/D{self.head_dim}"
+                )
+            if not get_server_args().disable_overlap_schedule:
+                raise ValueError(
+                    "SGLANG_GLM52_E2E_PREFILL_CLUSTERED_MQA=1 requires "
+                    "--disable-overlap-schedule because logits/Q scratch is "
+                    "reused across sequential layers"
+                )
+        if self.glm52_e2e_prefill_paged_mqa:
+            if not _is_cuda or _is_hip or _is_fp8_fnuz:
+                raise ValueError(
+                    "SGLANG_GLM52_E2E_PREFILL_PAGED_MQA=1 requires "
+                    "NVIDIA e4m3fn CUDA"
+                )
+            if self.n_heads != 32 or self.head_dim != 128:
+                raise ValueError(
+                    "GLM paged prefill MQA requires indexer H32/D128, got "
+                    f"H{self.n_heads}/D{self.head_dim}"
+                )
         if self.dsa_enable_prefill_cp:
             self.cp_size = get_parallel().attn_cp_size
             self.cp_rank = get_parallel().attn_cp_rank
         else:
             self.cp_size = None
             self.cp_rank = None
+        if (
+            self.glm52_cp8_combine_indexer_halves
+            or self.glm52_cp8_combine_indexer_halves_arm_file
+        ):
+            if not _is_cuda or _is_hip or _is_fp8_fnuz:
+                raise ValueError(
+                    "GLM CP8 combined-indexer treatment requires "
+                    "NVIDIA e4m3fn CUDA"
+                )
+            if not self.dsa_enable_prefill_cp or self.cp_size != 8:
+                raise ValueError(
+                    "GLM CP8 combined-indexer treatment requires "
+                    "DSA attention CP size 8"
+                )
+            if not is_dsa_prefill_cp_in_seq_split():
+                raise ValueError(
+                    "GLM CP8 combined-indexer treatment requires "
+                    "zigzag/in-sequence DSA CP"
+                )
+            if self.n_heads != 32 or self.head_dim != 128:
+                raise ValueError(
+                    "GLM CP8 combined indexer requires H32/D128, got "
+                    f"H{self.n_heads}/D{self.head_dim}"
+                )
+            if not get_server_args().disable_overlap_schedule:
+                raise ValueError(
+                    "GLM CP8 combined-indexer treatment requires "
+                    "--disable-overlap-schedule"
+                )
         if _is_cuda:
             self.sm_count = deep_gemm.get_num_sms()
             self.half_device_sm_count = ceil_align(self.sm_count // 2, 8)
@@ -1113,6 +1250,312 @@ class Indexer(MultiPlatformOp):
         need_chunk = logits_bytes > logits_budget_bytes
         return need_chunk, logits_budget_bytes
 
+    def _get_topk_ragged_paged_prefill(
+        self,
+        *,
+        forward_batch: ForwardBatch,
+        layer_id: int,
+        q_fp8: torch.Tensor,
+        weights: torch.Tensor,
+        metadata: BaseIndexerMetadata,
+        topk_result: Optional[torch.Tensor],
+    ) -> Optional[torch.Tensor]:
+        """Skip the KV gather with DeepGEMM's native SM100 paged kernel.
+
+        The stock DeepGEMM ABI needs a rectangular [B, next_n] Q layout, so
+        this arm admits only uniform ordinary-prefill query counts. Unsupported
+        shapes return None before invoking DeepGEMM and retain the exact ragged
+        path below.
+        """
+
+        if not self.glm52_e2e_prefill_paged_mqa:
+            return None
+        if topk_result is not None:
+            return self._reject_glm52_paged_prefill("output_already_bound", q_fp8)
+        if self.dsa_enable_prefill_cp:
+            return self._reject_glm52_paged_prefill("prefill_cp", q_fp8)
+        if get_is_capture_mode():
+            return self._reject_glm52_paged_prefill("capture_mode", q_fp8)
+        if q_fp8.ndim != 3 or q_fp8.shape[1:] != (32, 128):
+            return self._reject_glm52_paged_prefill("q_shape", q_fp8)
+        if weights.ndim != 2 or weights.shape[1] != 32:
+            return self._reject_glm52_paged_prefill("weight_shape", q_fp8)
+        if q_fp8.dtype != torch.float8_e4m3fn or weights.dtype != torch.float32:
+            return self._reject_glm52_paged_prefill("dtype", q_fp8)
+
+        attn_metadata = getattr(metadata, "attn_metadata", None)
+        if attn_metadata is None:
+            return self._reject_glm52_paged_prefill("no_metadata", q_fp8)
+        cached_plan = attn_metadata.glm52_paged_prefill_mqa_plan
+        if cached_plan is False:
+            return self._reject_glm52_paged_prefill("cached_rejection", q_fp8)
+
+        seq_lens_expanded = metadata.get_seqlens_expanded()
+        extend_lens_cpu = metadata.get_dsa_extend_len_cpu()
+        q_offset = sum(extend_lens_cpu)
+        if q_offset != seq_lens_expanded.numel() or q_offset != q_fp8.shape[0]:
+            _set_glm52_prefill_plan_cache(
+                attn_metadata, "glm52_paged_prefill_mqa_plan", False
+            )
+            return self._reject_glm52_paged_prefill("q_count", q_fp8)
+
+        topk_transform_args = _get_glm52_prefill_topk_transform_args(
+            metadata, q_offset, q_fp8.device
+        )
+        if topk_transform_args is None:
+            return self._reject_glm52_paged_prefill(
+                "topk_transform_metadata", q_fp8
+            )
+        cu_seqlens_q, batch_idx_list, global_topk_offset = topk_transform_args
+
+        block_tables = metadata.get_page_table_64()
+        if cached_plan is None:
+            device_index = q_fp8.device.index
+            if device_index is None:
+                return self._reject_glm52_paged_prefill("no_device", q_fp8)
+            seq_lens_cpu = metadata.get_indexer_seq_len_cpu()
+            if seq_lens_cpu is None or seq_lens_cpu.numel() == 0:
+                _set_glm52_prefill_plan_cache(
+                    attn_metadata, "glm52_paged_prefill_mqa_plan", False
+                )
+                return self._reject_glm52_paged_prefill("no_seq_lens", q_fp8)
+            from sglang.jit_kernel.glm52.paged_prefill_mqa import (
+                prepare_glm52_paged_prefill_mqa_plan,
+            )
+
+            cached_plan = prepare_glm52_paged_prefill_mqa_plan(
+                seq_lens_expanded=seq_lens_expanded,
+                block_tables=block_tables,
+                extend_lens_cpu=extend_lens_cpu,
+                max_context=int(seq_lens_cpu.max().item()),
+                logits_budget_bytes=self._get_mqa_logits_budget_bytes(
+                    device_index
+                ),
+            )
+            _set_glm52_prefill_plan_cache(
+                attn_metadata,
+                "glm52_paged_prefill_mqa_plan",
+                cached_plan if cached_plan is not None else False,
+            )
+            if cached_plan is None:
+                return self._reject_glm52_paged_prefill("plan_rejected", q_fp8)
+
+        raw_kv_cache = self._get_index_k_read_buffer(
+            get_token_to_kv_pool(), layer_id
+        )
+        from sglang.jit_kernel.glm52.paged_prefill_mqa import (
+            run_glm52_paged_prefill_mqa,
+        )
+
+        logits = run_glm52_paged_prefill_mqa(
+            q=q_fp8,
+            raw_kv_cache=raw_kv_cache,
+            weights=weights,
+            block_tables=block_tables,
+            plan=cached_plan,
+        )
+        self._mask_init_and_local_tokens(
+            logits, seq_lens_expanded, cached_plan.local_row_starts
+        )
+        result = metadata.topk_transform(
+            logits,
+            self.index_topk,
+            ks=cached_plan.local_row_starts,
+            cu_seqlens_q=cu_seqlens_q,
+            ke_offset=seq_lens_expanded,
+            batch_idx_list=batch_idx_list,
+            topk_indices_offset_override=global_topk_offset,
+        )
+
+        from sglang.srt.layers.glm52_opt.dispatch import _record_hit
+
+        _record_hit(
+            "e2e_prefill/deepgemm_paged_h32",
+            "index_score",
+            "prefill",
+            m=q_offset,
+        )
+        return result
+
+    def _reject_glm52_paged_prefill(
+        self, reason: str, q_fp8: torch.Tensor
+    ) -> None:
+        """Record a paged-prefill rejection only in an explicit debug run."""
+
+        if self.glm52_e2e_prefill_diagnostics:
+            from sglang.srt.layers.glm52_opt.dispatch import _record_miss
+
+            m = int(q_fp8.shape[0]) if q_fp8.ndim > 0 else -1
+            _record_miss(
+                f"e2e_prefill/paged_{reason}",
+                "index_score",
+                "prefill",
+                m=m,
+            )
+        return None
+
+    def _get_topk_ragged_clustered(
+        self,
+        *,
+        forward_batch: ForwardBatch,
+        layer_id: int,
+        q_fp8: torch.Tensor,
+        weights: torch.Tensor,
+        metadata: BaseIndexerMetadata,
+        topk_result: Optional[torch.Tensor],
+    ) -> Optional[torch.Tensor]:
+        """Run the migrated Q16/Q32 two-CTA kernel on GLM's paged index cache.
+
+        Unsupported dynamic shapes return None before loading the extension so
+        the existing DeepGEMM ragged implementation remains the exact fallback.
+        Once a matching plan is selected, CUDA/compiler errors propagate: an
+        explicitly enabled optimized arm must not silently become baseline.
+        """
+
+        if (
+            not self.glm52_e2e_prefill_clustered_mqa
+            or topk_result is not None
+            or self.dsa_enable_prefill_cp
+            or get_is_capture_mode()
+        ):
+            return None
+        if q_fp8.ndim != 3 or q_fp8.shape[1:] != (32, 128):
+            return None
+        if weights.ndim != 2 or weights.shape[1] != 32:
+            return None
+        if q_fp8.dtype != torch.float8_e4m3fn or weights.dtype != torch.float32:
+            return None
+
+        attn_metadata = getattr(metadata, "attn_metadata", None)
+        if attn_metadata is None:
+            return None
+        cached_plan = attn_metadata.glm52_clustered_mqa_plan
+        if cached_plan is False:
+            return None
+
+        seq_lens_expanded = metadata.get_seqlens_expanded()
+        token_to_batch_idx = metadata.get_token_to_batch_idx()
+        extend_lens_cpu = metadata.get_dsa_extend_len_cpu()
+        q_offset = sum(extend_lens_cpu)
+        if q_offset != seq_lens_expanded.numel() or q_offset != q_fp8.shape[0]:
+            _set_glm52_prefill_plan_cache(
+                attn_metadata, "glm52_clustered_mqa_plan", False
+            )
+            return None
+        topk_transform_args = _get_glm52_prefill_topk_transform_args(
+            metadata, q_offset, q_fp8.device
+        )
+        if topk_transform_args is None:
+            return None
+        cu_seqlens_q, batch_idx_list, global_topk_offset = topk_transform_args
+
+        if cached_plan is None:
+            device_index = q_fp8.device.index
+            if device_index is None:
+                return None
+            seq_lens_cpu = metadata.get_indexer_seq_len_cpu()
+            if seq_lens_cpu is None or seq_lens_cpu.numel() == 0:
+                _set_glm52_prefill_plan_cache(
+                    attn_metadata, "glm52_clustered_mqa_plan", False
+                )
+                return None
+            from sglang.jit_kernel.glm52.clustered_mqa_logits import (
+                prepare_glm52_clustered_mqa_plan,
+            )
+
+            cached_plan = prepare_glm52_clustered_mqa_plan(
+                seq_lens_expanded=seq_lens_expanded,
+                token_to_batch_idx=token_to_batch_idx,
+                block_tables=metadata.get_page_table_64(),
+                extend_lens_cpu=extend_lens_cpu,
+                max_context=int(seq_lens_cpu.max().item()),
+                logits_budget_bytes=self._get_mqa_logits_budget_bytes(device_index),
+            )
+            _set_glm52_prefill_plan_cache(
+                attn_metadata,
+                "glm52_clustered_mqa_plan",
+                cached_plan if cached_plan is not None else False,
+            )
+            if cached_plan is None:
+                return None
+
+        from sglang.jit_kernel.glm52.clustered_mqa_logits import (
+            run_glm52_clustered_mqa_chunk,
+        )
+
+        pool = get_token_to_kv_pool()
+        raw_kv_cache = self._get_index_k_read_buffer(pool, layer_id)
+        if (
+            raw_kv_cache.dtype != torch.uint8
+            or raw_kv_cache.ndim != 2
+            or raw_kv_cache.shape[1] != 64 * (128 + 4)
+        ):
+            raise RuntimeError(
+                "selected GLM clustered MQA but index-cache page ABI is not "
+                "uint8[pages,8448]"
+            )
+
+        workspace = metadata.get_prefill_topk_workspace()
+        if (
+            workspace is not None
+            and workspace.device == q_fp8.device
+            and workspace.dtype is torch.int32
+            and workspace.shape == (q_offset, self.index_topk)
+        ):
+            result = workspace
+        else:
+            result = torch.empty(
+                (q_offset, self.index_topk),
+                device=q_fp8.device,
+                dtype=torch.int32,
+            )
+
+        for chunk in cached_plan.chunks:
+            logits = run_glm52_clustered_mqa_chunk(
+                q=q_fp8[chunk.start : chunk.end],
+                raw_kv_cache=raw_kv_cache,
+                weights=weights[chunk.start : chunk.end],
+                plan=cached_plan,
+                chunk=chunk,
+            )
+            lengths = seq_lens_expanded[chunk.start : chunk.end]
+            self._mask_init_and_local_tokens(logits, lengths)
+            raw_topk = metadata.topk_transform(
+                logits,
+                self.index_topk,
+                ks=torch.zeros_like(lengths),
+                cu_seqlens_q=(
+                    None
+                    if cu_seqlens_q is None
+                    else cu_seqlens_q[chunk.start : chunk.end]
+                ),
+                ke_offset=lengths,
+                batch_idx_list=(
+                    None
+                    if batch_idx_list is None
+                    else batch_idx_list[chunk.start : chunk.end]
+                ),
+                topk_indices_offset_override=(
+                    None
+                    if global_topk_offset is None
+                    else global_topk_offset[chunk.start : chunk.end]
+                ),
+            )
+            result[chunk.start : chunk.end].copy_(raw_topk)
+
+        from sglang.srt.layers.glm52_opt.dispatch import _record_hit
+
+        _record_hit(
+            (
+                "e2e_prefill/clustered_mqa_h32_q"
+                f"{cached_plan.queries_per_cluster}_native"
+            ),
+            "index_score",
+            "prefill",
+            m=q_offset,
+        )
+        return result
+
     def _get_topk_ragged(
         self,
         enable_dual_stream: bool,
@@ -1148,6 +1591,28 @@ class Indexer(MultiPlatformOp):
         )
         weights = weights.squeeze(-1)
 
+        paged_result = self._get_topk_ragged_paged_prefill(
+            forward_batch=forward_batch,
+            layer_id=layer_id,
+            q_fp8=q_fp8,
+            weights=weights,
+            metadata=metadata,
+            topk_result=topk_result,
+        )
+        if paged_result is not None:
+            return paged_result
+
+        clustered_result = self._get_topk_ragged_clustered(
+            forward_batch=forward_batch,
+            layer_id=layer_id,
+            q_fp8=q_fp8,
+            weights=weights,
+            metadata=metadata,
+            topk_result=topk_result,
+        )
+        if clustered_result is not None:
+            return clustered_result
+
         if _is_hip and not _use_aiter_preshuffle:
             block_tables = metadata.get_page_table_1()
         else:
@@ -1164,11 +1629,22 @@ class Indexer(MultiPlatformOp):
         device_index = device.index
         assert device_index is not None, "q_fp8 must be on an indexed CUDA device"
 
-        if topk_result is None:
+        owns_topk_result = topk_result is None
+        use_direct_topk_result = (
+            owns_topk_result and self.glm52_e2e_prefill_indexer
+        )
+        if topk_result is None and not use_direct_topk_result:
             topk_result = torch.full(
                 (token_nums, self.index_topk), -1, device=device, dtype=torch.int32
             )
         if batch_size == 0:
+            if topk_result is None:
+                topk_result = torch.full(
+                    (token_nums, self.index_topk),
+                    -1,
+                    device=device,
+                    dtype=torch.int32,
+                )
             return topk_result
 
         ks, ke = metadata.get_indexer_kvcache_range()
@@ -1237,12 +1713,78 @@ class Indexer(MultiPlatformOp):
 
             self._mask_init_and_local_tokens(logits, seq_lens_expanded, ks)
             raw_topk_result = metadata.topk_transform(logits, self.index_topk, ks=ks)
+            if use_direct_topk_result and q_offset == token_nums:
+                # DSV4's E2E path keeps the top-k output as the live result
+                # instead of allocating/filling a second tensor and copying the
+                # complete [M, topk] matrix.  GLM ordinary EXTEND has one ks row
+                # per live query, so the transformed output already has the
+                # exact public shape.  Padded/graph surfaces retain the stock
+                # materialization below.
+                from sglang.srt.layers.glm52_opt.dispatch import _record_hit
+
+                _record_hit(
+                    "e2e_prefill/direct_topk",
+                    "index_score",
+                    "prefill",
+                    m=q_offset,
+                )
+                return raw_topk_result
+            if topk_result is None:
+                topk_result = torch.full(
+                    (token_nums, self.index_topk),
+                    -1,
+                    device=device,
+                    dtype=torch.int32,
+                )
             topk_result[:q_offset] = raw_topk_result
             return topk_result
 
         bytes_per_row = k_offset * self._MQA_LOGITS_BYTES_PER_ELEM
         max_rows = max(1, int(logits_budget_bytes // max(bytes_per_row, 1)))
         max_rows = min(max_rows, q_offset)
+
+        if topk_result is None:
+            # Port DSV4's cross-layer scratch reuse to GLM's actual ragged
+            # indexer path.  With overlap scheduling disabled, every decoder
+            # layer runs on the same stream and consumes this tensor before the
+            # next layer overwrites it.  A shape mismatch fails closed to the
+            # ordinary per-layer allocation.
+            workspace = metadata.get_prefill_topk_workspace()
+            if (
+                workspace is not None
+                and workspace.device == device
+                and workspace.dtype is torch.int32
+                and workspace.shape == (token_nums, self.index_topk)
+            ):
+                topk_result = workspace
+                from sglang.srt.layers.glm52_opt.dispatch import _record_hit
+
+                _record_hit(
+                    "e2e_prefill/reuse_topk_workspace",
+                    "index_score",
+                    "prefill",
+                    m=q_offset,
+                )
+            else:
+                # Every live row is overwritten by a chunk below. Avoid the
+                # bandwidth-heavy full(-1) initialization; only an optional
+                # padded tail needs the sentinel required by the stock ABI.
+                topk_result = torch.empty(
+                    (token_nums, self.index_topk),
+                    device=device,
+                    dtype=torch.int32,
+                )
+            if q_offset < token_nums:
+                topk_result[q_offset:].fill_(-1)
+            if workspace is None or topk_result is not workspace:
+                from sglang.srt.layers.glm52_opt.dispatch import _record_hit
+
+                _record_hit(
+                    "e2e_prefill/empty_chunked_topk",
+                    "index_score",
+                    "prefill",
+                    m=q_offset,
+                )
 
         global_topk_offset = metadata.attn_metadata.topk_indices_offset
         cu_seqlens_q_full = None
@@ -1400,6 +1942,149 @@ class Indexer(MultiPlatformOp):
             topk_result[: raw_topk_result.shape[0]] = raw_topk_result
             return None
         return raw_topk_result
+
+    def _use_cp8_combined_indexer_for_batch(
+        self, forward_batch: ForwardBatch, q_rows: int
+    ) -> bool:
+        # This development treatment is admitted only for the frozen 10,016
+        # real-token suffix: zigzag CP8 gives exactly 1,252 local rows.  The
+        # 90K cache warmup uses M10048/M2452 and remains on the reviewed stock
+        # two-call path.  This is an intentional local rollback, not a silent
+        # shape generalization.
+        if q_rows != 1_252:
+            return False
+        if self.glm52_cp8_combine_indexer_halves:
+            return True
+        arm_file = self.glm52_cp8_combine_indexer_halves_arm_file
+        if not arm_file:
+            return False
+        cache_name = "_glm52_cp8_combine_indexer_halves_enabled"
+        cached = getattr(forward_batch, cache_name, None)
+        if cached is None:
+            cached = os.path.isfile(arm_file)
+            setattr(forward_batch, cache_name, cached)
+        return bool(cached)
+
+    def _get_topk_ragged_with_cp_combined(
+        self,
+        forward_batch: ForwardBatch,
+        layer_id: int,
+        q_fp8: torch.Tensor,
+        weights: torch.Tensor,
+        metadata: BaseIndexerMetadata,
+        kv_lens: Tuple[int, int],
+        actual_seq_qs: Tuple[int, int],
+    ) -> torch.Tensor:
+        """Evaluate both zigzag halves in one DeepGEMM MQA call.
+
+        Stock CP invokes ``fp8_mqa_logits`` once for the early zigzag block and
+        once for the late block.  Both blocks read the same request's paged KV
+        prefix; only their per-row visible end positions differ.  DeepGEMM's
+        ``ks``/``ke`` ABI already represents that difference, so use the longer
+        KV view once, concatenate the row endpoints, and preserve the original
+        top-k transform boundaries with a two-entry query-length vector.
+        """
+
+        assert not _is_in_piecewise_or_breakable_cuda_graph(), (
+            "combined DSA CP indexer is eager-only"
+        )
+        if TYPE_CHECKING:
+            assert isinstance(get_token_to_kv_pool(), DSATokenToKVPool)
+        assert get_token_to_kv_pool().page_size == 64
+        assert forward_batch.batch_size == 1
+        assert forward_batch.seq_lens_cpu is not None
+        assert forward_batch.extend_seq_lens_cpu is not None
+        assert len(weights.shape) == 3
+
+        prev_q, next_q = map(int, actual_seq_qs)
+        if prev_q <= 0 or next_q <= 0 or q_fp8.shape[0] != prev_q + next_q:
+            raise RuntimeError(
+                "invalid CP8 combined indexer query partition: "
+                f"q_rows={q_fp8.shape[0]} prev={prev_q} next={next_q}"
+            )
+        weights_2d = weights.squeeze(-1)
+        if weights_2d.shape[0] != q_fp8.shape[0]:
+            raise RuntimeError(
+                "CP8 combined indexer weight/query row mismatch: "
+                f"weights={weights_2d.shape[0]} q={q_fp8.shape[0]}"
+            )
+
+        prefix_len = int(forward_batch.seq_lens_cpu[0].item()) - int(
+            forward_batch.extend_seq_lens_cpu[0]
+        )
+        absolute_kv_lens = tuple(prefix_len + int(value) for value in kv_lens)
+        prev_kv, next_kv = absolute_kv_lens
+        if prev_kv < prev_q or next_kv < next_q:
+            raise RuntimeError(
+                "CP8 combined indexer KV endpoint precedes its query block: "
+                f"kv={absolute_kv_lens} q={actual_seq_qs}"
+            )
+        max_kv_len = max(absolute_kv_lens)
+        block_tables = metadata.get_page_table_64()
+        k_fp8 = get_token_to_kv_pool().get_index_k_continuous(
+            layer_id, max_kv_len, block_tables[0]
+        )
+        k_scale = get_token_to_kv_pool().get_index_k_scale_continuous(
+            layer_id, max_kv_len, block_tables[0]
+        )
+        kv_fp8 = (
+            k_fp8.view(torch.float8_e4m3fn),
+            k_scale.view(torch.float32).squeeze(-1),
+        )
+
+        ks = torch.zeros(q_fp8.shape[0], dtype=torch.int32, device=q_fp8.device)
+        ke_offset = torch.cat(
+            [
+                torch.arange(
+                    prev_kv - prev_q + 1,
+                    prev_kv + 1,
+                    dtype=torch.int32,
+                    device=q_fp8.device,
+                ),
+                torch.arange(
+                    next_kv - next_q + 1,
+                    next_kv + 1,
+                    dtype=torch.int32,
+                    device=q_fp8.device,
+                ),
+            ]
+        )
+        with self._with_real_sm_count():
+            q_padded, w_padded, _ = self._pad_heads_for_deep_gemm(
+                q_fp8, weights_2d
+            )
+            logits = deep_gemm.fp8_mqa_logits(
+                q_padded,
+                kv_fp8,
+                w_padded,
+                ks,
+                ke_offset,
+                clean_logits=False,
+            )
+        # The two CP halves are two disjoint query blocks of the *same* logical
+        # sequence.  Present one 1,252-query segment to the fused transform so
+        # every output-index offset remains zero.  Passing two 626-query
+        # segments would incorrectly add ``prev_q`` to every late-half index.
+        # A real CUDA cu_seqlens tensor is also part of the fused top-k ABI.
+        combined_query_len = torch.tensor(
+            [q_fp8.shape[0]], dtype=torch.int32, device=q_fp8.device
+        )
+        result = metadata.topk_transform(
+            logits,
+            self.index_topk,
+            ks=ks,
+            cu_seqlens_q=combined_query_len,
+            ke_offset=ke_offset,
+        )
+        from sglang.srt.layers.glm52_opt.dispatch import _record_hit
+
+        _record_hit(
+            "e2e_prefill/cp8_combined_indexer_halves",
+            "index_score",
+            "prefill",
+            m=int(q_fp8.shape[0]),
+        )
+        return result
 
     def _get_topk_ragged_with_cp(
         self,
@@ -2027,36 +2712,50 @@ class Indexer(MultiPlatformOp):
                         forward_batch.attn_cp_metadata.actual_seq_q_next_list[0]
                     )
 
-                    # TODO support mutil-batch
-                    # cp_batch_seq_index_prev = forward_batch.attn_cp_metadata["cp_batch_seq_index_prev"]
-                    # cp_batch_seq_index_next = forward_batch.attn_cp_metadata["cp_batch_seq_index_next"]
-                    # TODO prev, next, combined into a single call
-                    q_fp8_prev, q_fp8_next = torch.split(
-                        q_fp8, (q_fp8.shape[0] + 1) // 2, dim=0
-                    )
-                    weights_prev, weights_next = torch.split(
-                        weights, (weights.shape[0] + 1) // 2, dim=0
-                    )
-                    topk_result_prev = self._get_topk_ragged_with_cp(
-                        forward_batch,
-                        layer_id,
-                        q_fp8_prev,
-                        weights_prev,
-                        metadata,
-                        kv_len_prev,
-                        actual_seq_q_prev,
-                    )
+                    # TODO support multi-batch. The reviewed CP8 treatment is
+                    # deliberately restricted to the existing batch-size-one
+                    # zigzag contract.
+                    if self._use_cp8_combined_indexer_for_batch(
+                        forward_batch, int(q_fp8.shape[0])
+                    ):
+                        topk_result = self._get_topk_ragged_with_cp_combined(
+                            forward_batch,
+                            layer_id,
+                            q_fp8,
+                            weights,
+                            metadata,
+                            (kv_len_prev, kv_len_next),
+                            (actual_seq_q_prev, actual_seq_q_next),
+                        )
+                    else:
+                        q_fp8_prev, q_fp8_next = torch.split(
+                            q_fp8, (q_fp8.shape[0] + 1) // 2, dim=0
+                        )
+                        weights_prev, weights_next = torch.split(
+                            weights, (weights.shape[0] + 1) // 2, dim=0
+                        )
+                        topk_result_prev = self._get_topk_ragged_with_cp(
+                            forward_batch,
+                            layer_id,
+                            q_fp8_prev,
+                            weights_prev,
+                            metadata,
+                            kv_len_prev,
+                            actual_seq_q_prev,
+                        )
 
-                    topk_result_next = self._get_topk_ragged_with_cp(
-                        forward_batch,
-                        layer_id,
-                        q_fp8_next,
-                        weights_next,
-                        metadata,
-                        kv_len_next,
-                        actual_seq_q_next,
-                    )
-                    topk_result = torch.cat([topk_result_prev, topk_result_next], dim=0)
+                        topk_result_next = self._get_topk_ragged_with_cp(
+                            forward_batch,
+                            layer_id,
+                            q_fp8_next,
+                            weights_next,
+                            metadata,
+                            kv_len_next,
+                            actual_seq_q_next,
+                        )
+                        topk_result = torch.cat(
+                            [topk_result_prev, topk_result_next], dim=0
+                        )
                     topk_result = _broadcast_indexer_topk_from_rank0(topk_result)
                     return maybe_capture_indexer_topk(layer_id, topk_result)
                 else:

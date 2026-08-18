@@ -79,15 +79,27 @@ class DownGemmOverlapArgs:
 
 
 def compute_overlap_args(dispatch_output, alt_stream):
-    if not (
+    enable_down_gemm_overlap = (
         SboFlags.enable_combine_down_gemm_two_stream_overlap()
-        or SboFlags.enable_combine_shared_two_stream_overlap()
-    ):
+    )
+    enable_shared_overlap = SboFlags.enable_combine_shared_two_stream_overlap()
+    if not (enable_down_gemm_overlap or enable_shared_overlap):
         return None, None, {}
 
     hidden_states = dispatch_output.hidden_states
-
-    num_local_experts, num_tokens_static, hidden_dim = hidden_states.shape
+    # DeepEP normal dispatch returns a flat [tokens, hidden] tensor, while the
+    # low-latency path used by down-GEMM overlap returns
+    # [local_experts, static_slots, hidden].  The shared-expert-only Blackwell
+    # path does not consume any of those dimensions, so do not reject its valid
+    # normal-dispatch ABI merely to unpack fields that are never used.
+    if enable_down_gemm_overlap:
+        if hidden_states.ndim != 3:
+            raise ValueError(
+                "SBO down-GEMM overlap requires a 3D "
+                "[local_experts, static_slots, hidden] dispatch tensor; "
+                f"got shape {tuple(hidden_states.shape)}"
+            )
+        num_local_experts, num_tokens_static, _ = hidden_states.shape
 
     total_num_sms = torch.cuda.get_device_properties(
         device="cuda"
@@ -112,7 +124,7 @@ def compute_overlap_args(dispatch_output, alt_stream):
     )
     down_gemm_overlap_args = None
 
-    if SboFlags.enable_combine_down_gemm_two_stream_overlap():
+    if enable_down_gemm_overlap:
         # TODO use zero_allocator to remove this `torch.zeros` call
         # NOTE ours v2 use uint32 not int32 currently
         if is_blackwell():

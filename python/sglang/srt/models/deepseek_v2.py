@@ -147,7 +147,10 @@ from sglang.srt.model_executor.cuda_graph_config import (
     check_cuda_graph_backend,
 )
 from sglang.srt.model_executor.forward_batch_info import ForwardBatch, PPProxyTensors
-from sglang.srt.model_executor.forward_context import get_attn_backend
+from sglang.srt.model_executor.forward_context import (
+    get_attn_backend,
+    get_token_to_kv_pool,
+)
 from sglang.srt.model_executor.runner import get_is_capture_mode
 from sglang.srt.model_executor.runner_backend_utils.breakable_cuda_graph.context import (
     is_in_breakable_cuda_graph,
@@ -233,6 +236,7 @@ else:
     pass
 
 logger = logging.getLogger(__name__)
+_packed_cp_mla_kv_rejection_logged = False
 _glm52_shared_expert_swiglu_quant_logged = False
 
 _enable_pcg_dsv2_dual_stream = (
@@ -1818,6 +1822,8 @@ class DeepseekV2AttentionMLA(
         self.current_attention_backend = (
             None  # Attention backend used by current forward batch
         )
+        self._packed_cp_mla_kv_logged = False
+        self._direct_packed_cp_mla_kv_logged = False
 
         self.has_fused_proj = hasattr(self, "fused_qkv_a_proj_with_mqa")
         self.is_packed_weight = (
@@ -2068,6 +2074,74 @@ class DeepseekV2AttentionMLA(
             qkv_latent = self.fused_qkv_a_proj_with_mqa(hidden_states)[0]
         return qkv_latent
 
+    def _cp_packed_mla_kv_rejection_reason(
+        self, forward_batch, k_nope: torch.Tensor, k_pe: torch.Tensor, pool
+    ) -> Optional[str]:
+        """Return the first unsupported packed-cache condition, if any."""
+
+        return next(
+            (
+                name
+                for condition, name in (
+                    (not self.use_dsa, "not_dsa"),
+                    (
+                        self.current_attention_backend != "dsa"
+                        or getattr(get_attn_backend(), "dsa_prefill_impl", None)
+                        != "flashmla_kv",
+                        "backend="
+                        f"{self.current_attention_backend}/"
+                        f"{getattr(get_attn_backend(), 'dsa_prefill_impl', None)}",
+                    ),
+                    (
+                        torch.cuda.get_device_capability(k_nope.device) != (10, 3),
+                        f"capability={torch.cuda.get_device_capability(k_nope.device)}",
+                    ),
+                    (get_parallel().dcp_enabled, "dcp_enabled"),
+                    (
+                        getattr(self, "cp_size", None) != 8,
+                        f"cp_size={getattr(self, 'cp_size', None)}",
+                    ),
+                    (self.hidden_size != 6144, f"hidden={self.hidden_size}"),
+                    (self.num_heads != 64, f"heads={self.num_heads}"),
+                    (self.q_lora_rank != 2048, f"q_lora={self.q_lora_rank}"),
+                    (self.kv_lora_rank != 512, f"kv_lora={self.kv_lora_rank}"),
+                    (
+                        self.qk_nope_head_dim != 192,
+                        f"qk_nope={self.qk_nope_head_dim}",
+                    ),
+                    (
+                        self.qk_rope_head_dim != 64,
+                        f"qk_rope={self.qk_rope_head_dim}",
+                    ),
+                    (self.v_head_dim != 256, f"v_head={self.v_head_dim}"),
+                    (
+                        not forward_batch.forward_mode.is_extend_without_speculative(),
+                        f"forward_mode={forward_batch.forward_mode}",
+                    ),
+                    (forward_batch.attn_cp_metadata is None, "no_cp_metadata"),
+                    (get_is_capture_mode(), "capture_mode"),
+                    (
+                        not getattr(pool, "dsa_kv_cache_store_fp8", False),
+                        f"pool={type(pool).__name__}:no_dsa_fp8_store",
+                    ),
+                    (
+                        not hasattr(pool, "set_mla_kv_buffer_packed"),
+                        f"pool={type(pool).__name__}:no_packed_writer",
+                    ),
+                    (
+                        k_nope.dtype is not torch.bfloat16,
+                        f"k_nope_dtype={k_nope.dtype}",
+                    ),
+                    (k_pe.dtype is not torch.bfloat16, f"k_pe_dtype={k_pe.dtype}"),
+                    (k_nope.shape[0] != k_pe.shape[0], "k_row_mismatch"),
+                    (k_nope.shape[-1] != 512, f"k_nope_shape={tuple(k_nope.shape)}"),
+                    (k_pe.shape[-1] != 64, f"k_pe_shape={tuple(k_pe.shape)}"),
+                )
+                if condition
+            ),
+            None,
+        )
+
     def rebuild_cp_kv_cache(self, latent_cache, forward_batch, k_nope, k_pe):
         # support allgather+rerrange
         latent_cache[..., : self.kv_lora_rank] = k_nope.squeeze(1)
@@ -2081,6 +2155,149 @@ class DeepseekV2AttentionMLA(
         k_nope = latent_cache_output[..., : self.kv_lora_rank].unsqueeze(1)
         k_pe = latent_cache_output[..., self.kv_lora_rank :].unsqueeze(1)
         return k_nope, k_pe
+
+    def rebuild_cp_kv_cache_direct_packed(
+        self, forward_batch, k_nope: torch.Tensor, k_pe: torch.Tensor
+    ) -> bool:
+        """Pack locally and multicast directly into final zigzag-global rows.
+
+        Unlike the older packed-NCCL experiment, selecting this candidate is
+        fail-closed: an unsupported runtime contract raises before any cache
+        mutation instead of falling back to the BF16 path.
+        """
+
+        if not envs.SGLANG_GLM52_CP8_DIRECT_PACKED_KV_COMM.get():
+            return False
+        if envs.SGLANG_GLM52_CP8_PACKED_KV_COMM.get():
+            raise RuntimeError(
+                "select exactly one CP8 packed MLA-KV candidate; both direct and NCCL are enabled"
+            )
+
+        pool = get_token_to_kv_pool()
+        reason = self._cp_packed_mla_kv_rejection_reason(
+            forward_batch, k_nope, k_pe, pool
+        )
+        if reason is not None:
+            raise RuntimeError(
+                f"GLM-5.2 direct packed CP MLA-KV rejected: {reason}"
+            )
+
+        out_cache_loc = forward_batch.out_cache_loc
+        local_m = k_nope.shape[0]
+        if (
+            out_cache_loc is None
+            or out_cache_loc.ndim != 1
+            or out_cache_loc.shape[0] != local_m * self.cp_size
+        ):
+            raise RuntimeError(
+                "GLM-5.2 direct packed CP MLA-KV rejected: "
+                f"out_cache_rows={None if out_cache_loc is None else tuple(out_cache_loc.shape)} "
+                f"local_M={local_m} cp={self.cp_size}"
+            )
+
+        from sglang.jit_kernel.cp8_packed_kv_direct_scatter import (
+            direct_zigzag_packed_mla_kv_all_gather,
+        )
+        from sglang.srt.layers.attention.dsa.quant_k_cache import (
+            quantize_k_cache_separate,
+        )
+
+        nope, rope = quantize_k_cache_separate(k_nope, k_pe)
+        packed_local = torch.cat(
+            (nope.reshape(local_m, -1), rope.reshape(local_m, -1)), dim=-1
+        )
+        cp_group = get_parallel().attn_cp_group
+        max_global_rows = int(get_server_args().chunked_prefill_size)
+        packed_global = direct_zigzag_packed_mla_kv_all_gather(
+            packed_local,
+            forward_batch.attn_cp_metadata,
+            group=cp_group.device_group,
+            rank=cp_group.rank_in_group,
+            world=cp_group.world_size,
+            max_global_rows=max_global_rows,
+        )
+        if packed_global.shape[0] != out_cache_loc.shape[0]:
+            raise RuntimeError(
+                "GLM-5.2 direct packed CP MLA-KV produced wrong global rows: "
+                f"packed={packed_global.shape[0]} cache={out_cache_loc.shape[0]}"
+            )
+        pool.set_mla_kv_buffer_packed(
+            self.attn_mqa, out_cache_loc, packed_global
+        )
+        if not self._direct_packed_cp_mla_kv_logged:
+            logger.info(
+                "GLM-5.2 direct packed CP MLA-KV selected: "
+                "local_M=%d global_M=%d row_bytes=656 transport=multimem",
+                local_m,
+                packed_global.shape[0],
+            )
+            self._direct_packed_cp_mla_kv_logged = True
+        return True
+
+    def rebuild_cp_kv_cache_packed(
+        self, forward_batch, k_nope: torch.Tensor, k_pe: torch.Tensor
+    ) -> bool:
+        """Exchange final FP8-cache rows instead of BF16 MLA KV under CP8.
+
+        Returns True only after the complete global packed cache has been
+        written.  Every unsupported surface fails closed before mutation.
+        """
+
+        global _packed_cp_mla_kv_rejection_logged
+
+        if not envs.SGLANG_GLM52_CP8_PACKED_KV_COMM.get():
+            return False
+        pool = get_token_to_kv_pool()
+        reason = self._cp_packed_mla_kv_rejection_reason(
+            forward_batch, k_nope, k_pe, pool
+        )
+        if reason is not None:
+            if not _packed_cp_mla_kv_rejection_logged:
+                logger.info("GLM-5.2 packed CP MLA-KV rejected: %s", reason)
+                _packed_cp_mla_kv_rejection_logged = True
+            return False
+
+        out_cache_loc = forward_batch.out_cache_loc
+        local_m = k_nope.shape[0]
+        if (
+            out_cache_loc is None
+            or out_cache_loc.shape[0] != local_m * self.cp_size
+        ):
+            if not _packed_cp_mla_kv_rejection_logged:
+                logger.info(
+                    "GLM-5.2 packed CP MLA-KV rejected: out_cache_rows=%s local_M=%d cp=%d",
+                    None if out_cache_loc is None else out_cache_loc.shape[0],
+                    local_m,
+                    self.cp_size,
+                )
+                _packed_cp_mla_kv_rejection_logged = True
+            return False
+
+        from sglang.srt.layers.attention.dsa.quant_k_cache import (
+            quantize_k_cache_separate,
+        )
+
+        nope, rope = quantize_k_cache_separate(k_nope, k_pe)
+        packed_local = torch.cat(
+            (nope.reshape(local_m, -1), rope.reshape(local_m, -1)), dim=-1
+        )
+        packed_global = cp_all_gather_rerange_output(
+            packed_local,
+            self.cp_size,
+            forward_batch,
+            torch.cuda.current_stream(),
+        )
+        pool.set_mla_kv_buffer_packed(
+            self.attn_mqa, out_cache_loc, packed_global
+        )
+        if not self._packed_cp_mla_kv_logged:
+            logger.info(
+                "GLM-5.2 packed CP MLA-KV communication selected: "
+                "local_M=%d BF16_row_bytes=1152 packed_row_bytes=656",
+                local_m,
+            )
+            self._packed_cp_mla_kv_logged = True
+        return True
 
     @staticmethod
     def _get_q_b_proj_quant_config(quant_config):

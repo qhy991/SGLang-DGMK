@@ -873,6 +873,8 @@ def model_forward_maybe_tbo(
     input_data_scatter_mode: ScatterMode,
     residual: Optional[torch.Tensor],
     zero_allocator: Optional[BumpAllocator] = None,
+    topk_indices: Optional[torch.Tensor] = None,
+    return_topk_indices: bool = False,
 ):
     inputs = dict(
         positions=positions,
@@ -881,19 +883,24 @@ def model_forward_maybe_tbo(
         residual=residual,
         zero_allocator=zero_allocator,
     )
+    # Keep the generic TBO ABI unchanged for Qwen/GLM4/MiMo/DSV4 layers whose
+    # op_comm_prepare_attn methods do not accept DSA state.
+    if return_topk_indices or topk_indices is not None:
+        inputs["topk_indices"] = topk_indices
     layer_input_scatter_mode = layers[0].layer_scatter_modes.layer_input_mode
     operations_strategy = OperationsStrategy.init_new_tbo(
         layers, forward_batch.global_forward_mode
     )
     if enable_tbo:
-        return _model_forward_tbo(
+        outputs = _model_forward_tbo(
             inputs=inputs,
             operations_strategy=operations_strategy,
             input_data_scatter_mode=input_data_scatter_mode,
             layer_input_scatter_mode=layer_input_scatter_mode,
         )
     else:
-        return _model_forward_non_tbo(inputs, operations_strategy)
+        outputs = _model_forward_non_tbo(inputs, operations_strategy)
+    return outputs if return_topk_indices else outputs[:2]
 
 
 def _model_forward_tbo(
@@ -930,7 +937,7 @@ def _model_forward_tbo(
 
 def _model_forward_non_tbo(inputs, operations_strategy: OperationsStrategy):
     outputs = execute_operations(inputs, operations_strategy.operations)
-    return outputs["hidden_states"], outputs["residual"]
+    return outputs["hidden_states"], outputs["residual"], outputs.get("topk_indices")
 
 
 def _model_forward_tbo_split_inputs(
@@ -941,6 +948,7 @@ def _model_forward_tbo_split_inputs(
     zero_allocator: Optional[BumpAllocator],
     input_data_scatter_mode: ScatterMode,
     layer_input_scatter_mode: ScatterMode,
+    topk_indices: Optional[torch.Tensor] = None,
 ) -> List[Dict]:
     tbo_splitter_scatter_mode = ScatterMode.TP_ATTN_FULL
     context = CommunicateContext.init_new()
@@ -961,6 +969,7 @@ def _model_forward_tbo_split_inputs(
         positions=positions,
         forward_batch=forward_batch,
         zero_allocator=zero_allocator,
+        topk_indices=topk_indices,
     )
 
     def _post_transform(hidden_states, residual, forward_batch, **kwargs):
@@ -989,6 +998,7 @@ def _model_forward_tbo_split_inputs_raw(
     positions: torch.Tensor,
     forward_batch: ForwardBatch,
     zero_allocator: Optional[BumpAllocator],
+    topk_indices: Optional[torch.Tensor] = None,
 ) -> List[Dict]:
     return [
         dict(
@@ -996,6 +1006,7 @@ def _model_forward_tbo_split_inputs_raw(
                 hidden_states=hidden_states,
                 residual=residual,
                 positions=positions,
+                topk_indices=topk_indices,
                 output_forward_batch=output_forward_batch,
                 tbo_subbatch_index=tbo_subbatch_index,
             ),
@@ -1015,13 +1026,21 @@ def _model_forward_filter_inputs(
     hidden_states: torch.Tensor,
     residual: torch.Tensor,
     positions: torch.Tensor,
+    topk_indices: Optional[torch.Tensor],
     output_forward_batch: ForwardBatch,
     tbo_subbatch_index: int,
 ) -> Dict:
     token_slice = slice(*output_forward_batch.tbo_parent_token_range)
+    if topk_indices is not None:
+        assert topk_indices.shape[0] == hidden_states.shape[0], (
+            "DSA topk rows must match the unsplit token rows before TBO: "
+            f"topk={topk_indices.shape[0]}, tokens={hidden_states.shape[0]}"
+        )
     hidden_states = hidden_states[token_slice]
     residual = None if residual is None else residual[token_slice]
     positions = positions[token_slice]
+    if topk_indices is not None:
+        topk_indices = topk_indices[token_slice]
 
     assert output_forward_batch.tbo_padded_len is not None
     padded_len = output_forward_batch.tbo_padded_len
@@ -1036,10 +1055,23 @@ def _model_forward_filter_inputs(
         res[: x.shape[0]] = x
         return res
 
+    def _pad_topk(x):
+        if x is None or x.shape[0] == padded_len:
+            return x
+        res = torch.full(
+            (padded_len, *x.shape[1:]),
+            -1,
+            dtype=x.dtype,
+            device=x.device,
+        )
+        res[: x.shape[0]] = x
+        return res
+
     return dict(
         hidden_states=_pad(hidden_states),
         residual=_pad(residual),
         positions=_pad(positions),
+        topk_indices=_pad_topk(topk_indices),
         forward_batch=output_forward_batch,
         tbo_subbatch_index=tbo_subbatch_index,
     )
@@ -1063,7 +1095,16 @@ def _model_forward_tbo_merge_outputs(output_a, output_b, original_len):
         res[slice(s1, t1)] = value_b[: t1 - s1]
         return res
 
-    return _handle_key("hidden_states"), _handle_key("residual")
+    topk_indices = (
+        _handle_key("topk_indices")
+        if "topk_indices" in output_a and "topk_indices" in output_b
+        else None
+    )
+    return (
+        _handle_key("hidden_states"),
+        _handle_key("residual"),
+        topk_indices,
+    )
 
 
 # -------------------------------- Utilities and wrappers ---------------------------------------

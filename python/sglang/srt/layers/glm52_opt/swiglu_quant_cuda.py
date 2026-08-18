@@ -1,4 +1,4 @@
-"""Bounded CUDA fallback for GLM-5.2 Task-25 decode."""
+"""Route-complete CUDA fallback for GLM-5.2 Task-25 decode."""
 
 from __future__ import annotations
 
@@ -14,20 +14,20 @@ from sglang.jit_kernel.utils import (
 )
 
 
-VARIANT = "cuda_valid_cta"
+VARIANT = "cuda_grid_stride"
 
 
 @cache_once
 def _jit_module():
     args = make_cpp_args(is_arch_support_pdl())
     return load_jit(
-        "task25_silu_mul_quant_valid_cta",
+        "task25_silu_mul_quant_grid_stride",
         *args,
         cuda_files=["deepseek_v4/task25_silu_and_mul_masked_post_quant.cuh"],
         cuda_wrappers=[
             (
                 "run",
-                f"Task25SiluAndMulMaskedPostQuantKernel<{args}>::run",
+                f"Task25SiluAndMulMaskedPostQuantGridStrideKernel<{args}>::run",
             )
         ],
         extra_cuda_cflags=["-use_fast_math"],
@@ -42,7 +42,7 @@ def launch_into(
     *,
     num_real_tokens: int,
 ) -> None:
-    """Launch the exact stock kernel body on only live routed assignments."""
+    """Launch a graph-static CTA pool that drains the full device route table."""
 
     _jit_module().run(
         gateup_output,

@@ -18,6 +18,7 @@ from sglang.srt.configs.model_config import get_dsa_index_topk, is_deepseek_dsa
 from sglang.srt.runtime_context import get_parallel
 
 logger = logging.getLogger(__name__)
+_dsa_cp_local_flashmla_metadata_logged = False
 from sglang.srt.environ import envs
 from sglang.srt.layers.attention.base_attn_backend import AttentionBackend
 from sglang.srt.layers.attention.dsa.dequant_k_cache import dequantize_k_cache_paged
@@ -219,6 +220,16 @@ class DSAMetadata:
     indexer_seq_lens: Optional[torch.Tensor] = None
     # batch index for each token.
     token_to_batch_idx: Optional[torch.Tensor] = None
+    # Optional GLM-only [M, index_topk] output scratch.  It is a view into one
+    # backend-owned allocation and is safe only when overlap scheduling is off.
+    indexer_topk_workspace: Optional[torch.Tensor] = None
+    # Lazily built once per forward by the first GLM indexer layer. False means
+    # the Q16 contract did not match and all layers must retain DeepGEMM.
+    glm52_clustered_mqa_plan: Optional[object] = None
+    # Lazily built once per forward by the first GLM indexer layer. False means
+    # the uniform-query direct-paged contract did not match; ordinary ragged
+    # DeepGEMM remains the exact fallback.
+    glm52_paged_prefill_mqa_plan: Optional[object] = None
 
 
 @torch.compile
@@ -280,6 +291,9 @@ class DSAIndexerMetadata(BaseIndexerMetadata):
 
     def get_token_to_batch_idx(self) -> torch.Tensor:
         return self.attn_metadata.token_to_batch_idx
+
+    def get_prefill_topk_workspace(self) -> Optional[torch.Tensor]:
+        return self.attn_metadata.indexer_topk_workspace
 
     def topk_transform(
         self,
@@ -382,6 +396,36 @@ class DeepseekSparseAttnBackend(
         self.dsa_topk_backend: DSATopKBackend = DSATopKBackend(
             model_runner.server_args.dsa_topk_backend
         )
+        architectures = tuple(
+            getattr(model_runner.model_config.hf_config, "architectures", ()) or ()
+        )
+        self.glm52_e2e_prefill_workspace = False
+        if architectures == ("GlmMoeDsaForCausalLM",):
+            from sglang.srt.layers.glm52_opt import config as glm52_opt_config
+
+            self.glm52_e2e_prefill_workspace = (
+                glm52_opt_config.e2e_prefill_workspace_enabled()
+            )
+        self._glm52_e2e_prefill_topk_storage: Optional[torch.Tensor] = None
+        if self.glm52_e2e_prefill_workspace:
+            if not model_runner.server_args.disable_overlap_schedule:
+                raise ValueError(
+                    "SGLANG_GLM52_E2E_PREFILL_WORKSPACE=1 requires "
+                    "--disable-overlap-schedule because one top-k buffer is "
+                    "reused across sequential layers and forward batches"
+                )
+            max_workspace_tokens = int(
+                model_runner.server_args.chunked_prefill_size or 0
+            )
+            if not 1 <= max_workspace_tokens <= 8192:
+                raise ValueError(
+                    "SGLANG_GLM52_E2E_PREFILL_WORKSPACE=1 requires "
+                    "chunked_prefill_size in [1, 8192], got "
+                    f"{max_workspace_tokens}"
+                )
+            self._glm52_e2e_prefill_workspace_capacity = max_workspace_tokens
+        else:
+            self._glm52_e2e_prefill_workspace_capacity = 0
         if self.num_q_heads <= 64:
             self.flashmla_kv_num_q_heads = 64
         elif self.num_q_heads <= 128:
@@ -683,6 +727,30 @@ class DeepseekSparseAttnBackend(
                 next_pow_of_2, device=self.device, dtype=torch.int32
             )
         return self._arange_buf[:length]
+
+    def _get_glm52_e2e_prefill_topk_workspace(
+        self, num_tokens: int
+    ) -> Optional[torch.Tensor]:
+        """Return one fixed-capacity scratch view shared by all GLM layers."""
+
+        if (
+            not self.glm52_e2e_prefill_workspace
+            or num_tokens <= 0
+            or num_tokens > self._glm52_e2e_prefill_workspace_capacity
+        ):
+            return None
+        storage = self._glm52_e2e_prefill_topk_storage
+        if storage is None:
+            storage = torch.empty(
+                (
+                    self._glm52_e2e_prefill_workspace_capacity,
+                    self.dsa_index_topk,
+                ),
+                dtype=torch.int32,
+                device=self.device,
+            )
+            self._glm52_e2e_prefill_topk_storage = storage
+        return storage[:num_tokens]
 
     def _graph_page_table_width(self, metadata: DSAMetadata) -> int:
         """Column count to scan req_to_token during graph replay. Reads the wide
@@ -1011,6 +1079,16 @@ class DeepseekSparseAttnBackend(
             indexer_seq_lens=indexer_seq_lens,
             token_to_batch_idx=token_to_batch_idx,
             topk_v2_plan=self._build_topk_v2_plan(seqlens_expanded),
+            indexer_topk_workspace=(
+                self._get_glm52_e2e_prefill_topk_workspace(
+                    int(seqlens_expanded.shape[0])
+                )
+                if (
+                    forward_batch.forward_mode.is_extend_without_speculative()
+                    and forward_batch.attn_cp_metadata is None
+                )
+                else None
+            ),
         )
         self.forward_metadata = metadata
 
@@ -2404,6 +2482,42 @@ class DeepseekSparseAttnBackend(
             indices.shape[-1] == self.dsa_index_topk
         )  # requirement of FlashMLA decode kernel
 
+        # Zigzag DSA prefill CP shards query rows after eager forward metadata
+        # is built. The top-k page table already follows the local query rows,
+        # while eager FlashMLA metadata can still describe the global rows.
+        # FlashMLA requires cache_seqlens.shape == (b,) and
+        # num_splits.shape == (b + 1,), where b is the local q batch. Rebuild
+        # only on that explicit CP mismatch, deriving each local sparse length
+        # from the already-local, -1-padded top-k indices. Non-CP mismatches
+        # still fail in stock FlashMLA rather than being silently repaired.
+        flashmla_metadata = metadata.flashmla_metadata
+        local_q_rows = q_input.shape[0]
+        if is_dsa_enable_prefill_cp() and (
+            cache_seqlens.numel() != local_q_rows
+            or flashmla_metadata.num_splits.numel() != local_q_rows + 1
+        ):
+            local_cache_seqlens = (indices[:, 0, :] >= 0).sum(
+                dim=-1, dtype=torch.int32
+            )
+            if local_cache_seqlens.numel() != local_q_rows:
+                raise RuntimeError(
+                    "DSA CP local FlashMLA cache lengths do not match local q rows: "
+                    f"cache_rows={local_cache_seqlens.numel()} q_rows={local_q_rows}"
+                )
+            flashmla_metadata = self._compute_flashmla_metadata(
+                cache_seqlens=local_cache_seqlens,
+                seq_len_q=1,
+            )
+            cache_seqlens = local_cache_seqlens
+            global _dsa_cp_local_flashmla_metadata_logged
+            if not _dsa_cp_local_flashmla_metadata_logged:
+                logger.info(
+                    "DSA CP rebuilt FlashMLA metadata for local query rows: "
+                    f"q_rows={local_q_rows} "
+                    f"num_splits={flashmla_metadata.num_splits.numel()}"
+                )
+                _dsa_cp_local_flashmla_metadata_logged = True
+
         # Keep the empty block-table allocation common to stock and candidate.
         # FlashMLA documents it as unused, but its public ABI still requires a
         # tensor.  The GLM-5.2 dispatcher accepts only the exact production
@@ -2422,8 +2536,8 @@ class DeepseekSparseAttnBackend(
                 k_cache=kv_cache,
                 cache_seqlens=cache_seqlens,
                 head_dim_v=v_head_dim,
-                tile_scheduler_metadata=metadata.flashmla_metadata.flashmla_metadata,
-                num_splits=metadata.flashmla_metadata.num_splits,
+                tile_scheduler_metadata=flashmla_metadata.flashmla_metadata,
+                num_splits=flashmla_metadata.num_splits,
                 softmax_scale=sm_scale,
                 indices=indices,
                 block_table=block_table,
@@ -2439,8 +2553,8 @@ class DeepseekSparseAttnBackend(
                 k_cache=kv_cache,
                 cache_seqlens=cache_seqlens,
                 head_dim_v=v_head_dim,
-                tile_scheduler_metadata=metadata.flashmla_metadata.flashmla_metadata,
-                num_splits=metadata.flashmla_metadata.num_splits,
+                tile_scheduler_metadata=flashmla_metadata.flashmla_metadata,
+                num_splits=flashmla_metadata.num_splits,
                 softmax_scale=sm_scale,
                 indices=indices,
                 block_table=block_table,
@@ -2452,8 +2566,8 @@ class DeepseekSparseAttnBackend(
                 k_cache=kv_cache,
                 cache_seqlens=cache_seqlens,
                 head_dim_v=v_head_dim,
-                tile_scheduler_metadata=metadata.flashmla_metadata.flashmla_metadata,
-                num_splits=metadata.flashmla_metadata.num_splits,
+                tile_scheduler_metadata=flashmla_metadata.flashmla_metadata,
+                num_splits=flashmla_metadata.num_splits,
                 softmax_scale=sm_scale,
                 indices=indices,
                 block_table=block_table,

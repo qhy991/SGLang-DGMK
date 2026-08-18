@@ -21,7 +21,7 @@ def _set_campaign_env(
     enabled: bool = True,
     profile: str = "combined_winners",
     ops: str | None = "moe_swiglu_quant",
-    variant: str | None = "cuda_valid_cta",
+    variant: str | None = "cuda_grid_stride",
 ) -> None:
     os.environ["SGLANG_GLM52_OPT"] = "1" if enabled else "0"
     os.environ["SGLANG_GLM52_OPT_PROFILE"] = profile
@@ -55,7 +55,7 @@ class SwigluQuantConfigTest(unittest.TestCase):
 
     def test_candidate_requires_every_explicit_gate(self):
         _set_campaign_env()
-        self.assertEqual(config.swiglu_quant_variant(), "cuda_valid_cta")
+        self.assertEqual(config.swiglu_quant_variant(), "cuda_grid_stride")
 
         _set_campaign_env(enabled=False)
         self.assertIsNone(config.swiglu_quant_variant())
@@ -78,11 +78,11 @@ class SwigluQuantConfigTest(unittest.TestCase):
 
         _set_campaign_env(ops="moe_swiglu_quant")
         self.assertEqual(config.combined_winner_ops(), {"moe_swiglu_quant"})
-        self.assertEqual(config.swiglu_quant_variant(), "cuda_valid_cta")
+        self.assertEqual(config.swiglu_quant_variant(), "cuda_grid_stride")
 
     def test_candidate_rejects_unknown_variant(self):
         _set_campaign_env(variant="typo")
-        with self.assertRaisesRegex(ValueError, "cuda_valid_cta"):
+        with self.assertRaisesRegex(ValueError, "cuda_grid_stride"):
             config.swiglu_quant_variant()
 
 
