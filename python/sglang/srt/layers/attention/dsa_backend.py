@@ -74,6 +74,20 @@ from sglang.srt.utils import (
 # concat). Enable with SGLANG_DSA_TRITON_PREFILL=1. Decode stays on TileLang.
 _DSA_TRITON_PREFILL = get_bool_env_var("SGLANG_DSA_TRITON_PREFILL")
 _IS_GFX95 = is_gfx95_supported()
+_GLM52_CP8_REUSE_FLASHMLA_METADATA = get_bool_env_var(
+    "SGLANG_GLM52_CP8_REUSE_FLASHMLA_METADATA"
+)
+_GLM52_CP8_REUSE_FLASHMLA_METADATA_VERIFY = get_bool_env_var(
+    "SGLANG_GLM52_CP8_REUSE_FLASHMLA_METADATA_VERIFY"
+)
+if (
+    _GLM52_CP8_REUSE_FLASHMLA_METADATA_VERIFY
+    and not _GLM52_CP8_REUSE_FLASHMLA_METADATA
+):
+    raise ValueError(
+        "SGLANG_GLM52_CP8_REUSE_FLASHMLA_METADATA_VERIFY=1 requires "
+        "SGLANG_GLM52_CP8_REUSE_FLASHMLA_METADATA=1"
+    )
 
 if is_cuda():
     import deep_gemm
@@ -157,6 +171,17 @@ class DSAFlashMLAMetadata:
         self.num_splits.copy_(other.num_splits)
 
 
+@dataclass
+class _GLM52CP8FlashMLAMetadataReuseState:
+    """Per-forward CP-local FlashMLA metadata owned by ``DSAMetadata``."""
+
+    local_cache_seqlens: torch.Tensor
+    flashmla_metadata: DSAFlashMLAMetadata
+    q_rows: int
+    index_topk: int
+    reuse_count: int = 0
+
+
 @dataclass(frozen=True)
 class DSAMetadata:
     page_size: int
@@ -230,6 +255,11 @@ class DSAMetadata:
     # the uniform-query direct-paged contract did not match; ordinary ragged
     # DeepGEMM remains the exact fallback.
     glm52_paged_prefill_mqa_plan: Optional[object] = None
+    # Default-off Ariadne candidate: the first selected CP8 sparse-attention
+    # layer builds local FlashMLA schedule metadata and the remaining layers
+    # reuse it. DSAMetadata is recreated per forward, so this cache cannot leak
+    # across requests or shape changes.
+    glm52_cp8_flashmla_metadata_reuse: Optional[object] = None
 
 
 @torch.compile
@@ -2492,10 +2522,117 @@ class DeepseekSparseAttnBackend(
         # still fail in stock FlashMLA rather than being silently repaired.
         flashmla_metadata = metadata.flashmla_metadata
         local_q_rows = q_input.shape[0]
-        if is_dsa_enable_prefill_cp() and (
+        cp_local_mismatch = is_dsa_enable_prefill_cp() and (
             cache_seqlens.numel() != local_q_rows
             or flashmla_metadata.num_splits.numel() != local_q_rows + 1
-        ):
+        )
+        reuse_selected = _GLM52_CP8_REUSE_FLASHMLA_METADATA and local_q_rows == 1_252
+        if reuse_selected:
+            contract_errors = []
+            if not cp_local_mismatch:
+                contract_errors.append("no_cp_local_metadata_mismatch")
+            if not is_dsa_prefill_cp_in_seq_split():
+                contract_errors.append("not_zigzag_cp")
+            if get_parallel().attn_cp_size != 8:
+                contract_errors.append(f"cp_size={get_parallel().attn_cp_size}")
+            if metadata.dsa_extend_seq_lens_list != [10_016]:
+                contract_errors.append(
+                    f"extend_lens={metadata.dsa_extend_seq_lens_list}"
+                )
+            if num_q_heads != 32 or layer.head_dim != 128:
+                contract_errors.append(f"q_shape=H{num_q_heads}/D{layer.head_dim}")
+            if self.real_page_size != 64:
+                contract_errors.append(f"page_size={self.real_page_size}")
+            if self.dsa_index_topk != 2_048:
+                contract_errors.append(f"topk={self.dsa_index_topk}")
+            if not self.dsa_kv_cache_store_fp8:
+                contract_errors.append("kv_cache_not_fp8")
+            if indices.shape != (1_252, 1, 2_048):
+                contract_errors.append(f"indices_shape={tuple(indices.shape)}")
+            if contract_errors:
+                raise RuntimeError(
+                    "GLM CP8 FlashMLA metadata reuse selected outside its "
+                    f"frozen contract: {contract_errors}"
+                )
+
+            state = metadata.glm52_cp8_flashmla_metadata_reuse
+            if state is None:
+                local_cache_seqlens = (indices[:, 0, :] >= 0).sum(
+                    dim=-1, dtype=torch.int32
+                )
+                if local_cache_seqlens.numel() != local_q_rows:
+                    raise RuntimeError(
+                        "DSA CP local FlashMLA cache lengths do not match local q rows: "
+                        f"cache_rows={local_cache_seqlens.numel()} "
+                        f"q_rows={local_q_rows}"
+                    )
+                state = _GLM52CP8FlashMLAMetadataReuseState(
+                    local_cache_seqlens=local_cache_seqlens,
+                    flashmla_metadata=self._compute_flashmla_metadata(
+                        cache_seqlens=local_cache_seqlens,
+                        seq_len_q=1,
+                    ),
+                    q_rows=local_q_rows,
+                    index_topk=self.dsa_index_topk,
+                )
+                object.__setattr__(
+                    metadata, "glm52_cp8_flashmla_metadata_reuse", state
+                )
+                from sglang.srt.layers.glm52_opt.dispatch import _record_hit
+
+                _record_hit(
+                    "e2e_prefill/cp8_flashmla_metadata_reuse",
+                    "metadata",
+                    "prefill",
+                    m=local_q_rows,
+                )
+            else:
+                if not isinstance(state, _GLM52CP8FlashMLAMetadataReuseState):
+                    raise RuntimeError(
+                        "invalid GLM CP8 FlashMLA metadata reuse state type: "
+                        f"{type(state)}"
+                    )
+                if (
+                    state.q_rows != local_q_rows
+                    or state.index_topk != self.dsa_index_topk
+                    or state.local_cache_seqlens.device != indices.device
+                    or state.local_cache_seqlens.dtype != torch.int32
+                    or state.local_cache_seqlens.shape != (local_q_rows,)
+                    or state.flashmla_metadata.num_splits.shape
+                    != (local_q_rows + 1,)
+                ):
+                    raise RuntimeError(
+                        "GLM CP8 FlashMLA metadata reuse state drift: "
+                        f"q_rows={state.q_rows}/{local_q_rows} "
+                        f"topk={state.index_topk}/{self.dsa_index_topk} "
+                        f"lengths={state.local_cache_seqlens.shape}/"
+                        f"{state.local_cache_seqlens.dtype}/"
+                        f"{state.local_cache_seqlens.device} "
+                        f"num_splits={state.flashmla_metadata.num_splits.shape}"
+                    )
+                if _GLM52_CP8_REUSE_FLASHMLA_METADATA_VERIFY:
+                    current_cache_seqlens = (indices[:, 0, :] >= 0).sum(
+                        dim=-1, dtype=torch.int32
+                    )
+                    if not torch.equal(
+                        current_cache_seqlens, state.local_cache_seqlens
+                    ):
+                        raise RuntimeError(
+                            "GLM CP8 FlashMLA metadata is not layer-invariant"
+                        )
+                state.reuse_count += 1
+                if (
+                    _GLM52_CP8_REUSE_FLASHMLA_METADATA_VERIFY
+                    and state.reuse_count == 77
+                ):
+                    logger.warning(
+                        "GLM-5.2 CP8 FlashMLA metadata reuse verified: "
+                        "q_rows=1252 reused_layers=77"
+                    )
+
+            cache_seqlens = state.local_cache_seqlens
+            flashmla_metadata = state.flashmla_metadata
+        elif cp_local_mismatch:
             local_cache_seqlens = (indices[:, 0, :] >= 0).sum(
                 dim=-1, dtype=torch.int32
             )
