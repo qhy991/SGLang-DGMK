@@ -2539,7 +2539,10 @@ class DeepseekSparseAttnBackend(
                 contract_errors.append(
                     f"extend_lens={metadata.dsa_extend_seq_lens_list}"
                 )
-            if num_q_heads != 32 or layer.head_dim != 128:
+            # This is the sparse-attention consumer ABI, not the H32/D128
+            # indexer ABI. The production FlashMLA Q is H64/D576 before
+            # Blackwell head-count padding.
+            if num_q_heads != 64 or layer.head_dim != 576:
                 contract_errors.append(f"q_shape=H{num_q_heads}/D{layer.head_dim}")
             if self.real_page_size != 64:
                 contract_errors.append(f"page_size={self.real_page_size}")
